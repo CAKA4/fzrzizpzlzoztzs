@@ -791,7 +791,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v71";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v72";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2014,7 +2014,7 @@ function applyTractAssign(scope){
               "Plots already sent will be updated in the Sheet.")) return;
   let n=0; const resend=[];
   target.forEach(p=>{ if(String(p.TRACT||"")!==t){ p.TRACT=t; p._sent=false; n++; resend.push(p); } });
-  addTract(t); tractSelect(); persist(); renderSaved(); closeTractAssign();
+  addTract(t); queueTract(t); tractSelect(); persist(); renderSaved(); closeTractAssign();
   if(!n){ toast("Those plots already had that tract"); return; }
   if(connected && !isOffline()){ resend.forEach(p=>send(p,true)); toast(`Tract set on ${n} plot${n===1?"":"s"} · updating the Sheet…`); }
   else toast(`Tract set on ${n} plot${n===1?"":"s"} on device — the Sheet updates on the next send`,true);
