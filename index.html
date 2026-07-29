@@ -794,7 +794,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v74";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v75";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2507,8 +2507,8 @@ function renderLayerList(){
     `<div class="layer-row"><span>${esc(f.name)} <small>(${f.features.length})</small></span><button type="button" onclick="removeBoundFile('${esc(f.id)}')">✕</button></div>`).join("");
 }
 // On/off visibility for each map overlay. Layer stays loaded — this only shows/hides it.
-let layerVis={ mine:true, bound:true, ref:true, photo:true, track:true };
-if(STORE){ try{ Object.assign(layerVis, JSON.parse(STORE.getItem("fi_layervis"))||{}); }catch(e){} trackShown=layerVis.track; }
+var layerVis={ mine:true, bound:true, ref:true, photo:true, track:true };
+try{ if(typeof STORE!=="undefined"&&STORE) Object.assign(layerVis, JSON.parse(STORE.getItem("fi_layervis"))||{}); }catch(e){}
 function layerGroupFor_(k){ return {mine:fpins, bound:fboundLayer, ref:refLayer, photo:photoLayer}[k]; }
 function applyLayerVis_(){
   [["mine",fpins,flabelLayer],["bound",fboundLayer,flabelLayer],["ref",refLayer,freflabelLayer],["photo",photoLayer,null]].forEach(([k,lyr,lbl])=>{
@@ -2517,19 +2517,24 @@ function applyLayerVis_(){
     else { if(!fmap.hasLayer(lyr)) fmap.addLayer(lyr); if(k==="bound"&&lbl&&!fmap.hasLayer(lbl)) fmap.addLayer(lbl); if(k==="ref"&&lbl&&!fmap.hasLayer(lbl)) fmap.addLayer(lbl); }
   });
   // track log has its own show/hide path
-  if(layerVis.track===false){ if(trackLine){ fmap.removeLayer(trackLine); trackLine=null; } trackShown=false; }
-  else { trackShown=true; drawTrack(); }
+  if(typeof trackLine!=="undefined"){
+    if(layerVis.track===false){ if(trackLine){ fmap.removeLayer(trackLine); trackLine=null; } trackShown=false; }
+    else { trackShown=true; if(typeof drawTrack==="function") drawTrack(); }
+  }
 }
 function toggleLayerVis(k){ layerVis[k]=!(layerVis[k]!==false); try{ STORE&&STORE.setItem("fi_layervis",JSON.stringify(layerVis)); }catch(e){}
   if(k==="track"){ trackShown=layerVis.track; setTrackBtn(); }
   applyLayerVis_(); renderLayerVis_(); updateLayerStatus(); }
 function renderLayerVis_(){
   const box=$("layerVisList"); if(!box) return;
+  const refN=(typeof refLabels!=="undefined"&&refLabels)?refLabels.length:0;
+  const trkN=(typeof trackLog!=="undefined"&&trackLog)?trackLog.length:0;
+  const bndN=(typeof BOUND!=="undefined"&&BOUND&&BOUND.features)?BOUND.features.length:0;
   const rows=[["mine","📍 My plots", saved.filter(p=>isFinite(parseFloat(p.Y))).length],
-             ["bound","▧ Stand boundaries", (BOUND&&BOUND.features?BOUND.features.length:0)],
-             ["ref","• Imported points/lines", (refLabels?refLabels.length:0)],
+             ["bound","▧ Stand boundaries", bndN],
+             ["ref","• Imported points/lines", refN],
              ["photo","📷 Photo locations", 0],
-             ["track","〰 Track log", trackLog.length]]
+             ["track","〰 Track log", trkN]]
     .filter(r=>r[0]==="mine"||r[0]==="track"||r[2]>0);   // show layers that have data (plots/track always)
   box.innerHTML = rows.length ? `<div class="layer-hd">Show / hide</div>`+rows.map(([k,label,cnt])=>
     `<label class="layer-row" style="cursor:pointer"><span>${esc(label)}${cnt?` <small>(${cnt})</small>`:""}</span>`+
@@ -2741,6 +2746,7 @@ let pdfOverlay=null, pdfBounds=null, pdfVisible=true, pdfName="";
 let trackActive=false, trackLog=[], trackLine=null, _lastTrackPersist=0;
 let trackShown=true;   // visibility only — recording is controlled by the ⏺ tool
 if(STORE){ try{ trackShown = STORE.getItem("fi_trackshown")!=="0"; }catch(e){} }
+if(typeof layerVis==="object" && layerVis.track===false) trackShown=false;   // layer toggle overrides if set off
 if(STORE){ try{ const t=JSON.parse(STORE.getItem("fi_track")); if(Array.isArray(t)) trackLog=t; }catch(e){} }
 function trackDist(a,b,c,d){ const R=6371000,toR=x=>x*Math.PI/180,dLat=toR(c-a),dLon=toR(d-b);
   const s=Math.sin(dLat/2)**2+Math.cos(toR(a))*Math.cos(toR(c))*Math.sin(dLon/2)**2; return 2*R*Math.asin(Math.sqrt(s)); }
