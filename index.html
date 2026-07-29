@@ -81,6 +81,8 @@
   #layerVisList .visrow small{ color:#7a9a76; }
   #layerVisList .visdot{ flex:none; min-width:38px; text-align:center; padding:3px 8px; border-radius:20px; font:700 11px/1 system-ui; letter-spacing:.05em; background:#2a1414; color:#e8b4b4; border:1px solid #5b2b2b; }
   #layerVisList .visdot.on{ background:#123a1c; color:#8fe6a0; border-color:#2f7a44; }
+  #layerVisList .visbtn{ flex:none; width:32px; height:30px; border-radius:7px; background:#16271a; color:#cdebcf; border:1px solid #33623a; font-size:14px; cursor:pointer; }
+  #layerVisList .visbtn.on{ background:#123a1c; color:#8fe6a0; border-color:#2f7a44; }
   .sumseg-wrap{ margin-bottom:12px }
   .sumseg-label{ font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-bottom:5px }
   .seg{ display:flex; border:1px solid #33623a; border-radius:9px; overflow:hidden }
@@ -801,7 +803,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v79";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v80";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2536,20 +2538,51 @@ function applyLayerVis_(){
 function toggleLayerVis(k){ layerVis[k]=!(layerVis[k]!==false); try{ STORE&&STORE.setItem("fi_layervis",JSON.stringify(layerVis)); }catch(e){}
   if(k==="track"){ trackShown=layerVis.track; setTrackBtn(); }
   applyLayerVis_(); renderLayerVis_(); updateLayerStatus(); }
+
+// Labels on/off, per label layer (boundary stand names, imported-point labels). Persisted.
+var labelVis={ bound:true, ref:true };
+try{ if(typeof STORE!=="undefined"&&STORE) Object.assign(labelVis, JSON.parse(STORE.getItem("fi_labelvis"))||{}); }catch(e){}
+function toggleLabels(k){ labelVis[k]=!(labelVis[k]!==false); try{ STORE&&STORE.setItem("fi_labelvis",JSON.stringify(labelVis)); }catch(e){}
+  if(k==="bound"){ if(typeof renderLabels==="function") renderLabels(); }
+  if(k==="ref"){ if(typeof renderRefLabels==="function") renderRefLabels(); }
+  renderLayerVis_(); }
+
+// Zoom/pan the map to fit a single layer.
+function zoomToLayer(k){
+  let b=[];
+  if(k==="mine") saved.forEach(p=>{ const y=parseFloat(p.Y),x=parseFloat(p.X); if(isFinite(y)&&isFinite(x)) b.push([y,x]); });
+  else if(k==="bound"){ if(typeof BOUND!=="undefined"&&BOUND&&BOUND.features) collectCoords_(BOUND.features,b); }
+  else if(k==="ref") (refLabels||[]).forEach(r=>{ if(isFinite(r.lat)&&isFinite(r.lng)) b.push([r.lat,r.lng]); });
+  else if(k==="track") b=(trackLog||[]).slice();
+  else if(k==="pdf"&&pdfBounds){ try{ fmap.fitBounds(pdfBounds,{padding:[30,30]}); closeLayersMenu(); return; }catch(e){} }
+  if(!b.length){ toast("Nothing to zoom to in that layer",true); return; }
+  try{ fmap.fitBounds(b,{padding:[40,40],maxZoom:18}); closeLayersMenu(); }catch(e){ toast("Couldn't zoom to that layer",true); }
+}
+function collectCoords_(features,out){ features.forEach(f=>{ const g=f&&f.geometry; if(!g) return;
+  const walk=c=>{ if(typeof c[0]==="number"){ if(isFinite(c[1])&&isFinite(c[0])) out.push([c[1],c[0]]); } else c.forEach(walk); };
+  if(g.coordinates) walk(g.coordinates); }); }
+
 function renderLayerVis_(){
   const box=$("layerVisList"); if(!box) return;
   const refN=(typeof refLabels!=="undefined"&&refLabels)?refLabels.length:0;
   const trkN=(typeof trackLog!=="undefined"&&trackLog)?trackLog.length:0;
   const bndN=(typeof BOUND!=="undefined"&&BOUND&&BOUND.features)?BOUND.features.length:0;
-  const rows=[["mine","📍 My plots", saved.filter(p=>isFinite(parseFloat(p.Y))).length],
-             ["bound","▧ Stand boundaries", bndN],
-             ["ref","• Imported points/lines", refN],
-             ["track","〰 Track log", trkN]]
-    .filter(r=>r[0]==="mine"||r[0]==="track"||r[2]>0);   // show layers that have data (plots/track always)
-  box.innerHTML = rows.length ? `<div class="layer-hd" style="margin-top:2px">Show / hide</div>`+rows.map(([k,label,cnt])=>{
-    const on=layerVis[k]!==false;
-    return `<div class="visrow" onclick="toggleLayerVis('${k}')"><span>${esc(label)}${cnt?` <small>(${cnt})</small>`:""}</span>`+
-      `<span class="visdot ${on?"on":""}">${on?"ON":"OFF"}</span></div>`;
+  const hasPdf=(typeof pdfOverlay!=="undefined"&&pdfOverlay);
+  // [key, label, count, canLabel]
+  const rows=[["mine","📍 My plots", saved.filter(p=>isFinite(parseFloat(p.Y))).length, false],
+             ["bound","▧ Stand boundaries", bndN, true],
+             ["ref","• Imported points/lines", refN, true],
+             ["track","〰 Track log", trkN, false],
+             ["pdf","🗺 PDF map", hasPdf?1:0, false]]
+    .filter(r=>r[0]==="mine"||r[0]==="track"||r[2]>0);
+  box.innerHTML = rows.length ? `<div class="layer-hd" style="margin-top:2px">Layers — tap ⤢ to zoom</div>`+rows.map(([k,label,cnt,canLabel])=>{
+    const on=(k==="pdf")?(typeof pdfVisible==="undefined"?true:pdfVisible):(layerVis[k]!==false);
+    const onTap=(k==="pdf")?"togglePDF();renderLayerVis_()":`toggleLayerVis('${k}')`;
+    const lblBtn = canLabel ? `<button type="button" class="visbtn ${labelVis[k]!==false?"on":""}" title="Labels on/off" onclick="event.stopPropagation();toggleLabels('${k}')">🏷</button>` : "";
+    return `<div class="visrow"><span onclick="${onTap}" style="flex:1;cursor:pointer">${esc(label)}${cnt&&k!=="pdf"?` <small>(${cnt})</small>`:""}</span>`+
+      `<button type="button" class="visbtn" title="Zoom to this layer" onclick="event.stopPropagation();zoomToLayer('${k}')">⤢</button>`+
+      lblBtn+
+      `<span class="visdot ${on?"on":""}" onclick="${onTap}" style="cursor:pointer">${on?"ON":"OFF"}</span></div>`;
   }).join("") : "";
 }
 function normalizeFC(gj){
@@ -2604,6 +2637,7 @@ function renderBoundaries(){
    the DOM-marker count tiny even with hundreds of compartments (the heavy part on mobile). */
 function renderLabels(){
   if(!flabelLayer) return; flabelLayer.clearLayers();
+  if((typeof labelVis!=="undefined"&&labelVis.bound===false)) return;   // labels turned off
   if(!boundLabels.length || !fmap || fmap.getZoom()<LABEL_MIN_ZOOM) return;
   const b=fmap.getBounds(); let n=0;
   for(const L0 of boundLabels){
@@ -3306,6 +3340,7 @@ function refLabelText_(pr){
 }
 function renderRefLabels(){
   if(!freflabelLayer) return; freflabelLayer.clearLayers();
+  if((typeof labelVis!=="undefined"&&labelVis.ref===false)) return;   // labels turned off
   if(!refLabels.length || !fmap || fmap.getZoom()<REF_LABEL_MIN_ZOOM) return;
   const bb=fmap.getBounds(); let n=0;
   for(const R of refLabels){
