@@ -335,6 +335,7 @@
 <div class="appbar">
   <span class="chip" id="savedChip">0 saved</span>
   <button class="mapbtn" type="button" onclick="openMore()">⋯</button>
+  <button class="mapbtn" type="button" onclick="showFormHelp()" title="How to use the form">?</button>
   <button class="mapbtn" type="button" onclick="openMap()">🗺 Map</button>
   <h1>🌲 Forest Inventory</h1>
   <div class="buildstamp" id="buildStamp" role="button" tabindex="0" title="Tap to update to the latest version" onclick="forceUpdate()"></div>
@@ -553,6 +554,7 @@
   <div class="map-top">
     <button class="map-back" type="button" onclick="closeMap()">‹ Form</button>
     <div class="map-standpill" id="mapStandPill"><span class="k">In stand</span><b id="mapStandVal">—</b></div>
+    <button class="map-load" type="button" onclick="showMapHelp()" title="How to use this map" style="margin-left:8px;min-width:0;padding:0 12px">?</button>
     <button class="map-load" type="button" onclick="toggleLayersMenu()">＋ Layers</button>
   </div>
   <div class="layers-menu" id="layersMenu" style="display:none">
@@ -803,7 +805,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v80";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v83";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3189,12 +3191,12 @@ function countPoints(){
   if(!total){ toast("No points on the map yet — submit a plot, show crew plots, or import points",true); return; }
   let html=`<div style="font:600 13px system-ui;margin-bottom:6px">${total} point${total===1?"":"s"} on the map</div>`;
   const byStand={};
-  layers.forEach(l=>{ html+=`<div style="margin:6px 0 2px;font:600 12px system-ui;color:#2f5a3a">${esc(l.layer)}: ${l.pts.length}</div>`;
-    const cs=countByStand_(l.pts); html+=`<div style="font:12px 'Courier New',monospace;color:#345">`+
+  layers.forEach(l=>{ html+=`<div style="margin:6px 0 2px;font:600 12px system-ui;color:#8fe6a0">${esc(l.layer)}: ${l.pts.length}</div>`;
+    const cs=countByStand_(l.pts); html+=`<div style="font:12px 'Courier New',monospace;color:#dcefe0">`+
       Object.keys(cs).sort().map(s=>`&nbsp;&nbsp;${esc(s)}: ${cs[s]}`).join("<br>")+`</div>`;
     l.pts.forEach(p=>{ byStand[p.stand]=(byStand[p.stand]||0)+1; }); });
-  html+=`<div style="margin:8px 0 2px;font:600 12px system-ui;color:#2f5a3a">All layers by compartment</div>`+
-    `<div style="font:12px 'Courier New',monospace;color:#345">`+
+  html+=`<div style="margin:8px 0 2px;font:600 12px system-ui;color:#8fe6a0">All layers by compartment</div>`+
+    `<div style="font:12px 'Courier New',monospace;color:#dcefe0">`+
     Object.keys(byStand).sort().map(s=>`&nbsp;&nbsp;${esc(s)}: ${byStand[s]}`).join("<br>")+`</div>`;
   showInfoSheet_("Point counts", html);
 }
@@ -3207,11 +3209,11 @@ function countInPolygon(){
   const layers=allPointLayers_(); let total=0;
   let html=`<div style="font:600 13px system-ui;margin-bottom:6px">Inside ${esc(where)}</div>`;
   layers.forEach(l=>{ const inside=l.pts.filter(p=>pointInRing_(p.lat,p.lon,ring));
-    total+=inside.length; if(inside.length) html+=`<div style="font:12px system-ui;color:#345">${esc(l.layer)}: <b>${inside.length}</b> of ${l.pts.length}</div>`; });
+    total+=inside.length; if(inside.length) html+=`<div style="font:12px system-ui;color:#dcefe0">${esc(l.layer)}: <b>${inside.length}</b> of ${l.pts.length}</div>`; });
   html=`<div style="font:600 13px system-ui;margin-bottom:6px">${total} point${total===1?"":"s"} inside ${esc(where)}</div>`+
-       (total?html.split("</div>").slice(1).join("</div>"):"<div style='color:#777'>No points fall inside this polygon.</div>");
+       (total?html.split("</div>").slice(1).join("</div>"):"<div style='color:#a9c9b0'>No points fall inside this polygon.</div>");
   const haP=polyAreaOf_(ring)/10000;
-  html+=`<div style="margin-top:8px;font:12px system-ui;color:#567">Polygon area ≈ ${haP.toFixed(haP<10?2:1)} ha · density ≈ ${haP>0?(total/haP).toFixed(2):"—"} points/ha</div>`;
+  html+=`<div style="margin-top:8px;font:12px system-ui;color:#a9c9b0">Polygon area ≈ ${haP.toFixed(haP<10?2:1)} ha · density ≈ ${haP>0?(total/haP).toFixed(2):"—"} points/ha</div>`;
   showInfoSheet_("Points in polygon", html);
 }
 // lightweight info sheet reused by both tools
@@ -3223,7 +3225,7 @@ function showInfoSheet_(title, html){
     m.style.cssText="position:fixed;inset:0;z-index:5600;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.5);padding:16px";
     m.innerHTML=`<div style="background:#0f1e0d;border:1px solid #33623a;border-radius:14px;max-width:440px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.6)">`+
       `<div id="infoSheetTitle" style="font:700 15px system-ui;color:#eafae8;padding:14px 16px 8px"></div>`+
-      `<div id="infoSheetBody" style="overflow:auto;padding:0 16px 4px;flex:1;-webkit-overflow-scrolling:touch"></div>`+
+      `<div id="infoSheetBody" style="overflow:auto;padding:0 16px 4px;flex:1;-webkit-overflow-scrolling:touch;color:#e8f0e6;font-size:13px"></div>`+
       `<div style="padding:12px 16px;text-align:right"><button class="btn submit" type="button" onclick="closeInfoSheet_()">Done</button></div>`+
     `</div>`;
     m.addEventListener("click",e=>{ if(e.target===m) closeInfoSheet_(); });   // tap outside the card to close
@@ -3231,6 +3233,60 @@ function showInfoSheet_(title, html){
   $("infoSheetTitle").textContent=title; $("infoSheetBody").innerHTML=html; m.style.display="flex";
 }
 function closeInfoSheet_(){ const m=$("infoSheet"); if(m) m.style.display="none"; }
+// Form help — explains the top bar, every section, the red-cell prompts, and the shortcuts.
+function showFormHelp(){
+  const row=(ic,t)=>`<div style="display:flex;gap:10px;align-items:flex-start;margin:7px 0"><div style="flex:none;width:30px;text-align:center;font-size:14px;color:#8fe6a0;font-weight:700">${ic}</div><div style="flex:1;color:#dcefe0;font-size:12.5px;line-height:1.35">${t}</div></div>`;
+  const hd=t=>`<div style="font:700 12px system-ui;color:#8fe6a0;letter-spacing:.04em;text-transform:uppercase;margin:14px 0 4px">${t}</div>`;
+  let h=`<div style="color:#cdebcf;font-size:12.5px;line-height:1.4">Fill the sections top to bottom, then <b>Submit</b>. Tap <b>Done</b> or outside to close.</div>`;
+  h+=hd("Top bar");
+  h+=row("⋯","<b>More</b> — data-entry person, backups, restore, build/email summaries, assign tract, re-attribute plots, start a new project.");
+  h+=row("?","<b>This help.</b>");
+  h+=row("🗺","<b>Map</b> — satellite view: your GPS, plots, boundaries, tools.");
+  h+=row("v82","The small <b>build stamp</b> by the title shows your version — tap it to update to the latest.");
+  h+=hd("Red cells = needs your attention");
+  h+=row("🟥","A cell outlined in <b>red</b> means it's carried over from the last tree/row and you haven't set it yet — e.g. a new tree's <b>species</b> and <b>DBH</b>, or a new regen row. It clears to normal once you set (or confirm) it. Red never blocks submitting; it's just a reminder.");
+  h+=hd("The sections");
+  h+=row("01","<b>Plot header</b> — Stand/compartment, Tract/property, plot number, date, and GPS. Stand & tract carry forward to the next plot. Most-used species rise to the top of every species list.");
+  h+=row("02","<b>Tree tally</b> — one row per prism (BAF 2) tree: species, DBH, quality (AGS/UGS), logs. Species & DBH start red on a new tree.");
+  h+=row("03","<b>Regeneration</b> — Advance (&gt; 1.3 m) and Early (&lt; 1.3 m) in the 10 m² sub-plot. Buckthorn is counted but never toward stocking.");
+  h+=row("04","<b>Ground vegetation</b> — tap plants present; add your own (they're remembered and synced).");
+  h+=row("05","<b>SAR &amp; invasives</b> — species at risk and invasive species observed.");
+  h+=row("06","<b>Sample / site tree</b> — the height/age tree (species, DBH, height, cored age, CAI). Carries over with 'copy site fields'.");
+  h+=row("07","<b>Pest / disease</b> — agent, severity and quantity.");
+  h+=row("08","<b>Site, soil &amp; management</b> — texture, moisture, access, canopy, plus a <b>Copy site fields from…</b> a prior plot shortcut.");
+  h+=row("09","<b>Photo &amp; comment</b> — attach geotagged photos and free-text notes.");
+  h+=row("▤","<b>Saved plots</b> — every plot on this device with its send status; edit or resend from here.");
+  h+=hd("Submitting");
+  h+=row("✓","<b>Submit</b> saves the plot and uploads it to the Sheet (queues if offline). The form then scrolls to the top and opens the map, ready for the next plot.");
+  showInfoSheet_("How to use the form", h);
+}
+// Map help — explains the legend, the GPS marker, and every toolbar icon.
+function showMapHelp(){
+  const row=(ic,t)=>`<div style="display:flex;gap:10px;align-items:flex-start;margin:7px 0"><div style="flex:none;width:26px;text-align:center;font-size:16px">${ic}</div><div style="flex:1;color:#dcefe0;font-size:12.5px;line-height:1.35">${t}</div></div>`;
+  const hd=t=>`<div style="font:700 12px system-ui;color:#8fe6a0;letter-spacing:.04em;text-transform:uppercase;margin:14px 0 4px">${t}</div>`;
+  let h="";
+  h+=`<div style="color:#cdebcf;font-size:12.5px;line-height:1.4;margin-bottom:2px">Quick guide to the map. Tap <b>Done</b> or outside this box to close.</div>`;
+  h+=hd("Legend (bottom-left)");
+  h+=row(`<span style="display:inline-block;width:12px;height:12px;background:#4caf50;border-radius:2px"></span>`,"<b>You</b> — your live GPS position. A soft <b>yellow halo</b> makes it easy to find; a <b>green arrow</b> points the way you're moving.");
+  h+=row(`<span style="display:inline-block;width:12px;height:12px;background:#e8b84b;border-radius:50%"></span>`,"<b>Plot</b> — a plot you've saved, coloured orange/yellow. Tap one to see its stand & number or edit it.");
+  h+=row(`<span style="display:inline-block;width:12px;height:12px;border:1px solid #8fd18a;border-radius:2px"></span>`,"<b>Stand</b> — a loaded stand/compartment boundary. Tap inside (away from a plot) for its attributes.");
+  h+=hd("Toolbar (right side, top → bottom)");
+  h+=row("📍","<b>Place plot by tapping</b> — turn on, then tap the map to drop a plot where you point (instead of at your GPS).");
+  h+=row("⏺","<b>Record track log</b> — starts/stops breadcrumb recording of where you walk. Turns red while recording.");
+  h+=row("📐","<b>Measure</b> — tap points to measure distance; close the shape for area.");
+  h+=row("〰️","<b>Draw cruise route</b> — tap to lay down a planned walking route; it's shared with the crew.");
+  h+=row("⬠","<b>Draw area polygon</b> — tap corners to outline an area (used for the point-count tool and area figures).");
+  h+=row("#️⃣","<b>Count points</b> — tallies every point on the map by layer and by compartment.");
+  h+=row("◎","<b>Count points in polygon</b> — counts points inside your drawn polygon, with area and points/ha.");
+  h+=row("🗺","<b>Show / hide PDF</b> — appears when a georeferenced PDF is loaded; toggles it on the map.");
+  h+=hd("Top bar");
+  h+=row("‹","<b>Form</b> — back to the data-entry form.");
+  h+=row("＋","<b>Layers</b> — load boundaries, reference points, or a PDF; show/hide crew, track and each layer; <b>⤢</b> zoom to a layer; <b>🏷</b> labels on/off.");
+  h+=row("＋ / −","<b>Zoom</b> the map (bottom-right).");
+  h+=hd("Bottom");
+  h+=row("📍","<b>Drop plot at my location</b> — creates a plot at your current GPS fix and opens the form.");
+  showInfoSheet_("How to use the map", h);
+}
 function undoPolyPt(){ if(!polyPts.length) return; polyPts.pop(); polyPtsSnap.pop(); drawPoly(); updatePoly(); persistPoly(); updateLayerStatus(); }
 function savePoly(){ if(polyPts.length<3){ toast("Need 3+ points to save an area",true); return; }
   const traced=maybeTrace_();
