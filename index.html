@@ -550,6 +550,7 @@
   </div>
   <div class="layers-menu" id="layersMenu" style="display:none">
     <div id="layerStatus" class="layer-status"></div>
+    <div id="layerVisList"></div>
     <button type="button" onclick="closeLayersMenu();$('boundInput').click()">⬇ Stand boundaries (polygons)</button>
     <button type="button" onclick="closeLayersMenu();$('pointsInput').click()">⬇ Reference points / lines</button>
     <button type="button" onclick="closeLayersMenu();$('pdfInput').click()">🗺 Georeferenced PDF map</button>
@@ -599,6 +600,8 @@
     <button class="map-tool" id="toolMeasure" type="button" onclick="toggleMeasure()" title="Measure distance / area">📐</button>
     <button class="map-tool" id="toolRoute" type="button" onclick="toggleRoute()" title="Draw cruise route">〰️</button>
     <button class="map-tool" id="toolPoly" type="button" onclick="togglePoly()" title="Draw area polygon">⬠</button>
+    <button class="map-tool" id="toolCount" type="button" onclick="countPoints()" title="Count points on the map (by layer &amp; compartment)">#️⃣</button>
+    <button class="map-tool" id="toolCountPoly" type="button" onclick="countInPolygon()" title="Count points inside the drawn polygon">◎</button>
     <button class="map-tool" id="toolPdf" type="button" onclick="togglePDF()" title="Show / hide PDF" style="display:none">🗺</button>
   </div>
   <div class="pdf-opacity-bar" id="pdfOpacityBar" style="display:none">
@@ -791,7 +794,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v72";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v74";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2421,7 +2424,9 @@ function initMap(){
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:22,maxNativeZoom:19}).addTo(fmap);
   L.control.zoom({position:"bottomright"}).addTo(fmap);
   fpins=L.layerGroup().addTo(fmap); fboundLayer=L.layerGroup().addTo(fmap); flabelLayer=L.layerGroup().addTo(fmap); refLayer=L.layerGroup().addTo(fmap); freflabelLayer=L.layerGroup().addTo(fmap); crewLayer=L.layerGroup().addTo(fmap); liveLayer=L.layerGroup().addTo(fmap); crewRouteLayer=L.layerGroup().addTo(fmap); photoLayer=L.layerGroup().addTo(fmap);
+  applyLayerVis_();
   fmap.on("click",e=>{ if(polyMode){ addPolyPoint(e.latlng); return; } if(routeMode){ addRoutePoint(e.latlng); return; } if(measureMode){ addMeasurePoint(e.latlng); return; } if(placeMode){ placeAt(e.latlng.lat,e.latlng.lng); return; }
+    if(nearbyPlotPopup_(e.latlng)) return;                    // a plot pin near the tap wins over the boundary
     if(popupFields.length){ const bf=boundaryFeatureAt(e.latlng.lat,e.latlng.lng); if(bf) showBoundPopup(e.latlng,bf); } });
   // Keep taps on the on-map controls from also being treated as map clicks (which in draw modes would drop a stray point).
   try{ ["measureBar","routeBar","polyBar","mapDrop"].forEach(id=>{ const el=$(id); if(el){ L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); } });
@@ -2495,10 +2500,40 @@ function removeBoundFile(id){
 }
 function renderLayerList(){
   const c=$("boundFileList"); if(!c) return;
+  renderLayerVis_();
   if(!boundFiles.length){ c.innerHTML=""; c.style.display="none"; return; }
   c.style.display="block";
   c.innerHTML=`<div class="layer-hd">Boundary files</div>`+boundFiles.map(f=>
     `<div class="layer-row"><span>${esc(f.name)} <small>(${f.features.length})</small></span><button type="button" onclick="removeBoundFile('${esc(f.id)}')">✕</button></div>`).join("");
+}
+// On/off visibility for each map overlay. Layer stays loaded — this only shows/hides it.
+let layerVis={ mine:true, bound:true, ref:true, photo:true, track:true };
+if(STORE){ try{ Object.assign(layerVis, JSON.parse(STORE.getItem("fi_layervis"))||{}); }catch(e){} trackShown=layerVis.track; }
+function layerGroupFor_(k){ return {mine:fpins, bound:fboundLayer, ref:refLayer, photo:photoLayer}[k]; }
+function applyLayerVis_(){
+  [["mine",fpins,flabelLayer],["bound",fboundLayer,flabelLayer],["ref",refLayer,freflabelLayer],["photo",photoLayer,null]].forEach(([k,lyr,lbl])=>{
+    if(!fmap||!lyr) return;
+    if(layerVis[k]===false){ if(fmap.hasLayer(lyr)) fmap.removeLayer(lyr); if(k==="bound"&&lbl&&fmap.hasLayer(lbl)) fmap.removeLayer(lbl); if(k==="ref"&&lbl&&fmap.hasLayer(lbl)) fmap.removeLayer(lbl); }
+    else { if(!fmap.hasLayer(lyr)) fmap.addLayer(lyr); if(k==="bound"&&lbl&&!fmap.hasLayer(lbl)) fmap.addLayer(lbl); if(k==="ref"&&lbl&&!fmap.hasLayer(lbl)) fmap.addLayer(lbl); }
+  });
+  // track log has its own show/hide path
+  if(layerVis.track===false){ if(trackLine){ fmap.removeLayer(trackLine); trackLine=null; } trackShown=false; }
+  else { trackShown=true; drawTrack(); }
+}
+function toggleLayerVis(k){ layerVis[k]=!(layerVis[k]!==false); try{ STORE&&STORE.setItem("fi_layervis",JSON.stringify(layerVis)); }catch(e){}
+  if(k==="track"){ trackShown=layerVis.track; setTrackBtn(); }
+  applyLayerVis_(); renderLayerVis_(); updateLayerStatus(); }
+function renderLayerVis_(){
+  const box=$("layerVisList"); if(!box) return;
+  const rows=[["mine","📍 My plots", saved.filter(p=>isFinite(parseFloat(p.Y))).length],
+             ["bound","▧ Stand boundaries", (BOUND&&BOUND.features?BOUND.features.length:0)],
+             ["ref","• Imported points/lines", (refLabels?refLabels.length:0)],
+             ["photo","📷 Photo locations", 0],
+             ["track","〰 Track log", trackLog.length]]
+    .filter(r=>r[0]==="mine"||r[0]==="track"||r[2]>0);   // show layers that have data (plots/track always)
+  box.innerHTML = rows.length ? `<div class="layer-hd">Show / hide</div>`+rows.map(([k,label,cnt])=>
+    `<label class="layer-row" style="cursor:pointer"><span>${esc(label)}${cnt?` <small>(${cnt})</small>`:""}</span>`+
+    `<input type="checkbox" ${layerVis[k]!==false?"checked":""} onchange="toggleLayerVis('${k}')"></label>`).join("") : "";
 }
 function normalizeFC(gj){
   let feats=[]; const cols=Array.isArray(gj)?gj:[gj];
@@ -2640,6 +2675,25 @@ function drawMe(){ if(!fmap||!mePos) return; const ll=[mePos.lat,mePos.lon];
 function updateInStand(){ const s=mePos?standOrPolyAt_(mePos.lat,mePos.lon):null; $("mapStandVal").textContent=s||"—"; $("mapStandPill").classList.toggle("in",!!s); }
 
 /* ----- plot pins from saved plots ----- */
+// If a plot pin is within ~22 px of the tap, open its popup instead of the boundary popup.
+// Uses screen pixels so the buffer feels the same at every zoom. My plots take priority, then crew,
+// then imported points; the nearest within the buffer wins.
+function nearbyPlotPopup_(latlng){
+  if(!fmap) return false;
+  const BUF=22, tp=fmap.latLngToContainerPoint(latlng);
+  const near=(lat,lon)=>{ if(!isFinite(lat)||!isFinite(lon)) return 1e9; const p=fmap.latLngToContainerPoint([lat,lon]); return Math.hypot(p.x-tp.x,p.y-tp.y); };
+  let best=null;
+  saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X), d=near(lat,lon);
+    if(d<=BUF && (!best||d<best.d)) best={d,lat,lon,html:`<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b><br>${(p.DATE||"").slice(0,16)}<br><a href="javascript:void(0)" onclick="editFromMap(${i})">Edit this plot ›</a></div>`}; });
+  if(!best && crewShown && crewData.length) crewData.forEach(r=>{ const lat=parseFloat(r.lat), lon=parseFloat(r.lon), d=near(lat,lon);
+    if(d<=BUF && (!best||d<best.d)) best={d,lat,lon,html:`<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(r.stand||"—")} · plot ${esc(r.plot||"?")}</b><br>${esc(r.cruiser||"")}</div>`}; });
+  if(!best && refLabels && refLabels.length) refLabels.forEach(r=>{ const d=near(r.lat,r.lng);
+    if(d<=BUF && (!best||d<best.d)){ const lbl=Object.values(r.props||{}).filter(v=>v!=null&&v!=="").slice(0,2).join(" — ")||"point";
+      best={d,lat:r.lat,lon:r.lng,html:`<div style="font-family:monospace;font-size:11px;color:#16271a"><b>${esc(lbl)}</b><br>${r.lat.toFixed(5)}, ${r.lng.toFixed(5)}</div>`}; } });
+  if(!best) return false;
+  L.popup({offset:[0,-8]}).setLatLng([best.lat,best.lon]).setContent(best.html).openOn(fmap);
+  return true;
+}
 function renderMapPins(){ if(!fpins) return; fpins.clearLayers();
   saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)) return;
     const icon=L.divIcon({className:"",html:`<div style="width:24px;height:24px;border-radius:50%;background:#e8b84b;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font:700 10px/1 'Courier New',monospace;color:#1a2e18">${esc(p.PLOTNUM||"?")}</div>`,iconSize:[24,24],iconAnchor:[12,12]});
@@ -3028,6 +3082,64 @@ function togglePoly(){
   else { $("toolPoly").classList.remove("on"); fmap.getContainer().style.cursor=""; $("polyBar").style.display="none"; drawPoly(); }
 }
 function addPolyPoint(ll){ const s=snapLatLng_(ll); polyPts.push([s.lat,s.lon]); polyPtsSnap.push(s.snap||null); drawPoly(); updatePoly(); persistPoly(); updateLayerStatus(); }
+
+/* ---------- point counting tools ---------- */
+// Gather every point layer as {layer, pts:[{lat,lon,stand}]}. "stand" is the plot's own stand where
+// known, else looked up by location — so we can break counts down by compartment.
+function allPointLayers_(){
+  const layers=[];
+  const mine=[]; saved.forEach(p=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X);
+    if(isFinite(lat)&&isFinite(lon)) mine.push({lat,lon,stand:(p.STANDID||"").trim()||standOrPolyAt_(lat,lon)||"(unattributed)"}); });
+  if(mine.length) layers.push({layer:"My plots", pts:mine});
+  if(crewShown && crewData.length){ const crew=[]; crewData.forEach(r=>{ const lat=parseFloat(r.lat), lon=parseFloat(r.lon);
+    if(isFinite(lat)&&isFinite(lon)) crew.push({lat,lon,stand:(r.stand||"").trim()||standOrPolyAt_(lat,lon)||"(unattributed)"}); });
+    if(crew.length) layers.push({layer:"Crew plots", pts:crew}); }
+  if(refLabels && refLabels.length){ const imp=refLabels.filter(r=>isFinite(r.lat)&&isFinite(r.lng))
+      .map(r=>({lat:r.lat,lon:r.lng,stand:standOrPolyAt_(r.lat,r.lng)||"(outside compartments)"}));
+    if(imp.length) layers.push({layer:"Imported points", pts:imp}); }
+  return layers;
+}
+function countByStand_(pts){ const m={}; pts.forEach(p=>{ const s=p.stand||"(unattributed)"; m[s]=(m[s]||0)+1; }); return m; }
+// Count everything on the map, per layer and per compartment.
+function countPoints(){
+  const layers=allPointLayers_();
+  const total=layers.reduce((a,l)=>a+l.pts.length,0);
+  if(!total){ toast("No points on the map yet — submit a plot, show crew plots, or import points",true); return; }
+  let html=`<div style="font:600 13px system-ui;margin-bottom:6px">${total} point${total===1?"":"s"} on the map</div>`;
+  const byStand={};
+  layers.forEach(l=>{ html+=`<div style="margin:6px 0 2px;font:600 12px system-ui;color:#2f5a3a">${esc(l.layer)}: ${l.pts.length}</div>`;
+    const cs=countByStand_(l.pts); html+=`<div style="font:12px 'Courier New',monospace;color:#345">`+
+      Object.keys(cs).sort().map(s=>`&nbsp;&nbsp;${esc(s)}: ${cs[s]}`).join("<br>")+`</div>`;
+    l.pts.forEach(p=>{ byStand[p.stand]=(byStand[p.stand]||0)+1; }); });
+  html+=`<div style="margin:8px 0 2px;font:600 12px system-ui;color:#2f5a3a">All layers by compartment</div>`+
+    `<div style="font:12px 'Courier New',monospace;color:#345">`+
+    Object.keys(byStand).sort().map(s=>`&nbsp;&nbsp;${esc(s)}: ${byStand[s]}`).join("<br>")+`</div>`;
+  showInfoSheet_("Point counts", html);
+}
+// Count points that fall inside the last-drawn (or currently-drawn) polygon.
+function countInPolygon(){
+  let ring=null, where="";
+  if(polyPts.length>=3){ ring=polyPts; where="current outline"; }
+  else if(polys.length){ ring=polys[polys.length-1].pts; where=polys[polys.length-1].name; }
+  if(!ring){ toast("Draw a polygon first (⬠), then tap Count-in-area",true); return; }
+  const layers=allPointLayers_(); let total=0;
+  let html=`<div style="font:600 13px system-ui;margin-bottom:6px">Inside ${esc(where)}</div>`;
+  layers.forEach(l=>{ const inside=l.pts.filter(p=>pointInRing_(p.lat,p.lon,ring));
+    total+=inside.length; if(inside.length) html+=`<div style="font:12px system-ui;color:#345">${esc(l.layer)}: <b>${inside.length}</b> of ${l.pts.length}</div>`; });
+  html=`<div style="font:600 13px system-ui;margin-bottom:6px">${total} point${total===1?"":"s"} inside ${esc(where)}</div>`+
+       (total?html.split("</div>").slice(1).join("</div>"):"<div style='color:#777'>No points fall inside this polygon.</div>");
+  const haP=polyAreaOf_(ring)/10000;
+  html+=`<div style="margin-top:8px;font:12px system-ui;color:#567">Polygon area ≈ ${haP.toFixed(haP<10?2:1)} ha · density ≈ ${haP>0?(total/haP).toFixed(2):"—"} points/ha</div>`;
+  showInfoSheet_("Points in polygon", html);
+}
+// lightweight info sheet reused by both tools
+function showInfoSheet_(title, html){
+  let m=$("infoSheet");
+  if(!m){ m=document.createElement("div"); m.id="infoSheet"; m.className="modal"; m.style.display="none";
+    m.innerHTML=`<div class="modal-card"><div class="modal-title" id="infoSheetTitle"></div><div id="infoSheetBody" style="max-height:60vh;overflow:auto"></div><div class="modal-actions"><button class="btn submit" type="button" onclick="document.getElementById('infoSheet').style.display='none'">Done</button></div></div>`;
+    document.body.appendChild(m); }
+  $("infoSheetTitle").textContent=title; $("infoSheetBody").innerHTML=html; m.style.display="flex";
+}
 function undoPolyPt(){ if(!polyPts.length) return; polyPts.pop(); polyPtsSnap.pop(); drawPoly(); updatePoly(); persistPoly(); updateLayerStatus(); }
 function savePoly(){ if(polyPts.length<3){ toast("Need 3+ points to save an area",true); return; }
   const traced=maybeTrace_();
