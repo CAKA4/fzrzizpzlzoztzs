@@ -799,7 +799,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v76";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v77";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3145,13 +3145,22 @@ function countInPolygon(){
   showInfoSheet_("Points in polygon", html);
 }
 // lightweight info sheet reused by both tools
+// A scrollable info popup that sits ABOVE the map (map view is z-index 5000, generic .modal is lower,
+// which is why it used to only appear after leaving the map). Close via Done or tapping the backdrop.
 function showInfoSheet_(title, html){
   let m=$("infoSheet");
-  if(!m){ m=document.createElement("div"); m.id="infoSheet"; m.className="modal"; m.style.display="none";
-    m.innerHTML=`<div class="modal-card"><div class="modal-title" id="infoSheetTitle"></div><div id="infoSheetBody" style="max-height:60vh;overflow:auto"></div><div class="modal-actions"><button class="btn submit" type="button" onclick="document.getElementById('infoSheet').style.display='none'">Done</button></div></div>`;
+  if(!m){ m=document.createElement("div"); m.id="infoSheet";
+    m.style.cssText="position:fixed;inset:0;z-index:5600;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.5);padding:16px";
+    m.innerHTML=`<div style="background:#0f1e0d;border:1px solid #33623a;border-radius:14px;max-width:440px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.6)">`+
+      `<div id="infoSheetTitle" style="font:700 15px system-ui;color:#eafae8;padding:14px 16px 8px"></div>`+
+      `<div id="infoSheetBody" style="overflow:auto;padding:0 16px 4px;flex:1;-webkit-overflow-scrolling:touch"></div>`+
+      `<div style="padding:12px 16px;text-align:right"><button class="btn submit" type="button" onclick="closeInfoSheet_()">Done</button></div>`+
+    `</div>`;
+    m.addEventListener("click",e=>{ if(e.target===m) closeInfoSheet_(); });   // tap outside the card to close
     document.body.appendChild(m); }
   $("infoSheetTitle").textContent=title; $("infoSheetBody").innerHTML=html; m.style.display="flex";
 }
+function closeInfoSheet_(){ const m=$("infoSheet"); if(m) m.style.display="none"; }
 function undoPolyPt(){ if(!polyPts.length) return; polyPts.pop(); polyPtsSnap.pop(); drawPoly(); updatePoly(); persistPoly(); updateLayerStatus(); }
 function savePoly(){ if(polyPts.length<3){ toast("Need 3+ points to save an area",true); return; }
   const traced=maybeTrace_();
