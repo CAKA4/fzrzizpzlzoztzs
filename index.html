@@ -76,6 +76,11 @@
   .layer-row span{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .layer-row small{ color:#7a9a76; }
   .layer-row button{ background:#2a1414; border:1px solid #5b2b2b; color:#e8b4b4; border-radius:6px; width:28px; height:28px; font-size:13px; cursor:pointer; flex:none; }
+  #layerVisList .visrow{ display:flex; align-items:center; gap:8px; padding:10px 12px; margin-top:6px; border-radius:8px; border:1px solid var(--line2,#33623a); background:#16271a; color:#e8f0e6; font-size:13px; cursor:pointer; }
+  #layerVisList .visrow span:first-child{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #layerVisList .visrow small{ color:#7a9a76; }
+  #layerVisList .visdot{ flex:none; min-width:38px; text-align:center; padding:3px 8px; border-radius:20px; font:700 11px/1 system-ui; letter-spacing:.05em; background:#2a1414; color:#e8b4b4; border:1px solid #5b2b2b; }
+  #layerVisList .visdot.on{ background:#123a1c; color:#8fe6a0; border-color:#2f7a44; }
   .sumseg-wrap{ margin-bottom:12px }
   .sumseg-label{ font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-bottom:5px }
   .seg{ display:flex; border:1px solid #33623a; border-radius:9px; overflow:hidden }
@@ -794,7 +799,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v75";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v76";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2533,12 +2538,13 @@ function renderLayerVis_(){
   const rows=[["mine","📍 My plots", saved.filter(p=>isFinite(parseFloat(p.Y))).length],
              ["bound","▧ Stand boundaries", bndN],
              ["ref","• Imported points/lines", refN],
-             ["photo","📷 Photo locations", 0],
              ["track","〰 Track log", trkN]]
     .filter(r=>r[0]==="mine"||r[0]==="track"||r[2]>0);   // show layers that have data (plots/track always)
-  box.innerHTML = rows.length ? `<div class="layer-hd">Show / hide</div>`+rows.map(([k,label,cnt])=>
-    `<label class="layer-row" style="cursor:pointer"><span>${esc(label)}${cnt?` <small>(${cnt})</small>`:""}</span>`+
-    `<input type="checkbox" ${layerVis[k]!==false?"checked":""} onchange="toggleLayerVis('${k}')"></label>`).join("") : "";
+  box.innerHTML = rows.length ? `<div class="layer-hd" style="margin-top:2px">Show / hide</div>`+rows.map(([k,label,cnt])=>{
+    const on=layerVis[k]!==false;
+    return `<div class="visrow" onclick="toggleLayerVis('${k}')"><span>${esc(label)}${cnt?` <small>(${cnt})</small>`:""}</span>`+
+      `<span class="visdot ${on?"on":""}">${on?"ON":"OFF"}</span></div>`;
+  }).join("") : "";
 }
 function normalizeFC(gj){
   let feats=[]; const cols=Array.isArray(gj)?gj:[gj];
