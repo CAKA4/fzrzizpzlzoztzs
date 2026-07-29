@@ -558,7 +558,9 @@
     <div id="layerVisList"></div>
     <button type="button" onclick="closeLayersMenu();$('boundInput').click()">⬇ Stand boundaries (polygons)</button>
     <button type="button" onclick="closeLayersMenu();$('pointsInput').click()">⬇ Reference points / lines</button>
+    <button type="button" id="refClearBtn" onclick="closeLayersMenu();clearRefFiles()" style="display:none">✕ Remove reference points / lines</button>
     <button type="button" onclick="closeLayersMenu();$('pdfInput').click()">🗺 Georeferenced PDF map</button>
+    <button type="button" id="pdfUnloadBtn" onclick="closeLayersMenu();unloadPDF()" style="display:none">✕ Unload PDF map</button>
     <button type="button" id="crewBtn" onclick="closeLayersMenu();toggleCrewPlots()">👥 Show crew plots (from Sheet)</button>
     <div id="plotLabelRow" style="display:none;padding:0 0 2px">
       <label style="font-size:12px;color:#cfe6d4;display:block;margin:0 2px 3px">Label plots by</label>
@@ -799,7 +801,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v77";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v79";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2411,6 +2413,8 @@ async function openMap(){
   if(!fmap) initMap();
   setTimeout(()=>fmap.invalidateSize(),60);
   if(BOUND){ pickStandField(); renderBoundaries(); renderLayerList(); document.querySelector(".map-load").classList.add("has"); }
+  if(!refLabels.length) loadCachedRefFiles_();   // restore imported reference points/lines across restarts
+  loadCachedPdf_();                              // restore a georeferenced PDF across restarts
   renderMapPins();
   drawTrack();
   drawRoute();
@@ -2506,6 +2510,8 @@ function removeBoundFile(id){
 function renderLayerList(){
   const c=$("boundFileList"); if(!c) return;
   renderLayerVis_();
+  { const rb=$("refClearBtn"); if(rb) rb.style.display=(refLabels&&refLabels.length)?"block":"none"; }
+  { const ub=$("pdfUnloadBtn"); if(ub) ub.style.display=pdfOverlay?"block":"none"; }
   if(!boundFiles.length){ c.innerHTML=""; c.style.display="none"; return; }
   c.style.display="block";
   c.innerHTML=`<div class="layer-hd">Boundary files</div>`+boundFiles.map(f=>
@@ -2747,7 +2753,37 @@ if(_origRenderSaved){ renderSaved=function(){ _origRenderSaved.apply(this,argume
 let refLayer=null, placeMode=false, placeMarker=null;
 let freflabelLayer=null, refLabels=[], refLabelField=null, refFeatCount=0;   // point labels (virtualized like stand labels)
 let measureMode=false, measurePts=[], measureLine=null, measureMarks=[];
-let pdfOverlay=null, pdfBounds=null, pdfVisible=true, pdfName="";
+let pdfOverlay=null, pdfBounds=null, pdfVisible=true, pdfName="", pdfCorners=null;
+// A Leaflet layer that pins an image to four geographic corners [TL,TR,BR,BL] via a CSS affine
+// transform — so a rotated/skewed GeoPDF frame lands true, unlike axis-aligned imageOverlay.
+function cornerImageOverlay_(url, corners){
+  const layer=L.layerGroup();
+  const img=document.createElement("img");
+  img.src=url; img.style.position="absolute"; img.style.transformOrigin="0 0";
+  img.style.pointerEvents="none"; img.style.opacity="0.85"; img.decoding="async";
+  layer._img=img; layer._corners=corners; layer._opacity=0.85;
+  layer.onAdd=function(map){ this._map=map; map.getPanes().overlayPane.appendChild(img);
+    const redraw=()=>positionCornerImg_(map,img,corners);
+    this._redraw=redraw; img.onload=redraw;
+    map.on("move zoom zoomanim viewreset resize moveend",redraw); redraw(); };
+  layer.onRemove=function(map){ map.off("move zoom zoomanim viewreset resize moveend",this._redraw);
+    if(img.parentNode) img.parentNode.removeChild(img); };
+  layer.setOpacity=function(o){ this._opacity=o; img.style.opacity=String(o); };
+  return layer;
+}
+function positionCornerImg_(map,img,corners){
+  if(!img.naturalWidth) return;
+  const p=corners.map(c=>map.latLngToLayerPoint(L.latLng(c[0],c[1])));  // TL,TR,BR,BL on screen
+  const W=img.naturalWidth, H=img.naturalHeight;
+  // Solve the affine that maps image (0,0)->TL, (W,0)->TR, (0,H)->BL. (BR follows for a parallelogram;
+  // GeoPDF frames are affine so this is exact.)
+  const a=(p[1].x-p[0].x)/W, b=(p[1].y-p[0].y)/W;      // x-axis (image right)
+  const c=(p[3].x-p[0].x)/H, d=(p[3].y-p[0].y)/H;      // y-axis (image down)
+  const e=p[0].x, f=p[0].y;
+  L.DomUtil.setPosition(img,new L.Point(0,0));
+  img.style.transform=`matrix(${a},${b},${c},${d},${e},${f})`;
+  img.style.width=W+"px"; img.style.height=H+"px";
+}
 /* ---- GPS track log (records your path; export as GeoJSON) ---- */
 let trackActive=false, trackLog=[], trackLine=null, _lastTrackPersist=0;
 let trackShown=true;   // visibility only — recording is controlled by the ⏺ tool
@@ -3215,11 +3251,28 @@ function exportPolyShp(){
 /* ---- import reference points / lines / polygons (shapefile, GeoJSON, GPX) ---- */
 function importRefFile(file){
   toast("Reading…"); const lower=file.name.toLowerCase();
-  const done=gj=>{ const n=renderRef(gj); toast(n?`Imported ${n} feature${n>1?"s":""}`:"Nothing to import",!n); };
+  const done=gj=>{ const n=renderRef(gj); if(n){ cacheRefFile_(gj); } toast(n?`Imported ${n} feature${n>1?"s":""}`:"Nothing to import",!n); };
   if(lower.endsWith(".geojson")||lower.endsWith(".json")) file.text().then(t=>ensureWGS84(JSON.parse(t))).then(done).catch(()=>toast("Bad GeoJSON",true));
   else if(lower.endsWith(".gpx")) file.text().then(t=>done(gpxToGeo(t))).catch(()=>toast("Bad GPX",true));
   else if(lower.endsWith(".shp")||lower.endsWith(".zip")) file.arrayBuffer().then(b=>shp(b)).then(ensureWGS84).then(done).catch(e=>toast("Shapefile error",true));
   else toast("Use a .gpx, .geojson, .json, .shp or .zip file",true);
+}
+// Keep imported reference layers across app restarts (stored as WGS84 GeoJSON, like boundaries).
+function cacheRefFile_(gj){ try{ if(!STORE) return;
+  const cols=Array.isArray(gj)?gj:[gj]; let saved=[]; try{ saved=JSON.parse(STORE.getItem("fi_reffiles"))||[]; }catch(e){}
+  cols.forEach(fc=>{ if(fc&&fc.features&&fc.features.length) saved.push(fc); });
+  STORE.setItem("fi_reffiles",JSON.stringify(saved));
+}catch(e){} }
+function loadCachedRefFiles_(){ try{ if(!STORE) return;
+  const saved=JSON.parse(STORE.getItem("fi_reffiles")||"[]"); if(!Array.isArray(saved)||!saved.length) return;
+  saved.forEach(fc=>renderRef(fc));   // re-draw without re-caching (they're already stored)
+}catch(e){} }
+function clearRefFiles(){
+  if(refLabels.length && !confirm("Remove all imported reference points/lines from the map and device?")) return;
+  if(refLayer) refLayer.clearLayers(); if(freflabelLayer) freflabelLayer.clearLayers();
+  refLabels=[]; refFeatCount=0; refLabelField=null;
+  try{ STORE&&STORE.removeItem("fi_reffiles"); }catch(e){}
+  updateLayerStatus(); renderLayerVis_(); toast("Reference layers removed");
 }
 function renderRef(gj){
   if(!refLayer) return 0; const cols=Array.isArray(gj)?gj:[gj]; let n=0; const b=[];
@@ -3290,20 +3343,46 @@ function loadPdfOverlay(file){
   file.arrayBuffer().then(buf=>{ const geo=parseGeo(new Uint8Array(buf));
     if(!geo){ toast("No georeference found in that PDF",true); return; }
     toast("Rendering…");
-    renderPDF(buf.slice(0),geo).then(imgUrl=>{
-      const lats=geo.corners.map(c=>c.lat), lons=geo.corners.map(c=>c.lon);
-      pdfBounds=L.latLngBounds([Math.min(...lats),Math.min(...lons)],[Math.max(...lats),Math.max(...lons)]);
+    renderPDF(buf.slice(0),geo).then(res=>{
+      const imgUrl=(typeof res==="string")?res:res.url;
+      // Corner geo-positions (true, possibly rotated) + where each sits on the rendered image (0..1).
+      const cs=geo.corners.map(c=>({lat:c.lat,lon:c.lon,px:c.px,py:c.py}));
+      // order corners to TL,TR,BR,BL by their image fraction so we can map image edges to ground
+      const TL=cs.find(c=>c.px<0.5&&c.py<0.5)||cs[0], TR=cs.find(c=>c.px>=0.5&&c.py<0.5)||cs[1],
+            BR=cs.find(c=>c.px>=0.5&&c.py>=0.5)||cs[2], BL=cs.find(c=>c.px<0.5&&c.py>=0.5)||cs[3];
       if(pdfOverlay) fmap.removeLayer(pdfOverlay);
-      pdfOverlay=L.imageOverlay(imgUrl,pdfBounds,{opacity:.85,interactive:false}).addTo(fmap); pdfVisible=true; pdfName=file.name||"PDF";
-      $("toolPdf").style.display="flex"; $("toolPdf").classList.add("on");
+      pdfBounds=L.latLngBounds(cs.map(c=>[c.lat,c.lon]));
+      pdfCorners=[[TL.lat,TL.lon],[TR.lat,TR.lon],[BR.lat,BR.lon],[BL.lat,BL.lon]];
+      pdfOverlay=cornerImageOverlay_(imgUrl, pdfCorners).addTo(fmap); pdfVisible=true; pdfName=file.name||"PDF";
+      try{ STORE&&STORE.setItem("fi_pdf",JSON.stringify({url:imgUrl,corners:pdfCorners,name:pdfName})); }catch(e){}
+      $("toolPdf").style.display="flex"; $("toolPdf").classList.add("on"); { const ub=$("pdfUnloadBtn"); if(ub) ub.style.display="block"; }
       $("pdfOpacityBar").style.display="flex"; $("pdfOpacity").value=85; $("pdfOpacityVal").textContent="85%";
       fmap.fitBounds(pdfBounds,{padding:[30,30]}); toast("PDF map loaded"); updateLayerStatus();
     }).catch(()=>toast("PDF render failed",true));
   }).catch(()=>toast("Couldn't read the PDF",true));
 }
 function setPDFOpacity(v){ $("pdfOpacityVal").textContent=v+"%"; if(pdfOverlay&&pdfVisible) pdfOverlay.setOpacity(v/100); }
+// Restore a georeferenced PDF (image + its 4 corners) saved from a previous session.
+function loadCachedPdf_(){ try{ if(!STORE||pdfOverlay) return;
+  const s=JSON.parse(STORE.getItem("fi_pdf")||"null"); if(!s||!s.url||!s.corners) return;
+  pdfCorners=s.corners; pdfName=s.name||"PDF"; pdfBounds=L.latLngBounds(s.corners.map(c=>[c[0],c[1]]));
+  pdfOverlay=cornerImageOverlay_(s.url,s.corners).addTo(fmap); pdfVisible=true;
+  $("toolPdf").style.display="flex"; $("toolPdf").classList.add("on");
+  const ub=$("pdfUnloadBtn"); if(ub) ub.style.display="block";
+  $("pdfOpacityBar").style.display="flex"; $("pdfOpacity").value=85; $("pdfOpacityVal").textContent="85%";
+}catch(e){} }
 function togglePDF(){ if(!pdfOverlay) return; pdfVisible=!pdfVisible; const btn=$("toolPdf");
   if(pdfVisible){ pdfOverlay.setOpacity($("pdfOpacity").value/100); btn.classList.add("on"); } else { pdfOverlay.setOpacity(0); btn.classList.remove("on"); } }
+// Fully remove the georeferenced PDF from the map.
+function unloadPDF(){
+  if(pdfOverlay){ try{ fmap.removeLayer(pdfOverlay); }catch(e){} pdfOverlay=null; }
+  pdfBounds=null; pdfVisible=false; pdfName="";
+  const t=$("toolPdf"); if(t){ t.classList.remove("on"); t.style.display="none"; }
+  const ub=$("pdfUnloadBtn"); if(ub) ub.style.display="none";
+  const bar=$("pdfOpacityBar"); if(bar) bar.style.display="none";
+  try{ STORE&&STORE.removeItem("fi_pdf"); }catch(e){}
+  updateLayerStatus(); toast("PDF map unloaded");
+}
 function parseGeo(bytes){
   const text=new TextDecoder("latin1").decode(bytes);
   const gm=text.match(/\/GPTS\s*\[([^\]]+)\]/); if(!gm) return null;
@@ -3331,21 +3410,17 @@ function renderPDF(buf,geo){
         const {left,bottom,right,top}=geo.bboxPts, scaleX=full.width/pageWpts, scaleY=full.height/pageHpts;
         const cropX=Math.round(left*scaleX), cropY=Math.round((pageHpts-top)*scaleY), cropW=Math.round((right-left)*scaleX), cropH=Math.round((top-bottom)*scaleY);
         if(cropW>10&&cropH>10){
+          // Crop to the georeferenced map frame and hand it back flat — the corner overlay does the
+          // geo-placement (including any rotation), so no north-up warp here.
           const cropped=document.createElement("canvas"); cropped.width=cropW; cropped.height=cropH;
           cropped.getContext("2d").drawImage(full,cropX,cropY,cropW,cropH,0,0,cropW,cropH);
-          const lats=geo.corners.map(c=>c.lat), lons=geo.corners.map(c=>c.lon);
-          const minLat=Math.min(...lats),maxLat=Math.max(...lats),minLon=Math.min(...lons),maxLon=Math.max(...lons);
-          const latSpan=maxLat-minLat, lonSpan=maxLon-minLon, cosLat=Math.cos(((minLat+maxLat)/2)*Math.PI/180);
-          const outW=cropW, outH=Math.round(outW*latSpan/(lonSpan*cosLat));
-          const srcPts=geo.corners.map(c=>({x:c.px<0.5?0:cropW,y:c.py<0.5?0:cropH}));
-          const dstPts=geo.corners.map(c=>({x:(c.lon-minLon)/lonSpan*outW,y:(maxLat-c.lat)/latSpan*outH}));
-          const out=document.createElement("canvas"); out.width=outW; out.height=outH; const ctx=out.getContext("2d");
-          drawWarpedTriangle(ctx,cropped,0,0,srcPts[0],srcPts[1],srcPts[2],dstPts[0],dstPts[1],dstPts[2]);
-          drawWarpedTriangle(ctx,cropped,0,0,srcPts[0],srcPts[2],srcPts[3],dstPts[0],dstPts[2],dstPts[3]);
-          return out.toDataURL("image/jpeg",.92);
+          // report each geo corner's position within THIS cropped image (0..1)
+          geo.corners.forEach(c=>{ c.px=Math.min(1,Math.max(0,(c.px*pageW - left)/(right-left)));
+                                   c.py=Math.min(1,Math.max(0,(c.py*pageH - (pageH-top))/(top-bottom))); });
+          return { url: cropped.toDataURL("image/jpeg",.92) };
         }
       }
-      return full.toDataURL("image/jpeg",.92);
+      return { url: full.toDataURL("image/jpeg",.92) };
     });
   });
 }
