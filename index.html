@@ -83,6 +83,10 @@
   #layerVisList .visdot.on{ background:#123a1c; color:#8fe6a0; border-color:#2f7a44; }
   #layerVisList .visbtn{ flex:none; width:32px; height:30px; border-radius:7px; background:#16271a; color:#cdebcf; border:1px solid #33623a; font-size:14px; cursor:pointer; }
   #layerVisList .visbtn.on{ background:#123a1c; color:#8fe6a0; border-color:#2f7a44; }
+  #sppPickerList .pick{ display:block; width:100%; text-align:left; padding:11px 12px; margin:4px 0; border-radius:8px; border:1px solid #d7e2d5; background:#fff; color:#16271a; font:inherit; font-size:14px; cursor:pointer; }
+  #sppPickerList .pick:active{ background:#eef5ec; }
+  #sppPickerList .pick b{ color:#2f7a44; }
+  #sppPickerSearch{ font-size:16px; }
   .sumseg-wrap{ margin-bottom:12px }
   .sumseg-label{ font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-bottom:5px }
   .seg{ display:flex; border:1px solid #33623a; border-radius:9px; overflow:hidden }
@@ -336,6 +340,7 @@
   <span class="chip" id="savedChip">0 saved</span>
   <button class="mapbtn" type="button" onclick="openMore()">⋯</button>
   <button class="mapbtn" type="button" onclick="showFormHelp()" title="How to use the form">?</button>
+  <button class="mapbtn" type="button" onclick="startCapture()" title="Capture a plot location">🎯 Capture</button>
   <button class="mapbtn" type="button" onclick="openMap()">🗺 Map</button>
   <h1>🌲 Forest Inventory</h1>
   <div class="buildstamp" id="buildStamp" role="button" tabindex="0" title="Tap to update to the latest version" onclick="forceUpdate()"></div>
@@ -646,6 +651,11 @@
   <div class="map-drop" id="mapDrop">
     <button class="dropbtn" type="button" onclick="dropAtMe()">＋ Drop plot at my location</button>
   </div>
+  <div id="mapCrosshair" style="display:none;position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;pointer-events:none;z-index:1200">
+    <div style="position:absolute;left:21px;top:2px;width:2px;height:40px;background:rgba(255,60,60,.9)"></div>
+    <div style="position:absolute;top:21px;left:2px;height:2px;width:40px;background:rgba(255,60,60,.9)"></div>
+    <div style="position:absolute;left:16px;top:16px;width:12px;height:12px;border:2px solid rgba(255,60,60,.95);border-radius:50%"></div>
+  </div>
 </div>
 <input type="file" id="boundInput" style="display:none">
 <input type="file" id="pointsInput" style="display:none">
@@ -755,6 +765,18 @@
   </div>
 </div>
 
+<div class="modal" id="sppPicker" style="display:none">
+  <div class="modal-card" style="max-height:80vh;display:flex;flex-direction:column">
+    <div class="modal-title" id="sppPickerTitle">Choose a species</div>
+    <input id="sppPickerSearch" type="text" placeholder="Type to search name or code…" autocomplete="off" oninput="filterSppPicker()" style="margin-bottom:8px">
+    <div id="sppPickerList" class="picklist" style="overflow:auto;flex:1"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" type="button" onclick="closeSppPicker()">Cancel</button>
+      <button class="btn ghost" type="button" onclick="addFromPicker()">＋ Add new…</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="reportModal" style="display:none">
   <div class="modal-card">
     <div class="modal-title">Analyze &amp; email report</div>
@@ -805,7 +827,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v83";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v84";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -885,14 +907,46 @@ function sppSelect(s){
   s.innerHTML = `<option value="">—</option>` +
     ordered.map(o=>`<option value="${esc(o.code)}">${esc(o.code)} — ${esc(o.name)}</option>`).join("") +
     `<option value="${ADD_SENTINEL}">＋ Add species…</option>`;
+  if(!s._pickerBound){ s._pickerBound=true; s.addEventListener("mousedown",sppPickerOpen_); }   // tap opens the searchable picker
 }
+// Searchable species picker — opens over any tree/regen/Ht-tree species select.
+let _sppTarget=null, _sppShrub=false, _sppItems=[];
+function sppPickerOpen_(ev){
+  const el=ev.currentTarget; ev.preventDefault(); if(el.blur) el.blur();
+  _sppTarget=el; _sppShrub=el.classList.contains("p_sp") && !!el.closest("#shrubRows");
+  if(_sppShrub){
+    _sppItems=[...SHRUB_SPECIES.filter(Boolean),...customShrub].filter((v,i,a)=>a.findIndex(x=>x.toLowerCase()===v.toLowerCase())===i)
+      .map(n=>({code:"",name:n,val:n}));
+  } else {
+    const opts=SPECIES.filter(([c])=>c!=="").map(([c,l])=>({code:c,name:l.slice(c.length+1)})).concat(customTree.map(o=>({code:o.code,name:o.name})));
+    const used=opts.filter(o=>(speciesUse[o.code]||0)>0).sort((a,b)=>(speciesUse[b.code]-speciesUse[a.code]));
+    const rest=opts.filter(o=>!(speciesUse[o.code]||0)).sort((a,b)=>a.code.toLowerCase().localeCompare(b.code.toLowerCase()));
+    _sppItems=used.concat(rest).map(o=>({code:o.code,name:o.name,val:o.code}));
+  }
+  $("sppPickerTitle").textContent=_sppShrub?"Choose a shrub":"Choose a species";
+  $("sppPickerSearch").value=""; $("sppPicker").style.display="flex"; renderSppPicker_(_sppItems);
+  setTimeout(()=>$("sppPickerSearch").focus(),40);
+}
+function renderSppPicker_(items){
+  $("sppPickerList").innerHTML = items.length ? items.map(o=>
+    `<button type="button" class="pick" onclick="pickSpp('${esc(o.val)}')">${o.code?`<b>${esc(o.code)}</b> — `:""}${esc(o.name)}</button>`).join("")
+    : `<div class="hint" style="padding:10px">No match. Tap “＋ Add new…” to create it.</div>`;
+}
+function filterSppPicker(){ const q=$("sppPickerSearch").value.trim().toLowerCase();
+  renderSppPicker_(!q?_sppItems:_sppItems.filter(o=>o.name.toLowerCase().includes(q)||o.code.toLowerCase().includes(q))); }
+function pickSpp(val){ if(_sppTarget){ setSel(_sppTarget,val); if(val&&val!==ADD_SENTINEL){ _sppTarget.classList.remove("needs-entry"); bumpSpeciesUse_(val); }
+    _sppTarget.dispatchEvent(new Event("change",{bubbles:true})); } closeSppPicker(); }
+function addFromPicker(){ const t=_sppTarget, sh=_sppShrub, q=$("sppPickerSearch").value.trim(); closeSppPicker();
+  openAddSpecies(t,sh); if(q) $("addModalInput").value=q; }
+function closeSppPicker(){ $("sppPicker").style.display="none"; _sppTarget=null; }
 function shrubSelect(s){
   const seen=new Set(), list=[];
   SHRUB_SPECIES.concat(customShrub).forEach(v=>{ v=String(v); if(v==="") return; const k=v.toLowerCase(); if(!seen.has(k)){ seen.add(k); list.push(v); } });
   list.sort((a,b)=>a.toLowerCase().localeCompare(b.toLowerCase()));
   s.innerHTML = `<option value="">—</option>` +
     list.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join("") +
-    `<option value="${ADD_SENTINEL}">＋ Add shrub…</option>`; }
+    `<option value="${ADD_SENTINEL}">＋ Add shrub…</option>`;
+  if(!s._pickerBound){ s._pickerBound=true; s.addEventListener("mousedown",sppPickerOpen_); } }
 function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function pad(n){ return String(n).padStart(2,"0"); }
 function nowStr(){ const d=new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }
@@ -1159,6 +1213,21 @@ function confirmAddSpecies(){
     else if(pendingTract){ addTract(name); queueTract(name); tractSelect(); setSel($("TRACT"),name); toast(`Added ${name}`); }
     else {
       const code = pendingShrub ? "" : ($("addModalCode").value.trim().replace(/[^A-Za-z]/g,"") || suggestCode(name));
+      // Don't add a duplicate: if this species/shrub already exists (by name, or by code for trees), just select it.
+      const lc=name.toLowerCase();
+      const dupTree = !pendingShrub && (SPECIES.some(([c,l])=>l.slice(c.length+1).toLowerCase()===lc || c.toLowerCase()===code.toLowerCase())
+                       || customTree.some(o=>o.name.toLowerCase()===lc || o.code.toLowerCase()===code.toLowerCase()));
+      const dupShrub = pendingShrub && (SHRUB_SPECIES.some(s=>s.toLowerCase()===lc) || customShrub.some(s=>String(s).toLowerCase()===lc));
+      if(dupTree || dupShrub){
+        let val=name;
+        if(!pendingShrub){ const hit=SPECIES.find(([c,l])=>l.slice(c.length+1).toLowerCase()===lc)||null;
+          val = hit ? hit[0] : (customTree.find(o=>o.name.toLowerCase()===lc)||{code}).code; }
+        refreshSpeciesSelects();
+        if(pendingSel){ setSel(pendingSel,val); if(val) pendingSel.classList.remove("needs-entry"); }
+        updateTally(); toast(`${name} is already in the list — selected it`);
+        if(quickAddAfter){ quickAddAfter=false; addQuick(val); }
+        closeAddSpecies(); return;
+      }
       addSpeciesToList(name, pendingShrub, code);
       flushSpecies();                 // upload to the shared list (queues if offline)
       refreshSpeciesSelects();
@@ -1442,7 +1511,7 @@ function renderSaved(){
     saved.map((p,i)=>`<tr><td class="num">${esc(p.STANDID||"—")}</td><td class="num">${esc(p.PLOTNUM||"—")}</td>
       <td class="num">${p._trees||0}</td>
       <td>${p._sent?`<span class="st sent">sent</span>`:`<span class="st queued">queued</span>`}</td>
-      <td style="text-align:right"><button class="tbtn" onclick="editPlot(${i})">Edit</button>${p._sent?"":`<button class="tbtn" onclick="resend(${i})">Send</button>`}<button class="tbtn del" onclick="delPlot(${i})">✕</button></td></tr>`).join("")+
+      <td style="text-align:right"><button class="tbtn" onclick="editPlot(${i})">Edit</button>${p._sent?"":`<button class="tbtn" onclick="resend(${i})">Send</button>`}<button class="tbtn del" onclick="delPlot(${i})" title="Delete this plot">🗑 Delete</button></td></tr>`).join("")+
     `</tbody></table>`;
 }
 let lastDeleted=null;
@@ -2312,6 +2381,10 @@ $("STANDID").addEventListener("change", ()=>{
 });
 addTree(); setNow(); renderGround([]); renderSaved(); updateTally(); netDot(); autoGPS();
 setField($("PLOTNUM"), nextPlotFor($("STANDID").value));
+// Start on the map with the capture flow — unless we're resuming an unsaved draft.
+try{ const hasDraft = STORE && STORE.getItem(DRAFTKEY);
+  if(!hasDraft) setTimeout(()=>{ try{ startCapture(); }catch(e){} }, 400);
+}catch(e){}
 // Opening a category slides it up so its header sits just under the top bar.
 document.querySelectorAll("details.sec").forEach(sec=>{
   sec.addEventListener("toggle", ()=>{ if(sec.open) setTimeout(()=>scrollRowIntoView(sec),0); });
@@ -2428,6 +2501,7 @@ async function openMap(){
 }
 function closeMap(){ $("mapView").style.display="none"; stopMapGPS(); if(crewTimer){ clearInterval(crewTimer); crewTimer=null; } if(crewRoutesTimer){ clearInterval(crewRoutesTimer); crewRoutesTimer=null; } if(liveOn) stopLive();
   if(typeof placeMode!=="undefined" && placeMode){ placeMode=false; if(placeMarker){ fmap.removeLayer(placeMarker); placeMarker=null; } $("toolPlace").classList.remove("on"); resetDropBar(); }
+  if(typeof captureMode!=="undefined" && captureMode){ captureMode=false; const ch=$("mapCrosshair"); if(ch) ch.style.display="none"; resetDropBar(); }
   if(typeof measureMode!=="undefined" && measureMode) clearMeasure();
   if(typeof routeMode!=="undefined" && routeMode){ routeMode=false; $("toolRoute").classList.remove("on"); $("routeBar").style.display="none"; drawRoute(); }
   if(typeof polyMode!=="undefined" && polyMode){ polyMode=false; $("toolPoly").classList.remove("on"); $("polyBar").style.display="none"; drawPoly(); }
@@ -2737,7 +2811,7 @@ function nearbyPlotPopup_(latlng){
   const near=(lat,lon)=>{ if(!isFinite(lat)||!isFinite(lon)) return 1e9; const p=fmap.latLngToContainerPoint([lat,lon]); return Math.hypot(p.x-tp.x,p.y-tp.y); };
   let best=null;
   saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X), d=near(lat,lon);
-    if(d<=BUF && (!best||d<best.d)) best={d,lat,lon,html:`<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b><br>${(p.DATE||"").slice(0,16)}<br><a href="javascript:void(0)" onclick="editFromMap(${i})">Edit this plot ›</a></div>`}; });
+    if(d<=BUF && (!best||d<best.d)) best={d,lat,lon,html:`<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b><br>${(p.DATE||"").slice(0,16)}<br><a href="javascript:void(0)" onclick="editFromMap(${i})">Edit ›</a> &nbsp; <a href="javascript:void(0)" style="color:#b23b32" onclick="delFromMap(${i})">Delete ✕</a></div>`}; });
   if(!best && crewShown && crewData.length) crewData.forEach(r=>{ const lat=parseFloat(r.lat), lon=parseFloat(r.lon), d=near(lat,lon);
     if(d<=BUF && (!best||d<best.d)) best={d,lat,lon,html:`<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(r.stand||"—")} · plot ${esc(r.plot||"?")}</b><br>${esc(r.cruiser||"")}</div>`}; });
   if(!best && refLabels && refLabels.length) refLabels.forEach(r=>{ const d=near(r.lat,r.lng);
@@ -2755,6 +2829,7 @@ function renderMapPins(){ if(!fpins) return; fpins.clearLayers();
   });
 }
 function editFromMap(i){ closeMap(); editPlot(i); }
+function delFromMap(i){ if(fmap) fmap.closePopup(); delPlot(i); renderMapPins(); }
 
 /* ----- set the current plot's location + auto Stand ID ----- */
 /* accuracy-weighted average of the last few seconds of fixes (the watch is already running,
@@ -2943,6 +3018,35 @@ function confirmPlace(){
   toast(stand?`Location set · Stand ID → ${stand}`:"Location set — choose Stand ID");
 }
 function resetDropBar(){ $("mapDrop").innerHTML='<button class="dropbtn" type="button" onclick="dropAtMe()">＋ Drop plot at my location</button>'; }
+
+// Capture-point flow: open on the map with a crosshair, let the user either drag the map so the
+// crosshair sits where they want, or grab a GPS fix — then open the form for data entry.
+let captureMode=false;
+function startCapture(){
+  captureMode=true; openMap();
+  const show=()=>{ if(!fmap){ setTimeout(show,120); return; }
+    $("mapCrosshair").style.display="block";
+    $("mapDrop").innerHTML =
+      '<div style="display:flex;gap:8px;width:100%">'+
+        '<button class="dropbtn" type="button" style="flex:1" onclick="captureAtCrosshair()">✓ Use crosshair here</button>'+
+        '<button class="dropbtn" type="button" style="flex:1;background:#2f6b3a" onclick="captureAtGPS()">📍 Use my GPS</button>'+
+      '</div>';
+    if(mePos){ try{ fmap.setView([mePos.lat,mePos.lon], Math.max(fmap.getZoom(),17)); }catch(e){} }
+    toast("Pan the map so the crosshair is on the spot, then “Use crosshair” — or tap “Use my GPS”.");
+  };
+  show();
+}
+function endCapture_(){ captureMode=false; $("mapCrosshair").style.display="none"; resetDropBar(); }
+function captureAtCrosshair(){
+  const c=fmap.getCenter(); fillPlace(c.lat,c.lng);
+  endCapture_(); closeMap();   // closing the map returns to the form for data entry
+  toast("Location set — enter your plot data");
+}
+function captureAtGPS(){
+  if(!mePos){ toast("No GPS fix yet — pan to the spot and use the crosshair instead",true); return; }
+  const a=avgPos_()||mePos; setLocation(a.lat,a.lon,(a.n&&a.n>1)?`your location · avg ${a.n} fixes`:"your location",a.alt);
+  endCapture_(); closeMap(); toast("Location set from GPS — enter your plot data");
+}
 
 /* ---- measure distance / area ---- */
 function toggleMeasure(){
