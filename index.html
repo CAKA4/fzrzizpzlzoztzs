@@ -39,8 +39,10 @@
     background:#12201a; border-bottom:1px solid var(--line);
     color:var(--text); padding:max(12px,env(safe-area-inset-top)) 16px 12px;
     box-shadow:0 2px 12px rgba(0,0,0,.4); }
-  .appbar h1{ margin:0; font-size:18px; letter-spacing:.04em; font-weight:700; text-transform:uppercase;
-    display:flex; align-items:center; gap:8px; }
+  .appbar h1{ margin:0; font-size:16px; letter-spacing:.03em; font-weight:700; text-transform:uppercase;
+    display:flex; align-items:center; gap:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; flex:1 1 auto; }
+  .appbar-top{ display:flex; align-items:center; gap:8px; }
+  .appbar-btns{ display:flex; align-items:center; gap:6px; flex:none; }
   .appbar .sub{ font-size:12.5px; color:#86a08c; margin-top:3px; letter-spacing:.02em }
   .buildstamp{ font-size:11px; color:#6f8a78; margin-top:2px; letter-spacing:.03em; font-family:var(--mono); cursor:pointer; display:inline-block; -webkit-tap-highlight-color:transparent }
   .buildstamp:active{ color:#9fc6a8 }
@@ -340,12 +342,16 @@
 </head>
 <body>
 <div class="appbar">
-  <span class="chip" id="savedChip">0 saved</span>
-  <button class="mapbtn" type="button" onclick="openMore()">⋯</button>
-  <button class="mapbtn" type="button" onclick="showFormHelp()" title="How to use the form">?</button>
-  <button class="mapbtn" type="button" onclick="startCapture()" title="Capture a plot location">🎯 Capture</button>
-  <button class="mapbtn" type="button" onclick="openMap()">🗺 Map</button>
-  <h1>🌲 Forest Inventory</h1>
+  <div class="appbar-top">
+    <h1>🌲 Forest Inventory</h1>
+    <div class="appbar-btns">
+      <button class="mapbtn" type="button" onclick="openMap()" title="Map">🗺</button>
+      <button class="mapbtn" type="button" onclick="startCapture()" title="Capture a plot location">🎯</button>
+      <button class="mapbtn" type="button" onclick="showFormHelp()" title="How to use the form">?</button>
+      <button class="mapbtn" type="button" onclick="openMore()" title="More">⋯</button>
+      <span class="chip" id="savedChip">0 saved</span>
+    </div>
+  </div>
   <div class="buildstamp" id="buildStamp" role="button" tabindex="0" title="Tap to update to the latest version" onclick="forceUpdate()"></div>
   <div class="hdrstats">
     <span class="hs"><span class="lab">Stems</span><b id="tStems">0</b></span>
@@ -668,6 +674,7 @@
 </div>
 <input type="file" id="boundInput" style="display:none">
 <input type="file" id="pointsInput" style="display:none">
+<input type="file" id="importPlotsInput" accept=".zip,.shp,.dbf,.geojson,.json,.csv,.tsv,.txt" style="display:none">
 <input type="file" id="pdfInput" accept=".pdf,application/pdf" style="display:none">
 
 <div class="modal" id="photoArchive" style="display:none">
@@ -724,6 +731,9 @@
       <button type="button" onclick="closeMore();openReportModal()">📧 Analyze &amp; email report (Excel)</button>
       <button type="button" onclick="closeMore();reattributePlots()">🧭 Re-attribute plots to compartments</button>
       <button type="button" onclick="closeMore();openTractAssign()">🏷 Assign tract / property to plots</button>
+      <button type="button" onclick="closeMore();openImportPlots()">📥 Import past plots (audit)</button>
+      <button type="button" id="pushAuditBtn" onclick="closeMore();pushAuditToSheet()" style="display:none">📤 Push audit plots to the Sheet</button>
+      <button type="button" id="clearAuditBtn" onclick="closeMore();clearAuditPlots()" style="display:none">🗑 Clear audit plots</button>
       <button type="button" onclick="closeMore();clearAllData()" style="color:#e9a89f">🗑 Start new project (erase all data)</button>
     </div>
     <div class="modal-actions"><button class="btn ghost" type="button" onclick="closeMore()">Close</button></div>
@@ -836,7 +846,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v86";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v89";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1422,6 +1432,14 @@ function submitPlot(){
 }
 function finalizeSubmit(d){
   d._sent=false; d._ts=nowStr();
+  // Editing an imported audit plot: keep it in the audit set (push to Sheet later, deliberately).
+  if(editingAudit!=null){
+    d._audit=true; d._id=(auditPlots[editingAudit]&&auditPlots[editingAudit]._id)||genId();
+    d._src=(auditPlots[editingAudit]||{})._src; d._dup=(auditPlots[editingAudit]||{})._dup||false; d._trees=treeCount();
+    auditPlots[editingAudit]=d; persistAudit(); editingAudit=null; setEditMode(false);
+    clearDraft(); nextPlot(); renderSaved();
+    window.scrollTo({top:0,behavior:"smooth"}); toast("Audit plot updated"); return;
+  }
   const isUpdate = editingIndex!=null;
   if(isUpdate){ d._id = saved[editingIndex]._id || genId(); saved[editingIndex]=d; }
   else { d._id = genId(); saved.push(d); }
@@ -1486,21 +1504,155 @@ function cancelEdit(){ editingIndex=null; setEditMode(false); clearDraft(); next
 // Cancel the current entry. Editing an existing plot → discard changes, plot stays as-is on the map.
 // A new (unsaved) plot → discard it entirely; nothing gets mapped.
 function cancelPlot(){
-  const editing = editingIndex!=null;
+  const editing = editingIndex!=null || editingAudit!=null;
   const msg = editing
-    ? "Discard your changes to this plot?\n\nThe saved version stays unchanged and on the map."
+    ? "Discard your changes to this plot?\n\nThe saved version stays unchanged."
     : "Discard this new plot?\n\nNothing has been saved, so it won't be mapped.";
   if(!confirm(msg)) return;
-  editingIndex=null; setEditMode(false); clearDraft(); nextPlot();
+  editingIndex=null; editingAudit=null; setEditMode(false); clearDraft(); nextPlot();
   toast(editing?"Changes discarded":"Plot discarded");
   openMap();   // back to the map, ready for the next one
 }
-function setEditMode(on){
+let editingAudit=null;
+function setEditMode(on,audit){
   $("editBanner").style.display = on?"block":"none";
+  if(on){ $("editBanner").innerHTML = audit
+    ? '🔍 Editing an <b>imported audit plot</b> — changes stay in the audit set. <a href="javascript:void(0)" onclick="cancelPlot()">Cancel</a>'
+    : '✏️ Editing a saved plot — make changes, then tap <b>Update plot</b>. <a href="javascript:void(0)" onclick="cancelEdit()">Cancel</a>'; }
   document.querySelector(".btn.submit").textContent = on?"Update plot":"Submit plot";
 }
 
 function persist(){ if(STORE){ try{ STORE.setItem(PKEY, JSON.stringify(saved)); }catch(e){} } }
+
+/* ---------- Import past-collected plots (audit set) ----------
+   Reads a zipped shapefile (or .dbf/.geojson) of previously collected FRI plots, matches fields to
+   this app's schema (auto-handling ArcGIS's truncated names like T1SP______ → T1SP), converts UTM
+   X/Y to lat/lon, and stores them in a SEPARATE audit set. Audit plots can be opened/edited and
+   later pushed to the Sheet for analysis; duplicates (same Stand+Plot) are flagged, not merged. */
+const AUDITKEY="fi_auditplots";
+let auditPlots=[];
+if(STORE){ try{ const raw=STORE.getItem(AUDITKEY); if(raw) auditPlots=JSON.parse(raw)||[]; }catch(e){ auditPlots=[]; } }
+function persistAudit(){ if(STORE){ try{ STORE.setItem(AUDITKEY, JSON.stringify(auditPlots)); }catch(e){} } }
+
+// The app's own plot field names — anything matching one of these (after normalizing) is kept.
+function appPlotFields_(){
+  const f=["ID","STANDID","TRACT","PLOTNUM","DATE","TIME","AGE","HT","FLAG","TEXTURE","MOISTURE","DEPTH","STYPE",
+    "ECOSITE","TOPOGRAPHY","ROCKINESS","ADVANREGEN","EARLYREGEN","HARVEST","RENEWAL","TENDING","CC","EDITED",
+    "HTDBH","AGECORED","HTSPP","CAI","ACCESS","COMMENT","X","Y","Z","STBNDRY","STICNEST","HERBS","MOSS","GRASSEDG",
+    "GRNDSPEC","SAROSPEC","DSV","EUROBUCK","GARLMUST","MANIMAPL","INVASP","INVAQUAN","OTHEREC","POISIVY","PHOTONUM",
+    "LCR","WILDLIFE","HYDRO","INSEDISE","SITEDAMG","STRMDAMG","PESTS","PESTQUAN","DISEASE","RPD","DISEQUAN","AREASRC","CRUISER_EMAIL"];
+  for(let i=1;i<=28;i++) f.push(`T${i}SP`,`T${i}S`,`T${i}Q`,`T${i}QL`,`T${i}LOGS`);
+  for(let i=1;i<=5;i++) f.push(`ADRGNSP${i}`,`ADRGNN${i}`,`EARGNSP${i}`,`EARGNN${i}`,`SHRUBSP${i}`,`SHRUBN${i}`);
+  return f;
+}
+// Normalize an incoming field name: strip ArcGIS's trailing underscores + upper-case (T1SP______ → T1SP).
+function normField_(k){ return String(k||"").replace(/_+$/,"").trim().toUpperCase(); }
+
+function openImportPlots(){ $("importPlotsInput").click(); }
+function importPlotsFile(file){
+  const lower=(file.name||"").toLowerCase();
+  toast("Reading plots…");
+  const go=fc=>handleImportedFC_(fc,file.name);
+  if(lower.endsWith(".geojson")||lower.endsWith(".json")) file.text().then(t=>ensureWGS84(JSON.parse(t))).then(go).catch(()=>toast("Bad GeoJSON",true));
+  else if(lower.endsWith(".csv")||lower.endsWith(".tsv")||lower.endsWith(".txt")) file.text().then(t=>ensureWGS84(csvToFC_(t))).then(go).catch(e=>toast("CSV error: "+(e&&e.message||e),true));
+  else if(lower.endsWith(".shp")||lower.endsWith(".zip")||lower.endsWith(".dbf")) file.arrayBuffer().then(b=>shp(b)).then(ensureWGS84).then(go).catch(e=>toast("Shapefile error: "+(e&&e.message||e),true));
+  else toast("Use a zipped shapefile (.zip), .csv or .geojson",true);
+}
+// Parse CSV/TSV into a GeoJSON FeatureCollection so it flows through the same field-matching + UTM
+// reprojection as shapefiles. Handles quoted fields, commas/tabs, and \r\n. Builds Point geometry
+// from X/Y (or lon/lat / easting/northing) so projected coords get reprojected by ensureWGS84.
+function csvToFC_(text){
+  const rows=parseDelimited_(text); if(rows.length<2) throw new Error("no rows");
+  const head=rows[0].map(h=>String(h||"").trim());
+  const find=(...names)=>{ for(const n of names){ const i=head.findIndex(h=>h.toLowerCase()===n); if(i>=0) return i; } return -1; };
+  const xi=find("x","lon","long","longitude","easting"), yi=find("y","lat","latitude","northing");
+  const feats=[];
+  for(let r=1;r<rows.length;r++){ const row=rows[r]; if(!row.length||row.every(c=>String(c||"").trim()==="")) continue;
+    const props={}; head.forEach((h,i)=>{ if(h!=="") props[h]=row[i]!==undefined?row[i]:""; });
+    let geom=null;
+    if(xi>=0&&yi>=0){ const x=parseFloat(row[xi]), y=parseFloat(row[yi]); if(isFinite(x)&&isFinite(y)) geom={type:"Point",coordinates:[x,y]}; }
+    feats.push({type:"Feature",properties:props,geometry:geom});
+  }
+  return {type:"FeatureCollection",features:feats};
+}
+function parseDelimited_(text){
+  text=String(text).replace(/^\uFEFF/,"");                          // strip BOM
+  const tab=(text.split("\t").length-1)>(text.split(",").length-1); // pick tab vs comma by which is more common
+  const D=tab?"\t":","; const rows=[]; let row=[], cur="", q=false;
+  for(let i=0;i<text.length;i++){ const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){ cur+='"'; i++; } else q=false; } else cur+=c; }
+    else if(c==='"') q=true;
+    else if(c===D){ row.push(cur); cur=""; }
+    else if(c==="\n"){ row.push(cur); rows.push(row); row=[]; cur=""; }
+    else if(c==="\r"){ /* handled by \n */ }
+    else cur+=c;
+  }
+  if(cur!==""||row.length){ row.push(cur); rows.push(row); }
+  return rows;
+}
+function handleImportedFC_(fc,fname){
+  const cols=Array.isArray(fc)?fc:[fc];
+  const feats=[]; cols.forEach(c=>{ if(c&&c.features) feats.push(...c.features); });
+  if(!feats.length){ toast("No plot records found in that file",true); return; }
+  const appF=new Set(appPlotFields_());
+  const matched=new Set(), skipped=new Set();
+  const key=p=>`${String(p.STANDID||"").trim().toLowerCase()}\u0001${String(p.PLOTNUM||"").trim()}`;
+  const haveKeys=new Set(saved.map(key).concat(auditPlots.map(key)));
+  const out=[]; let dups=0;
+  feats.forEach(f=>{
+    const props=f.properties||{}; const p={_audit:true, _src:fname||"import"};
+    Object.keys(props).forEach(k=>{ const nf=normField_(k); if(appF.has(nf)){ matched.add(nf); if(props[k]!=null&&props[k]!=="") p[nf]=props[k]; } else if(String(props[k]||"")!=="") skipped.add(k); });
+    // geometry → lat/lon (ensureWGS84 already reprojected any UTM); prefer geometry, fall back to X/Y
+    let lon=null,lat=null; const g=f.geometry;
+    if(g&&g.type==="Point"&&Array.isArray(g.coordinates)){ lon=+g.coordinates[0]; lat=+g.coordinates[1]; }
+    if(isFinite(lat)&&isFinite(lon)){ p.Y=lat; p.X=lon; }               // map coords are lat/lon
+    // normalize types
+    if(p.DATE instanceof Date) p.DATE=p.DATE.toISOString();
+    if(p.DATE&&typeof p.DATE!=="string") p.DATE=String(p.DATE);
+    p.PLOTNUM = (p.PLOTNUM!=null&&p.PLOTNUM!=="")? String(parseInt(p.PLOTNUM,10)||p.PLOTNUM) : p.PLOTNUM;
+    p._id = p._id || genId(); p._sent=false;
+    p._trees = countImpTrees_(p);
+    p._dup = haveKeys.has(key(p)); if(p._dup) dups++;
+    out.push(p);
+  });
+  auditPlots = auditPlots.concat(out); persistAudit(); renderSaved();
+  const msg = `Imported ${out.length} plot${out.length===1?"":"s"} to the audit set`+
+    (dups?` · ${dups} flagged as possible duplicate${dups===1?"":"s"}`:"")+
+    ` · matched ${matched.size} fields`+(skipped.size?` · skipped ${skipped.size} unrecognised`:"");
+  showImportSummary_(out.length,dups,[...matched].sort(),[...skipped].sort(),fname);
+  toast(msg);
+}
+function countImpTrees_(p){ let n=0; for(let i=1;i<=28;i++){ const sp=p[`T${i}SP`]; if(sp&&!isStruct_(sp)) n++; } return n; }
+function showImportSummary_(n,dups,matched,skipped,fname){
+  let h=`<div style="color:#dcefe0;font-size:13px;line-height:1.4"><b>${esc(fname||"file")}</b><br>`+
+    `${n} plot${n===1?"":"s"} added to the <b>audit set</b>.</div>`;
+  if(dups) h+=`<div style="margin-top:8px;color:#e8b84b;font-size:12.5px">⚠ ${dups} plot${dups===1?"":"s"} match a Stand+Plot you already have — flagged for review (look for the “dup?” tag in the audit list).</div>`;
+  h+=`<div style="margin-top:10px;color:#8fe6a0;font:600 12px system-ui">Matched fields (${matched.length})</div>`+
+     `<div style="color:#a9c9b0;font-size:11px;font-family:monospace;max-height:80px;overflow:auto">${matched.map(esc).join(", ")||"—"}</div>`;
+  if(skipped.length) h+=`<div style="margin-top:8px;color:#8fb89a;font:600 12px system-ui">Skipped — not in this app (${skipped.length})</div>`+
+     `<div style="color:#8fb89a;font-size:11px;font-family:monospace;max-height:60px;overflow:auto">${skipped.map(esc).join(", ")}</div>`;
+  h+=`<div style="margin-top:12px;color:#cdebcf;font-size:12px">Open the map or the Saved-plots list to review them (audit plots are shown in blue). When ready, use <b>⋯ More → Push audit plots to the Sheet</b>.</div>`;
+  showInfoSheet_("Plots imported", h);
+}
+// Push audit plots into the live Sheet (for analysis). They become normal sent plots.
+function pushAuditToSheet(){
+  if(!auditPlots.length){ toast("No audit plots to push",true); return; }
+  if(!connected){ toast("Connect to a Sheet first",true); return; }
+  const dups=auditPlots.filter(p=>p._dup).length;
+  if(!confirm(`Send ${auditPlots.length} audit plot${auditPlots.length===1?"":"s"} to the Google Sheet for analysis?`+
+    (dups?`\n\n${dups} are flagged as possible duplicates of plots you already have — they'll be sent too.`:"")+
+    `\n\nThey'll move into your normal plots and be included in summaries.`)) return;
+  let moved=0;
+  auditPlots.slice().forEach(p=>{ const q=Object.assign({},p); delete q._audit; delete q._dup; delete q._src; q._sent=false;
+    saved.push(q); send(q,true); moved++; });
+  auditPlots=[]; persistAudit(); persist(); renderSaved(); netDot();
+  toast(`Pushed ${moved} plot${moved===1?"":"s"} to the Sheet — rebuild the summary to include them`);
+}
+function clearAuditPlots(){
+  if(!auditPlots.length){ toast("No audit plots",true); return; }
+  if(!confirm(`Remove all ${auditPlots.length} audit plots from this device? (Your own saved plots are not affected.)`)) return;
+  auditPlots=[]; persistAudit(); renderSaved(); if(fmap) renderMapPins(); toast("Audit plots cleared");
+}
 function nextPlotFor(stand){
   let max=0; const s=stand||"";
   saved.forEach(p=>{ if((p.STANDID||"")===s){ const n=parseInt(p.PLOTNUM,10); if(!isNaN(n)&&n>max) max=n; } });
@@ -1534,7 +1686,22 @@ function renderSaved(){
       <td>${p._sent?`<span class="st sent">sent</span>`:`<span class="st queued">queued</span>`}</td>
       <td style="text-align:right"><button class="tbtn" onclick="editPlot(${i})">Edit</button>${p._sent?"":`<button class="tbtn" onclick="resend(${i})">Send</button>`}<button class="tbtn del" onclick="delPlot(${i})" title="Delete this plot">🗑 Delete</button></td></tr>`).join("")+
     `</tbody></table>`;
+  // Audit set (imported past plots) — shown separately, editable, with duplicate flags.
+  { const pb=$("pushAuditBtn"), cb=$("clearAuditBtn");
+    if(pb) pb.style.display=auditPlots.length?"block":"none";
+    if(cb) cb.style.display=auditPlots.length?"block":"none"; }
+  if(auditPlots.length){
+    c.innerHTML += `<div class="layer-hd" style="margin:14px 0 4px;color:#7ab0d8">Imported audit plots (${auditPlots.length})</div>`+
+      `<table class="saved"><thead><tr><th>Stand</th><th>Plot</th><th>Trees</th><th>Flag</th><th></th></tr></thead><tbody>`+
+      auditPlots.map((p,i)=>`<tr><td class="num">${esc(p.STANDID||"—")}</td><td class="num">${esc(p.PLOTNUM||"—")}</td>
+        <td class="num">${p._trees||0}</td>
+        <td>${p._dup?`<span class="st" style="background:#4a3a12;color:#e8c86a">dup?</span>`:`<span class="st" style="background:#12324a;color:#7ab0d8">audit</span>`}</td>
+        <td style="text-align:right"><button class="tbtn" onclick="editAudit(${i})">Edit</button><button class="tbtn del" onclick="delAudit(${i})" title="Remove from audit set">🗑</button></td></tr>`).join("")+
+      `</tbody></table>`;
+  }
 }
+function editAudit(i){ const p=auditPlots[i]; if(!p) return; loadPlot(p); editingAudit=i; editingIndex=null; setEditMode(true,true); window.scrollTo({top:0,behavior:"smooth"}); }
+function delAudit(i){ const p=auditPlots[i]; if(!p) return; if(!confirm(`Remove audit plot ${p.STANDID||"—"} / ${p.PLOTNUM||"—"} from this device?`)) return; auditPlots.splice(i,1); persistAudit(); renderSaved(); if(fmap) renderMapPins(); }
 let lastDeleted=null;
 function delPlot(i){
   const p=saved[i]; if(!p) return;
@@ -2462,6 +2629,7 @@ flushSpecies(); fetchSpecies(); // sync the shared species list
 flushTracts(); fetchTracts(); // sync the shared tract list
 flushPhotos(); updateArchiveBadge(); // upload any photos queued before the app was last closed, and show the on-device count
 $("restoreInput").addEventListener("change", e=>{ const f=e.target.files[0]; e.target.value=""; if(f) importBackup(f); }); // restore from a backup file
+$("importPlotsInput").addEventListener("change", e=>{ const f=e.target.files[0]; e.target.value=""; if(f) importPlotsFile(f); }); // import past plots (audit set)
 // draft auto-save: persist the in-progress plot continuously, and flush immediately if the app is hidden/closed
 ["input","change"].forEach(ev=>document.addEventListener(ev, scheduleDraftSave, true));
 document.addEventListener("visibilitychange", ()=>{ if(document.hidden) saveDraft(); });
@@ -2853,7 +3021,15 @@ function renderMapPins(){ if(!fpins) return; fpins.clearLayers();
     L.marker([lat,lon],{icon}).addTo(fpins)
       .bindPopup(plotPopupHtml_(p,i));
   });
+  // Imported audit plots — blue, so they're visually distinct from your own plots.
+  auditPlots.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)) return;
+    const col=p._dup?"#e8b84b":"#4aa3e0";
+    const icon=L.divIcon({className:"",html:`<div style="width:22px;height:22px;border-radius:50%;background:${col};border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font:700 9px/1 'Courier New',monospace;color:#0a1a28">${esc(p.PLOTNUM||"?")}</div>`,iconSize:[22,22],iconAnchor:[11,11]});
+    L.marker([lat,lon],{icon}).addTo(fpins)
+      .bindPopup(`<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b> <span style="color:#2b6ea3">audit</span>${p._dup?' <span style="color:#b6791b">· dup?</span>':""}<br>${(p.DATE||"").slice(0,16)}<br><a href="javascript:void(0)" onclick="editAuditFromMap(${i})">🔍 Review / edit ›</a></div>`);
+  });
 }
+function editAuditFromMap(i){ closeMap(); editAudit(i); }
 function plotPopupHtml_(p,i){ return `<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b><br>${(p.DATE||"").slice(0,16)}<br><a href="javascript:void(0)" onclick="editFromMap(${i})">✎ Edit this plot ›</a> &nbsp; <a href="javascript:void(0)" style="color:#b23b32" onclick="delFromMap(${i})">Delete ✕</a></div>`; }
 function editFromMap(i){ closeMap(); editPlot(i); }
 function delFromMap(i){ if(fmap) fmap.closePopup(); delPlot(i); renderMapPins(); }
