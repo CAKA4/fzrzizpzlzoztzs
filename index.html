@@ -59,13 +59,17 @@
   #mapView{ display:none; position:fixed; inset:0; z-index:5000; background:#0a140a; }
   #fmap{ position:absolute; inset:0; top:52px; background:#0a140a; }
   .leaflet-container{ background:#0a140a; }
-  .map-top{ position:absolute; top:0; left:0; right:0; height:52px; z-index:5200;
+  .map-top{ position:absolute; top:0; left:0; right:0; min-height:52px; z-index:5200;
     background:#0f1e0d; border-bottom:1px solid var(--line2,#33623a);
-    display:flex; align-items:center; gap:8px; padding:0 10px; padding-top:env(safe-area-inset-top); }
+    display:flex; align-items:center; gap:6px; padding:6px 10px; padding-top:calc(6px + env(safe-area-inset-top)); }
   .map-back{ background:none; border:1px solid var(--line2,#33623a); color:#e8f0e6; font:inherit; font-size:13px;
-    padding:6px 12px; border-radius:7px; cursor:pointer; }
-  .map-load{ margin-left:auto; background:#16271a; border:1px solid var(--line2,#33623a); color:#bfe6cb; font:inherit;
-    font-size:11px; padding:6px 10px; border-radius:7px; cursor:pointer; font-family:var(--mono); }
+    padding:6px 12px; border-radius:7px; cursor:pointer; flex:none; }
+  .map-standpill{ font-family:var(--mono); text-align:center; flex:1 1 auto; min-width:0; overflow:hidden; }
+  .map-standpill .k{ display:block; font-size:8px; letter-spacing:.12em; text-transform:uppercase; color:#7a9a76; white-space:nowrap; }
+  .map-standpill b{ font-size:15px; color:#7a9a76; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; }
+  .map-standpill.in b{ color:#e8b84b; }
+  .map-load{ background:#16271a; border:1px solid var(--line2,#33623a); color:#bfe6cb; font:inherit;
+    font-size:11px; padding:6px 10px; border-radius:7px; cursor:pointer; font-family:var(--mono); flex:none; }
   .map-load.has{ border-color:#c8952a; color:#e8b84b; }
   .layers-menu{ position:absolute; top:calc(54px + env(safe-area-inset-top)); right:10px; z-index:5300; background:#0f1e0d; border:1px solid var(--line2,#33623a);
     border-radius:10px; padding:8px; box-shadow:0 6px 20px rgba(0,0,0,.6); display:flex; flex-direction:column; gap:6px; width:min(82vw,300px); max-height:calc(100vh - 80px - env(safe-area-inset-top)); overflow-y:auto; }
@@ -107,10 +111,6 @@
     background:rgba(15,30,13,.95); border:1px solid var(--line2,#33623a); border-radius:9px; padding:8px 11px; box-shadow:0 4px 16px rgba(0,0,0,.5); }
   .measure-bar #measureText{ font-family:var(--mono); font-size:12px; color:#e8b84b; white-space:normal; flex:1; min-width:0; line-height:1.3; }
   .measure-bar button{ flex:none; background:#16271a; border:1px solid var(--line2,#33623a); color:#cdebcf; font:inherit; font-size:11px; text-transform:uppercase; letter-spacing:.05em; padding:6px 10px; border-radius:7px; cursor:pointer; }
-  .map-standpill{ font-family:var(--mono); text-align:center; }
-  .map-standpill .k{ display:block; font-size:8px; letter-spacing:.12em; text-transform:uppercase; color:#7a9a76; }
-  .map-standpill b{ font-size:16px; color:#7a9a76; }
-  .map-standpill.in b{ color:#e8b84b; }
   .map-legend{ position:absolute; left:10px; bottom:118px; z-index:5200; font-family:var(--mono); font-size:10px;
     color:#9ab; background:rgba(15,30,13,.82); border:1px solid #284a2c; border-radius:7px; padding:6px 9px;
     display:flex; flex-direction:column; gap:3px; }
@@ -552,6 +552,7 @@
   <div class="liveread"><span class="dot" id="netDot"></span><b id="liveStems">0</b> stems · <b id="liveSaved">0</b> saved <span id="liveQueued"></span></div>
   <button class="btn ghost" type="button" onclick="exportCSV()">CSV</button>
   <button class="btn ghost" type="button" onclick="exportShapefile()">SHP</button>
+  <button class="btn ghost" type="button" onclick="cancelPlot()" title="Discard this entry">✕ Cancel</button>
   <button class="btn submit" type="button" onclick="submitPlot()">Submit plot</button>
 </div></div>
 
@@ -827,7 +828,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v84";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v85";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1474,6 +1475,18 @@ function grabPlot(i,mode){
   toast(mode==="all"?"Copied all fields — recapturing GPS":"Copied site fields — recapturing GPS");
 }
 function cancelEdit(){ editingIndex=null; setEditMode(false); clearDraft(); nextPlot(); }
+// Cancel the current entry. Editing an existing plot → discard changes, plot stays as-is on the map.
+// A new (unsaved) plot → discard it entirely; nothing gets mapped.
+function cancelPlot(){
+  const editing = editingIndex!=null;
+  const msg = editing
+    ? "Discard your changes to this plot?\n\nThe saved version stays unchanged and on the map."
+    : "Discard this new plot?\n\nNothing has been saved, so it won't be mapped.";
+  if(!confirm(msg)) return;
+  editingIndex=null; setEditMode(false); clearDraft(); nextPlot();
+  toast(editing?"Changes discarded":"Plot discarded");
+  openMap();   // back to the map, ready for the next one
+}
 function setEditMode(on){
   $("editBanner").style.display = on?"block":"none";
   document.querySelector(".btn.submit").textContent = on?"Update plot":"Submit plot";
@@ -2381,9 +2394,9 @@ $("STANDID").addEventListener("change", ()=>{
 });
 addTree(); setNow(); renderGround([]); renderSaved(); updateTally(); netDot(); autoGPS();
 setField($("PLOTNUM"), nextPlotFor($("STANDID").value));
-// Start on the map with the capture flow — unless we're resuming an unsaved draft.
+// On a fresh open, go to the map and zoom to what's loaded — the user taps "＋ New plot" when ready.
 try{ const hasDraft = STORE && STORE.getItem(DRAFTKEY);
-  if(!hasDraft) setTimeout(()=>{ try{ startCapture(); }catch(e){} }, 400);
+  if(!hasDraft) setTimeout(()=>{ try{ openMap(); setTimeout(fitAllLayers_,300); }catch(e){} }, 400);
 }catch(e){}
 // Opening a category slides it up so its header sits just under the top bar.
 document.querySelectorAll("details.sec").forEach(sec=>{
@@ -2497,6 +2510,7 @@ async function openMap(){
   drawRoute();
   drawPoly();
   startMapGPS();
+  if(!captureMode){ const ch=$("mapCrosshair"); if(ch) ch.style.display="none"; resetDropBar(); }   // default: New-plot button, no crosshair
   centerMap();
 }
 function closeMap(){ $("mapView").style.display="none"; stopMapGPS(); if(crewTimer){ clearInterval(crewTimer); crewTimer=null; } if(crewRoutesTimer){ clearInterval(crewRoutesTimer); crewRoutesTimer=null; } if(liveOn) stopLive();
@@ -2811,7 +2825,7 @@ function nearbyPlotPopup_(latlng){
   const near=(lat,lon)=>{ if(!isFinite(lat)||!isFinite(lon)) return 1e9; const p=fmap.latLngToContainerPoint([lat,lon]); return Math.hypot(p.x-tp.x,p.y-tp.y); };
   let best=null;
   saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X), d=near(lat,lon);
-    if(d<=BUF && (!best||d<best.d)) best={d,lat,lon,html:`<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b><br>${(p.DATE||"").slice(0,16)}<br><a href="javascript:void(0)" onclick="editFromMap(${i})">Edit ›</a> &nbsp; <a href="javascript:void(0)" style="color:#b23b32" onclick="delFromMap(${i})">Delete ✕</a></div>`}; });
+    if(d<=BUF && (!best||d<best.d)) best={d,lat,lon,html:plotPopupHtml_(p,i)}; });
   if(!best && crewShown && crewData.length) crewData.forEach(r=>{ const lat=parseFloat(r.lat), lon=parseFloat(r.lon), d=near(lat,lon);
     if(d<=BUF && (!best||d<best.d)) best={d,lat,lon,html:`<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(r.stand||"—")} · plot ${esc(r.plot||"?")}</b><br>${esc(r.cruiser||"")}</div>`}; });
   if(!best && refLabels && refLabels.length) refLabels.forEach(r=>{ const d=near(r.lat,r.lng);
@@ -2825,9 +2839,10 @@ function renderMapPins(){ if(!fpins) return; fpins.clearLayers();
   saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)) return;
     const icon=L.divIcon({className:"",html:`<div style="width:24px;height:24px;border-radius:50%;background:#e8b84b;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font:700 10px/1 'Courier New',monospace;color:#1a2e18">${esc(p.PLOTNUM||"?")}</div>`,iconSize:[24,24],iconAnchor:[12,12]});
     L.marker([lat,lon],{icon}).addTo(fpins)
-      .bindPopup(`<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b><br>${(p.DATE||"").slice(0,16)}<br><a href="javascript:void(0)" onclick="editFromMap(${i})">Edit this plot ›</a></div>`);
+      .bindPopup(plotPopupHtml_(p,i));
   });
 }
+function plotPopupHtml_(p,i){ return `<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b><br>${(p.DATE||"").slice(0,16)}<br><a href="javascript:void(0)" onclick="editFromMap(${i})">✎ Edit this plot ›</a> &nbsp; <a href="javascript:void(0)" style="color:#b23b32" onclick="delFromMap(${i})">Delete ✕</a></div>`; }
 function editFromMap(i){ closeMap(); editPlot(i); }
 function delFromMap(i){ if(fmap) fmap.closePopup(); delPlot(i); renderMapPins(); }
 
@@ -3017,7 +3032,17 @@ function confirmPlace(){
   $("toolPlace").classList.remove("on"); fmap.getContainer().style.cursor=""; resetDropBar(); closeMap();
   toast(stand?`Location set · Stand ID → ${stand}`:"Location set — choose Stand ID");
 }
-function resetDropBar(){ $("mapDrop").innerHTML='<button class="dropbtn" type="button" onclick="dropAtMe()">＋ Drop plot at my location</button>'; }
+function resetDropBar(){ $("mapDrop").innerHTML='<button class="dropbtn" type="button" onclick="startCapture()">＋ Create inventory plot</button>'; }
+// Zoom to fit everything currently loaded (plots, boundaries, imported points, track).
+function fitAllLayers_(){
+  if(!fmap) return; const b=[];
+  saved.forEach(p=>{ const y=parseFloat(p.Y),x=parseFloat(p.X); if(isFinite(y)&&isFinite(x)) b.push([y,x]); });
+  if(typeof BOUND!=="undefined"&&BOUND&&BOUND.features) collectCoords_(BOUND.features,b);
+  (refLabels||[]).forEach(r=>{ if(isFinite(r.lat)&&isFinite(r.lng)) b.push([r.lat,r.lng]); });
+  (trackLog||[]).forEach(t=>b.push(t));
+  if(b.length){ try{ fmap.fitBounds(b,{padding:[40,40],maxZoom:17}); }catch(e){} }
+  else if(mePos){ try{ fmap.setView([mePos.lat,mePos.lon],16); }catch(e){} }
+}
 
 // Capture-point flow: open on the map with a crosshair, let the user either drag the map so the
 // crosshair sits where they want, or grab a GPS fix — then open the form for data entry.
