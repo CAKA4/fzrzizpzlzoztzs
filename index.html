@@ -639,6 +639,7 @@
     <button class="map-tool" id="toolPoly" type="button" onclick="togglePoly()" title="Draw area polygon">⬠</button>
     <button class="map-tool" id="toolCount" type="button" onclick="countPoints()" title="Count points on the map (by layer &amp; compartment)">#️⃣</button>
     <button class="map-tool" id="toolCountPoly" type="button" onclick="countInPolygon()" title="Count points inside the drawn polygon">◎</button>
+    <button class="map-tool" id="toolSelect" type="button" onclick="toggleSelect()" title="Lasso-select plots (tap corners), then delete / export / email">☒</button>
     <button class="map-tool" id="toolPdf" type="button" onclick="togglePDF()" title="Show / hide PDF" style="display:none">🗺</button>
   </div>
   <div class="pdf-opacity-bar" id="pdfOpacityBar" style="display:none">
@@ -730,7 +731,7 @@
 
 <div class="modal" id="moreMenu" style="display:none" onclick="if(event.target===this)closeMore()">
   <div class="modal-card">
-    <div class="modal-title" style="display:flex;align-items:center;justify-content:space-between;position:sticky;top:-18px;background:var(--card);padding-top:2px;margin:-2px 0 12px;z-index:2">Tools <button type="button" onclick="closeMore()" style="background:none;border:none;color:#9fc6a8;font-size:22px;line-height:1;cursor:pointer;padding:0 2px" aria-label="Close">✕</button></div>
+    <div class="modal-title" style="display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--card);padding:6px 0 12px;margin:0 0 8px;z-index:2">Tools <button type="button" onclick="closeMore()" style="background:#16271a;border:1px solid #33623a;border-radius:8px;color:#cdebcf;width:40px;height:40px;font-size:20px;line-height:1;cursor:pointer;flex:none" aria-label="Close">✕</button></div>
     <div class="more-list">
       <button type="button" onclick="closeMore();openCruiser()">👤 Data-entry person</button>
       <button type="button" onclick="closeMore();openSummary()">📊 Stand summary</button>
@@ -746,6 +747,7 @@
       <button type="button" onclick="closeMore();autoAssignStands()">▧ Auto-assign stands from boundaries</button>
       <button type="button" onclick="closeMore();openImportPlots()">📥 Import past plots (audit)</button>
       <button type="button" id="pushAuditBtn" onclick="closeMore();pushAuditToSheet()" style="display:none">📤 Push audit plots to the Sheet</button>
+      <button type="button" id="auditLabelBtn" onclick="closeMore();openAuditLabelPicker()" style="display:none">🏷 Label audit plots by…</button>
       <button type="button" id="clearAuditBtn" onclick="closeMore();clearAuditPlots()" style="display:none">🗑 Clear audit plots</button>
       <button type="button" onclick="closeMore();clearAllData()" style="color:#e9a89f">🗑 Start new project (erase all data)</button>
     </div>
@@ -859,7 +861,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v97";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v100";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1725,9 +1727,10 @@ function renderSaved(){
       <td style="text-align:right"><button class="tbtn" onclick="editPlot(${i})">Edit</button>${p._sent?"":`<button class="tbtn" onclick="resend(${i})">Send</button>`}<button class="tbtn del" onclick="delPlot(${i})" title="Delete this plot">🗑 Delete</button></td></tr>`).join("")+
     `</tbody></table>`;
   // Audit set (imported past plots) — shown separately, editable, with duplicate flags.
-  { const pb=$("pushAuditBtn"), cb=$("clearAuditBtn");
+  { const pb=$("pushAuditBtn"), cb=$("clearAuditBtn"), lb=$("auditLabelBtn");
     if(pb) pb.style.display=auditPlots.length?"block":"none";
-    if(cb) cb.style.display=auditPlots.length?"block":"none"; }
+    if(cb) cb.style.display=auditPlots.length?"block":"none";
+    if(lb) lb.style.display=auditPlots.length?"block":"none"; }
   if(auditPlots.length){
     c.innerHTML += `<div class="layer-hd" style="margin:14px 0 4px;color:#7ab0d8">Imported audit plots (${auditPlots.length})</div>`+
       `<table class="saved"><thead><tr><th>Stand</th><th>Plot</th><th>Trees</th><th>Flag</th><th></th></tr></thead><tbody>`+
@@ -2740,6 +2743,7 @@ async function openMap(){
 function closeMap(){ rememberMapView_(); $("mapView").style.display="none"; stopMapGPS(); if(crewTimer){ clearInterval(crewTimer); crewTimer=null; } if(crewRoutesTimer){ clearInterval(crewRoutesTimer); crewRoutesTimer=null; } if(liveOn) stopLive();
   if(typeof placeMode!=="undefined" && placeMode){ placeMode=false; if(placeMarker){ fmap.removeLayer(placeMarker); placeMarker=null; } $("toolPlace").classList.remove("on"); resetDropBar(); }
   if(typeof captureMode!=="undefined" && captureMode){ captureMode=false; const ch=$("mapCrosshair"); if(ch) ch.style.display="none"; resetDropBar(); }
+  if(typeof selectMode!=="undefined" && selectMode){ selectMode=false; const b=$("toolSelect"); if(b) b.classList.remove("on"); clearSelDraw_(); selPts=[]; resetDropBar(); }
   if(typeof measureMode!=="undefined" && measureMode) clearMeasure();
   if(typeof routeMode!=="undefined" && routeMode){ routeMode=false; $("toolRoute").classList.remove("on"); $("routeBar").style.display="none"; drawRoute(); }
   if(typeof polyMode!=="undefined" && polyMode){ polyMode=false; $("toolPoly").classList.remove("on"); $("polyBar").style.display="none"; drawPoly(); }
@@ -2751,7 +2755,7 @@ function initMap(){
   fpins=L.layerGroup().addTo(fmap); fboundLayer=L.layerGroup().addTo(fmap); flabelLayer=L.layerGroup().addTo(fmap); refLayer=L.layerGroup().addTo(fmap); freflabelLayer=L.layerGroup().addTo(fmap); crewLayer=L.layerGroup().addTo(fmap); liveLayer=L.layerGroup().addTo(fmap); crewRouteLayer=L.layerGroup().addTo(fmap); photoLayer=L.layerGroup().addTo(fmap);
   applyLayerVis_();
   fmap.on("moveend zoomend",rememberMapView_);
-  fmap.on("click",e=>{ if(polyMode){ addPolyPoint(e.latlng); return; } if(routeMode){ addRoutePoint(e.latlng); return; } if(measureMode){ addMeasurePoint(e.latlng); return; } if(placeMode){ placeAt(e.latlng.lat,e.latlng.lng); return; }
+  fmap.on("click",e=>{ if(selectMode){ addSelPoint(e.latlng); return; } if(polyMode){ addPolyPoint(e.latlng); return; } if(routeMode){ addRoutePoint(e.latlng); return; } if(measureMode){ addMeasurePoint(e.latlng); return; } if(placeMode){ placeAt(e.latlng.lat,e.latlng.lng); return; }
     if(nearbyPlotPopup_(e.latlng)) return;                    // a plot pin near the tap wins over the boundary
     if(popupFields.length){ const bf=boundaryFeatureAt(e.latlng.lat,e.latlng.lng); if(bf) showBoundPopup(e.latlng,bf); } });
   // Keep taps on the on-map controls from also being treated as map clicks (which in draw modes would drop a stray point).
@@ -3072,12 +3076,30 @@ function renderMapPins(){ if(!fpins) return; fpins.clearLayers();
   // Imported audit plots — blue, so they're visually distinct from your own plots.
   auditPlots.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)) return;
     const col=p._dup?"#e8b84b":"#4aa3e0";
-    const icon=L.divIcon({className:"",html:`<div style="width:22px;height:22px;border-radius:50%;background:${col};border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font:700 9px/1 'Courier New',monospace;color:#0a1a28">${esc(p.PLOTNUM||"?")}</div>`,iconSize:[22,22],iconAnchor:[11,11]});
+    const lbl=auditDotLabel_(p);
+    const icon=L.divIcon({className:"",html:`<div style="min-width:22px;height:22px;padding:0 5px;border-radius:11px;background:${col};border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font:700 9px/1 'Courier New',monospace;color:#0a1a28;white-space:nowrap">${esc(lbl)}</div>`,iconSize:null,iconAnchor:[11,11]});
     L.marker([lat,lon],{icon}).addTo(fpins)
       .bindPopup(`<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b> <span style="color:#2b6ea3">audit</span>${p._dup?' <span style="color:#b6791b">· dup?</span>':""}<br>${(p.DATE||"").slice(0,16)}<br><a href="javascript:void(0)" onclick="editAuditFromMap(${i})">🔍 Review / edit ›</a></div>`);
   });
 }
 function editAuditFromMap(i){ closeMap(); editAudit(i); }
+// What to show inside audit dots. Default STANDID, falls back to PLOTNUM; user can pick any field.
+let auditLabelField = (STORE && STORE.getItem("fi_auditlabel")) || "STANDID";
+function auditDotLabel_(p){
+  let v=p[auditLabelField]; if(v==null||v==="") v = (auditLabelField!=="PLOTNUM"?p.PLOTNUM:null);
+  if(v==null||v==="") return "•";
+  let s=String(v); if(s.length>6) s=s.slice(0,6); return s;
+}
+function openAuditLabelPicker(){
+  if(!auditPlots.length){ toast("No audit plots to label",true); return; }
+  // offer fields that actually hold data across the audit set
+  const fields={}; auditPlots.forEach(p=>Object.keys(p).forEach(k=>{ if(k[0]==="_"||k==="__set") return; if(p[k]!=null&&p[k]!=="") fields[k]=(fields[k]||0)+1; }));
+  const pref=["STANDID","PLOTNUM","TRACT","DATE","HTSPP","COMMENT"];
+  const keys=Object.keys(fields).sort((a,b)=>{ const pa=pref.indexOf(a),pb=pref.indexOf(b); if(pa>=0||pb>=0) return (pa<0?99:pa)-(pb<0?99:pb); return a.localeCompare(b); });
+  const rows=keys.map(k=>`<button type="button" onclick="setAuditLabel('${esc(k)}')" style="display:block;width:100%;text-align:left;padding:10px 12px;margin:4px 0;border-radius:8px;border:1px solid ${k===auditLabelField?"#2f7a44":"#33623a"};background:${k===auditLabelField?"#123a1c":"#16271a"};color:#e8f0e6;font:inherit;font-size:13px;cursor:pointer">${esc(k)} ${k===auditLabelField?"✓":""} <small style="color:#8fb89a">(${fields[k]})</small></button>`).join("");
+  showInfoSheet_("Label audit plots by", `<div style="color:#a9c9b0;font-size:12px;margin-bottom:8px">Pick the field to show inside the blue audit dots on the map.</div>${rows}`);
+}
+function setAuditLabel(k){ auditLabelField=k; try{ STORE&&STORE.setItem("fi_auditlabel",k); }catch(e){} closeInfoSheet_(); if(fmap) renderMapPins(); toast(`Audit plots labelled by ${k}`); }
 function plotPopupHtml_(p,i){ return `<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b><br>${(p.DATE||"").slice(0,16)}<br><a href="javascript:void(0)" onclick="editFromMap(${i})">✎ Edit this plot ›</a> &nbsp; <a href="javascript:void(0)" style="color:#b23b32" onclick="delFromMap(${i})">Delete ✕</a></div>`; }
 function editFromMap(i){ closeMap(); editPlot(i); }
 // A scrollable table of all plot data for quick review. Key columns are pinned on the left; each row
@@ -3637,6 +3659,123 @@ function updatePoly(){ const n=polyPts.length, nb=polys.length, ns=polyPtsSnap.f
   if(ns) s += ` · ${ns} on edge`;
   if(nb) s += ` · ${nb} saved`;
   $("polyText").textContent=s; }
+/* ---------- Lasso-select plots: tap corners to draw a selection polygon, then act on the plots inside ---------- */
+let selectMode=false, selPts=[], selLayer=null, selMarkers=null;
+function toggleSelect(){
+  selectMode=!selectMode;
+  const btn=$("toolSelect");
+  if(selectMode){
+    // turn off other draw modes
+    if(typeof polyMode!=="undefined"&&polyMode) togglePoly();
+    if(typeof measureMode!=="undefined"&&measureMode) toggleMeasure();
+    if(typeof routeMode!=="undefined"&&routeMode) toggleRoute();
+    if(typeof placeMode!=="undefined"&&placeMode) togglePlace();
+    selPts=[]; btn.classList.add("on");
+    $("mapDrop").innerHTML='<div style="display:flex;gap:8px;width:100%">'+
+      '<button class="dropbtn" type="button" style="flex:1" onclick="finishSelect()">✓ Select inside</button>'+
+      '<button class="dropbtn" type="button" style="flex:none;background:#3a2a12" onclick="toggleSelect()">Cancel</button></div>';
+    toast("Tap the map to drop corners around the plots, then “Select inside”.");
+  } else {
+    btn.classList.remove("on"); clearSelDraw_(); selPts=[]; resetDropBar();
+  }
+}
+function addSelPoint(ll){ selPts.push([ll.lat,ll.lng]); drawSelDraw_(); }
+function drawSelDraw_(){ clearSelDraw_();
+  if(!fmap) return;
+  selMarkers=L.layerGroup().addTo(fmap);
+  selPts.forEach(p=>L.circleMarker(p,{radius:4,color:"#fff",weight:1.5,fillColor:"#ffd166",fillOpacity:1}).addTo(selMarkers));
+  if(selPts.length>=2) selLayer=L.polyline(selPts.concat(selPts.length>=3?[selPts[0]]:[]),{color:"#ffd166",weight:2,dashArray:"5,5"}).addTo(fmap);
+}
+function clearSelDraw_(){ if(selLayer){ fmap.removeLayer(selLayer); selLayer=null; } if(selMarkers){ fmap.removeLayer(selMarkers); selMarkers=null; } }
+let selected=[];   // [{set:'mine'|'audit', i, p}]
+function finishSelect(){
+  if(selPts.length<3){ toast("Tap at least 3 corners first",true); return; }
+  const ring=selPts;
+  selected=[];
+  saved.forEach((p,i)=>{ const lat=parseFloat(p.Y),lon=parseFloat(p.X); if(isFinite(lat)&&isFinite(lon)&&pointInRing_(lat,lon,ring)) selected.push({set:"mine",i,p}); });
+  auditPlots.forEach((p,i)=>{ const lat=parseFloat(p.Y),lon=parseFloat(p.X); if(isFinite(lat)&&isFinite(lon)&&pointInRing_(lat,lon,ring)) selected.push({set:"audit",i,p}); });
+  selectMode=false; $("toolSelect").classList.remove("on"); clearSelDraw_(); selPts=[]; resetDropBar();
+  if(!selected.length){ toast("No plots inside that outline",true); return; }
+  showSelectionActions_();
+}
+function showSelectionActions_(){
+  const n=selected.length, mine=selected.filter(s=>s.set==="mine").length, aud=n-mine;
+  const list=selected.slice(0,12).map(s=>`${esc(s.p.STANDID||"—")}/${esc(s.p.PLOTNUM||"?")}${s.set==="audit"?" (audit)":""}`).join(", ")+(n>12?` +${n-12} more`:"");
+  let h=`<div style="color:#dcefe0;font-size:13px;margin-bottom:6px"><b>${n}</b> plot${n===1?"":"s"} selected${aud?` (${mine} yours, ${aud} audit)`:""}.</div>`+
+    `<div style="color:#a9c9b0;font-size:11px;font-family:monospace;margin-bottom:12px">${list}</div>`+
+    `<div style="display:flex;flex-direction:column;gap:8px">`+
+    `<button class="btn ghost" type="button" onclick="nameSelected()">🏷 Assign Stand / name to selected</button>`+
+    `<button class="btn ghost" type="button" onclick="tractSelected()">🏷 Assign Tract / property to selected</button>`+
+    `<button class="btn ghost" type="button" onclick="exportSelected('shp')">⬇ Export selected as shapefile (.zip)</button>`+
+    `<button class="btn ghost" type="button" onclick="exportSelected('csv')">⬇ Export selected as CSV</button>`+
+    `<button class="btn ghost" type="button" onclick="emailSelected()">📧 Email selected (CSV)</button>`+
+    `<button class="btn ghost" type="button" onclick="deleteSelected()" style="color:#e9a89f;border-color:#5a3324">🗑 Delete selected (backed up in Sheet)</button>`+
+    `</div>`;
+  showInfoSheet_("Selected plots", h);
+}
+function selectedRows_(){ return selected.map(s=>s.p); }
+// Assign a Stand ID / name to every selected plot (handy for grouping imported plots).
+function nameSelected(){ assignFieldToSelected_("STANDID","Stand ID / name"); }
+// Assign a Tract / property name to every selected plot.
+function tractSelected(){ assignFieldToSelected_("TRACT","Tract / property"); }
+function assignFieldToSelected_(field,label){
+  const n=selected.length; if(!n) return;
+  const cur=selected[0].p[field]||"";
+  const v=prompt(`Assign a ${label} to ${n} selected plot${n===1?"":"s"}:`, cur);
+  if(v==null) return; const name=v.trim();
+  let nMine=0;
+  selected.forEach(s=>{ s.p[field]=name; if(s.set==="mine"){ nMine++; if(s.p._sent) s.p._sent=false; } });
+  if(field==="TRACT" && name){ addTract(name); queueTract(name); if(typeof tractSelect==="function") tractSelect(); }   // add to shared list + sync
+  persist(); persistAudit(); renderSaved(); if(fmap) renderMapPins();
+  if(nMine && connected && !isOffline()) selected.filter(s=>s.set==="mine").forEach(s=>send(s.p,true));   // update the Sheet
+  closeInfoSheet_();
+  toast(`Set ${field==="TRACT"?"tract":"stand"} “${name}” on ${n} plot${n===1?"":"s"}`+(nMine&&connected&&!isOffline()?" · updating the Sheet":""));
+}
+function exportSelected(kind){
+  const rows=selectedRows_().filter(p=>{ if(kind==="shp"){ const x=parseFloat(p.X),y=parseFloat(p.Y); return isFinite(x)&&isFinite(y);} return true; });
+  if(!rows.length){ toast(kind==="shp"?"Selected plots have no GPS":"Nothing to export",true); return; }
+  const stamp=nowStr().replace(/[: ]/g,"-");
+  if(kind==="csv"){
+    const lines=[HEADER.join(",")]; rows.forEach(p=>lines.push(HEADER.map(h=>csvCell(p[h]!==undefined?p[h]:"")).join(",")));
+    dl_(new Blob([lines.join("\r\n")],{type:"text/csv"}),`FRIselected_${stamp}.csv`);
+  } else {
+    const bytes=buildPlotShapefileZip(rows,HEADER);
+    dl_(new Blob([bytes],{type:"application/zip"}),`FRIselected_${stamp}.zip`);
+  }
+  toast(`Exported ${rows.length} selected plot${rows.length===1?"":"s"}`);
+  closeInfoSheet_();
+}
+function dl_(blob,name){ const url=URL.createObjectURL(blob),a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1500); }
+function emailSelected(){
+  const rows=selectedRows_(); if(!rows.length) return;
+  const lines=[HEADER.join(",")]; rows.forEach(p=>lines.push(HEADER.map(h=>csvCell(p[h]!==undefined?p[h]:"")).join(",")));
+  const body=encodeURIComponent(`${rows.length} selected FRI plots attached below as CSV.\n\n`+lines.join("\n"));
+  const subj=encodeURIComponent(`FRI selected plots (${rows.length}) — ${nowStr().slice(0,16)}`);
+  // mailto can't attach a file; put the CSV in the body (works everywhere). Also offer the file download.
+  window.location.href=`mailto:${encodeURIComponent(cruiserEmail||"")}?subject=${subj}&body=${body}`;
+  toast("Opening email with the selected plots…");
+}
+function deleteSelected(){
+  const n=selected.length; if(!n) return;
+  const sentIds=selected.filter(s=>s.set==="mine"&&s.p._sent&&s.p._id).map(s=>s.p._id);
+  if(!confirm(`Delete ${n} selected plot${n===1?"":"s"}?\n\n`+
+    (sentIds.length?`${sentIds.length} already in the Sheet will be moved to a DELETED_PLOTS backup tab there (recoverable).\n`:"")+
+    `They'll be removed from this device.`)) return;
+  // remove from device (both sets), highest index first so indices stay valid
+  selected.filter(s=>s.set==="mine").sort((a,b)=>b.i-a.i).forEach(s=>saved.splice(s.i,1));
+  selected.filter(s=>s.set==="audit").sort((a,b)=>b.i-a.i).forEach(s=>auditPlots.splice(s.i,1));
+  persist(); persistAudit(); renderSaved(); if(fmap) renderMapPins(); closeInfoSheet_();
+  // back up + delete the sent ones from the Sheet
+  if(sentIds.length && connected && !isOffline()){
+    fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body:JSON.stringify({_action:"deleteplots",ids:sentIds,by:cruiserEmail||cruiser||""})})
+      .then(()=>toast(`Deleted ${n} · ${sentIds.length} moved to the Sheet's DELETED_PLOTS backup`))
+      .catch(()=>toast("Deleted on device; couldn't reach the Sheet to back up",true));
+  } else {
+    toast(`Deleted ${n} plot${n===1?"":"s"} from this device`+(sentIds.length?" · connect to also back up in the Sheet":""));
+  }
+}
+
 function togglePoly(){
   polyMode=!polyMode;
   if(polyMode){ if(placeMode) togglePlace(); if(measureMode) clearMeasure(); if(routeMode) toggleRoute();
