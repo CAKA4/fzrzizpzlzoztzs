@@ -111,6 +111,9 @@
     background:rgba(15,30,13,.95); border:1px solid var(--line2,#33623a); border-radius:9px; padding:8px 11px; box-shadow:0 4px 16px rgba(0,0,0,.5); }
   .measure-bar #measureText{ font-family:var(--mono); font-size:12px; color:#e8b84b; white-space:normal; flex:1; min-width:0; line-height:1.3; }
   .measure-bar button{ flex:none; background:#16271a; border:1px solid var(--line2,#33623a); color:#cdebcf; font:inherit; font-size:11px; text-transform:uppercase; letter-spacing:.05em; padding:6px 10px; border-radius:7px; cursor:pointer; }
+  .map-chips{ position:absolute; left:10px; right:96px; bottom:74px; z-index:5200; display:flex; gap:6px; flex-wrap:wrap; }
+  .map-chips button{ background:rgba(15,30,13,.9); border:1px solid #33623a; color:#cdebcf; font-family:var(--mono); font-size:11px; padding:6px 10px; border-radius:16px; cursor:pointer; box-shadow:0 1px 4px rgba(0,0,0,.4); }
+  .map-chips button:active{ background:#123a1c; }
   .map-legend{ position:absolute; left:10px; bottom:118px; z-index:5200; font-family:var(--mono); font-size:10px;
     color:#9ab; background:rgba(15,30,13,.82); border:1px solid #284a2c; border-radius:7px; padding:6px 9px;
     display:flex; flex-direction:column; gap:3px; }
@@ -649,6 +652,11 @@
     <button type="button" onclick="finishPoly()">Done</button>
     <button type="button" onclick="clearPoly()">Clear</button>
   </div>
+  <div class="map-chips" id="mapChips">
+    <button type="button" onclick="zoomToMe_()" title="Center on my GPS">◎ Me</button>
+    <button type="button" onclick="fitAllLayers_()" title="Zoom to fit everything">⤢ Fit all</button>
+    <button type="button" onclick="openGoToStand()" title="Zoom to a stand">▧ Stand…</button>
+  </div>
   <div class="map-drop" id="mapDrop">
     <button class="dropbtn" type="button" onclick="dropAtMe()">＋ Drop plot at my location</button>
   </div>
@@ -828,7 +836,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v85";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v86";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2396,7 +2404,7 @@ addTree(); setNow(); renderGround([]); renderSaved(); updateTally(); netDot(); a
 setField($("PLOTNUM"), nextPlotFor($("STANDID").value));
 // On a fresh open, go to the map and zoom to what's loaded — the user taps "＋ New plot" when ready.
 try{ const hasDraft = STORE && STORE.getItem(DRAFTKEY);
-  if(!hasDraft) setTimeout(()=>{ try{ openMap(); setTimeout(fitAllLayers_,300); }catch(e){} }, 400);
+  if(!hasDraft) setTimeout(()=>{ try{ openMap(); }catch(e){} }, 400);
 }catch(e){}
 // Opening a category slides it up so its header sits just under the top bar.
 document.querySelectorAll("details.sec").forEach(sec=>{
@@ -2513,7 +2521,7 @@ async function openMap(){
   if(!captureMode){ const ch=$("mapCrosshair"); if(ch) ch.style.display="none"; resetDropBar(); }   // default: New-plot button, no crosshair
   centerMap();
 }
-function closeMap(){ $("mapView").style.display="none"; stopMapGPS(); if(crewTimer){ clearInterval(crewTimer); crewTimer=null; } if(crewRoutesTimer){ clearInterval(crewRoutesTimer); crewRoutesTimer=null; } if(liveOn) stopLive();
+function closeMap(){ rememberMapView_(); $("mapView").style.display="none"; stopMapGPS(); if(crewTimer){ clearInterval(crewTimer); crewTimer=null; } if(crewRoutesTimer){ clearInterval(crewRoutesTimer); crewRoutesTimer=null; } if(liveOn) stopLive();
   if(typeof placeMode!=="undefined" && placeMode){ placeMode=false; if(placeMarker){ fmap.removeLayer(placeMarker); placeMarker=null; } $("toolPlace").classList.remove("on"); resetDropBar(); }
   if(typeof captureMode!=="undefined" && captureMode){ captureMode=false; const ch=$("mapCrosshair"); if(ch) ch.style.display="none"; resetDropBar(); }
   if(typeof measureMode!=="undefined" && measureMode) clearMeasure();
@@ -2526,6 +2534,7 @@ function initMap(){
   L.control.zoom({position:"bottomright"}).addTo(fmap);
   fpins=L.layerGroup().addTo(fmap); fboundLayer=L.layerGroup().addTo(fmap); flabelLayer=L.layerGroup().addTo(fmap); refLayer=L.layerGroup().addTo(fmap); freflabelLayer=L.layerGroup().addTo(fmap); crewLayer=L.layerGroup().addTo(fmap); liveLayer=L.layerGroup().addTo(fmap); crewRouteLayer=L.layerGroup().addTo(fmap); photoLayer=L.layerGroup().addTo(fmap);
   applyLayerVis_();
+  fmap.on("moveend zoomend",rememberMapView_);
   fmap.on("click",e=>{ if(polyMode){ addPolyPoint(e.latlng); return; } if(routeMode){ addRoutePoint(e.latlng); return; } if(measureMode){ addMeasurePoint(e.latlng); return; } if(placeMode){ placeAt(e.latlng.lat,e.latlng.lng); return; }
     if(nearbyPlotPopup_(e.latlng)) return;                    // a plot pin near the tap wins over the boundary
     if(popupFields.length){ const bf=boundaryFeatureAt(e.latlng.lat,e.latlng.lng); if(bf) showBoundPopup(e.latlng,bf); } });
@@ -2537,12 +2546,15 @@ function initMap(){
   $("pointsInput").addEventListener("change",e=>{ const f=e.target.files[0]; e.target.value=""; if(f) importRefFile(f); });
   $("pdfInput").addEventListener("change",e=>{ const f=e.target.files[0]; e.target.value=""; if(f) loadPdfOverlay(f); });
 }
+let _mapViewedThisSession=false, _lastMapView=null;
+// Decide what to show when the map opens:
+//  • if you've used the map already this session → return to your last view (resume mid-cruise)
+//  • otherwise → fit everything loaded (fresh overview); GPS/current point as a fallback.
 function centerMap(){
-  if(mePos){ fmap.setView([mePos.lat,mePos.lon],16); return; }
-  const cur={x:parseFloat($("X").value),y:parseFloat($("Y").value)};
-  if(!isNaN(cur.x)&&!isNaN(cur.y)){ fmap.setView([cur.y,cur.x],16); return; }
-  if(BOUND) fitBoundaries();
+  if(_mapViewedThisSession && _lastMapView){ try{ fmap.setView(_lastMapView.c,_lastMapView.z); return; }catch(e){} }
+  fitAllLayers_(true);
 }
+function rememberMapView_(){ if(!fmap) return; try{ const c=fmap.getCenter(); _lastMapView={c:[c.lat,c.lng],z:fmap.getZoom()}; _mapViewedThisSession=true; }catch(e){} }
 
 /* ----- auto-reprojection: shapefiles with a .prj are handled by shpjs (any zone). If coordinates
    still arrive projected (missing/unreadable .prj), auto-detect the UTM zone by reprojecting under
@@ -3034,7 +3046,7 @@ function confirmPlace(){
 }
 function resetDropBar(){ $("mapDrop").innerHTML='<button class="dropbtn" type="button" onclick="startCapture()">＋ Create inventory plot</button>'; }
 // Zoom to fit everything currently loaded (plots, boundaries, imported points, track).
-function fitAllLayers_(){
+function fitAllLayers_(quiet){
   if(!fmap) return; const b=[];
   saved.forEach(p=>{ const y=parseFloat(p.Y),x=parseFloat(p.X); if(isFinite(y)&&isFinite(x)) b.push([y,x]); });
   if(typeof BOUND!=="undefined"&&BOUND&&BOUND.features) collectCoords_(BOUND.features,b);
@@ -3042,7 +3054,30 @@ function fitAllLayers_(){
   (trackLog||[]).forEach(t=>b.push(t));
   if(b.length){ try{ fmap.fitBounds(b,{padding:[40,40],maxZoom:17}); }catch(e){} }
   else if(mePos){ try{ fmap.setView([mePos.lat,mePos.lon],16); }catch(e){} }
+  else { const x=parseFloat($("X").value),y=parseFloat($("Y").value); if(isFinite(x)&&isFinite(y)) try{ fmap.setView([y,x],16); }catch(e){} }
+  if(!quiet) closeLayersMenu();
 }
+function zoomToMe_(){ if(mePos){ try{ fmap.setView([mePos.lat,mePos.lon],17); }catch(e){} } else toast("No GPS fix yet",true); }
+// List stands from loaded boundaries + your plots, then zoom to the chosen one.
+function openGoToStand(){
+  const bounds={};   // stand -> [[lat,lng],...]
+  const add=(name,lat,lng)=>{ name=String(name||"").trim(); if(!name||!isFinite(lat)||!isFinite(lng)) return; (bounds[name]=bounds[name]||[]).push([lat,lng]); };
+  if(typeof BOUND!=="undefined"&&BOUND&&BOUND.features&&standField) BOUND.features.forEach(f=>{ const nm=f.properties?f.properties[standField]:null; if(nm==null) return;
+    const pts=[]; collectCoords_([f],pts); pts.forEach(pt=>add(nm,pt[0],pt[1])); });
+  saved.forEach(p=>add(p.STANDID,parseFloat(p.Y),parseFloat(p.X)));
+  const names=Object.keys(bounds).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+  if(!names.length){ toast("No stands loaded — import boundaries or save a plot first",true); return; }
+  const html=`<input id="gotoSearch" type="text" placeholder="Search stand…" oninput="filterGoto_()" style="width:100%;font-size:16px;margin-bottom:8px;padding:9px 11px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
+    `<div id="gotoList">${gotoRows_(names)}</div>`;
+  _gotoBounds=bounds; _gotoNames=names; showInfoSheet_("Go to stand", html);
+  setTimeout(()=>{ const s=$("gotoSearch"); if(s) s.focus(); },60);
+}
+let _gotoBounds={}, _gotoNames=[];
+function gotoRows_(names){ return names.length ? names.map(n=>`<button type="button" onclick="gotoStand_('${esc(n).replace(/'/g,"\\'")}')" style="display:block;width:100%;text-align:left;padding:10px 12px;margin:4px 0;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6;font:inherit;font-size:14px;cursor:pointer">▧ ${esc(n)} <small style="color:#8fb89a">(${_gotoBounds[n].length} pt)</small></button>`).join("") : `<div class="hint" style="padding:8px;color:#a9c9b0">No match.</div>`; }
+function filterGoto_(){ const q=($("gotoSearch").value||"").trim().toLowerCase(); $("gotoList").innerHTML=gotoRows_(_gotoNames.filter(n=>n.toLowerCase().includes(q))); }
+function gotoStand_(name){ const pts=_gotoBounds[name]; closeInfoSheet_(); if(!pts||!pts.length) return;
+  try{ pts.length>1 ? fmap.fitBounds(pts,{padding:[50,50],maxZoom:18}) : fmap.setView(pts[0],17); }catch(e){}
+  toast(`Zoomed to ${name}`); }
 
 // Capture-point flow: open on the map with a crosshair, let the user either drag the map so the
 // crosshair sits where they want, or grab a GPS fix — then open the form for data entry.
