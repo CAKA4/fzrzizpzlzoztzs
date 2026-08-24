@@ -747,6 +747,8 @@
       <button type="button" onclick="closeMore();autoAssignStands()">▧ Auto-assign stands from boundaries</button>
       <button type="button" onclick="closeMore();openImportPlots()">📥 Import past plots (audit)</button>
       <button type="button" id="pushAuditBtn" onclick="closeMore();pushAuditToSheet()" style="display:none">📤 Push audit plots to the Sheet</button>
+      <button type="button" id="auditSumBtn" onclick="closeMore();buildAuditSummary()" style="display:none">📊 Build AUDIT summary (separate)</button>
+      <button type="button" id="includeAuditBtn" onclick="toggleIncludeAudit()" style="display:none">🔀 Audit in main: OFF (tap to include)</button>
       <button type="button" id="auditLabelBtn" onclick="closeMore();openAuditLabelPicker()" style="display:none">🏷 Label audit plots by…</button>
       <button type="button" id="clearAuditBtn" onclick="closeMore();clearAuditPlots()" style="display:none">🗑 Clear audit plots</button>
       <button type="button" onclick="closeMore();clearAllData()" style="color:#e9a89f">🗑 Start new project (erase all data)</button>
@@ -861,7 +863,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v100";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v102";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1655,14 +1657,47 @@ function pushAuditToSheet(){
   if(!auditPlots.length){ toast("No audit plots to push",true); return; }
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   const dups=auditPlots.filter(p=>p._dup).length;
-  if(!confirm(`Send ${auditPlots.length} audit plot${auditPlots.length===1?"":"s"} to the Google Sheet for analysis?`+
+  if(!confirm(`Send ${auditPlots.length} audit plot${auditPlots.length===1?"":"s"} to the Google Sheet for separate analysis?`+
     (dups?`\n\n${dups} are flagged as possible duplicates of plots you already have — they'll be sent too.`:"")+
-    `\n\nThey'll move into your normal plots and be included in summaries.`)) return;
+    `\n\nThey'll be tagged as AUDIT so you can analyze them apart from your own plots (and merge later).`)) return;
   let moved=0;
   auditPlots.slice().forEach(p=>{ const q=Object.assign({},p); delete q._audit; delete q._dup; delete q._src; q._sent=false;
+    q.PLOTSRC="AUDIT";                       // tag so the Sheet keeps them separate from your plots
     saved.push(q); send(q,true); moved++; });
   auditPlots=[]; persistAudit(); persist(); renderSaved(); netDot();
-  toast(`Pushed ${moved} plot${moved===1?"":"s"} to the Sheet — rebuild the summary to include them`);
+  toast(`Pushed ${moved} audit plot${moved===1?"":"s"} — use “Build AUDIT summary” to analyze them`);
+}
+// Trigger the separate AUDIT summary in the Sheet (analyzes only the AUDIT-tagged plots).
+function buildAuditSummary(){
+  if(!connected){ toast("Connect to a Sheet first",true); return; }
+  jsonpAction_("auditsummary", r=>{
+    if(r&&r.ok) toast(`AUDIT summary built (${r.plots} plots) — see the “AUDIT — …” tabs in the Sheet`);
+    else toast((r&&r.src==="AUDIT")?"No audit plots in the Sheet yet — push some first":"Couldn't build the audit summary",true);
+  });
+}
+// Merge audit plots into the main set (clears the AUDIT tag, folds them into the normal summary).
+// Reversible: include audit plots in the main summary, or keep them separate. Audit rows stay tagged
+// either way, so you can flip this any time.
+let _auditIncluded=false;
+function setIncludeAudit_(on){
+  if(!connected){ toast("Connect to a Sheet first",true); return; }
+  jsonpAction_("includeaudit&on="+(on?"1":"0"), r=>{
+    if(r&&r.ok){ _auditIncluded=!!r.included; renderSaved();
+      toast(_auditIncluded?"Audit plots INCLUDED in the main summary":"Audit plots kept SEPARATE from the main summary");
+    } else toast("Couldn't change the setting",true);
+  });
+}
+function toggleIncludeAudit(){ setIncludeAudit_(!_auditIncluded); }
+function refreshAuditState_(){ if(!connected) return; jsonpAction_("auditstate", r=>{ if(r&&r.ok){ _auditIncluded=!!r.included; const b=$("includeAuditBtn"); if(b) b.textContent=_auditIncluded?"🔀 Audit in main: ON (tap for separate)":"🔀 Audit in main: OFF (tap to include)"; } }); }
+// Small JSONP helper for GET actions that return a result.
+function jsonpAction_(action, cb){
+  const name="__cb"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  const clean=()=>{ try{ delete window[name]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  window[name]=r=>{ try{ cb(r); }finally{ clean(); } };
+  sc.onerror=()=>{ clean(); toast("Couldn't reach the Sheet",true); };
+  sc.src=SCRIPT_URL+sep+"action="+encodeURIComponent(action)+"&callback="+name;
+  document.body.appendChild(sc);
+  toast("Working in the Sheet…");
 }
 // Auto-assign Stand IDs to audit plots by which loaded boundary polygon each falls inside.
 // Only fills blanks by default; can overwrite if asked. Needs boundaries (or drawn polygons) loaded.
@@ -1727,10 +1762,12 @@ function renderSaved(){
       <td style="text-align:right"><button class="tbtn" onclick="editPlot(${i})">Edit</button>${p._sent?"":`<button class="tbtn" onclick="resend(${i})">Send</button>`}<button class="tbtn del" onclick="delPlot(${i})" title="Delete this plot">🗑 Delete</button></td></tr>`).join("")+
     `</tbody></table>`;
   // Audit set (imported past plots) — shown separately, editable, with duplicate flags.
-  { const pb=$("pushAuditBtn"), cb=$("clearAuditBtn"), lb=$("auditLabelBtn");
+  { const pb=$("pushAuditBtn"), cb=$("clearAuditBtn"), lb=$("auditLabelBtn"), asb=$("auditSumBtn"), iab=$("includeAuditBtn");
     if(pb) pb.style.display=auditPlots.length?"block":"none";
     if(cb) cb.style.display=auditPlots.length?"block":"none";
-    if(lb) lb.style.display=auditPlots.length?"block":"none"; }
+    if(lb) lb.style.display=auditPlots.length?"block":"none";
+    if(asb) asb.style.display=connected?"block":"none";
+    if(iab){ iab.style.display=connected?"block":"none"; iab.textContent=_auditIncluded?"🔀 Audit in main: ON (tap for separate)":"🔀 Audit in main: OFF (tap to include)"; } }
   if(auditPlots.length){
     c.innerHTML += `<div class="layer-hd" style="margin:14px 0 4px;color:#7ab0d8">Imported audit plots (${auditPlots.length})</div>`+
       `<table class="saved"><thead><tr><th>Stand</th><th>Plot</th><th>Trees</th><th>Flag</th><th></th></tr></thead><tbody>`+
@@ -2035,7 +2072,7 @@ function zipStore(files){   // ZIP with "stored" (uncompressed) entries — enou
 /* ====================== FIELD TOOLS ====================== */
 
 /* ---------- More menu ---------- */
-function openMore(){ $("moreMenu").style.display="flex"; }
+function openMore(){ $("moreMenu").style.display="flex"; try{ if(connected) refreshAuditState_(); }catch(e){} }
 function closeMore(){ $("moreMenu").style.display="none"; }
 
 /* ---------- data-entry person (per device): set once, stamped on every plot ---------- */
