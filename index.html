@@ -330,7 +330,7 @@
     font-size:10px; padding:0 4px; border-radius:4px }
   .toast{ position:fixed; left:50%; bottom:98px; transform:translateX(-50%) translateY(20px); opacity:0;
     background:#05221350; background:#0a3320; border:1px solid #2f9d59; color:#dffbe9; padding:11px 18px; border-radius:999px;
-    font-size:13.5px; font-weight:600; z-index:40; transition:opacity .25s,transform .25s; pointer-events:none; box-shadow:0 8px 26px rgba(0,0,0,.5) }
+    font-size:13.5px; font-weight:600; z-index:5700; transition:opacity .25s,transform .25s; pointer-events:none; box-shadow:0 8px 26px rgba(0,0,0,.5) }
   .toast.show{ opacity:1; transform:translateX(-50%) translateY(0) }
   .toast.err{ background:#2a1813; border-color:#5a3324; color:#ffd9c9 }
   @media (max-width:480px){
@@ -846,7 +846,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v89";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v90";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3238,11 +3238,17 @@ function zoomToMe_(){ if(mePos){ try{ fmap.setView([mePos.lat,mePos.lon],17); }c
 function openGoToStand(){
   const bounds={};   // stand -> [[lat,lng],...]
   const add=(name,lat,lng)=>{ name=String(name||"").trim(); if(!name||!isFinite(lat)||!isFinite(lng)) return; (bounds[name]=bounds[name]||[]).push([lat,lng]); };
-  if(typeof BOUND!=="undefined"&&BOUND&&BOUND.features&&standField) BOUND.features.forEach(f=>{ const nm=f.properties?f.properties[standField]:null; if(nm==null) return;
-    const pts=[]; collectCoords_([f],pts); pts.forEach(pt=>add(nm,pt[0],pt[1])); });
+  // Boundaries: use the chosen stand field; if none is set, fall back to a likely name field.
+  if(typeof BOUND!=="undefined"&&BOUND&&BOUND.features){
+    let sf=standField;
+    if(!sf){ const props=BOUND.features[0]&&BOUND.features[0].properties||{}; sf=Object.keys(props).find(k=>/stand|standid|poly|comp|unit|name|id/i.test(k))||Object.keys(props)[0]; }
+    BOUND.features.forEach(f=>{ const nm=f.properties&&sf?f.properties[sf]:null; if(nm==null||nm==="") return;
+      const pts=[]; collectCoords_([f],pts); pts.forEach(pt=>add(nm,pt[0],pt[1])); });
+  }
   saved.forEach(p=>add(p.STANDID,parseFloat(p.Y),parseFloat(p.X)));
+  auditPlots.forEach(p=>add(p.STANDID,parseFloat(p.Y),parseFloat(p.X)));
   const names=Object.keys(bounds).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
-  if(!names.length){ toast("No stands loaded — import boundaries or save a plot first",true); return; }
+  if(!names.length){ toast("No stands yet — load a boundary file or save/import a plot with a Stand ID",true); return; }
   const html=`<input id="gotoSearch" type="text" placeholder="Search stand…" oninput="filterGoto_()" style="width:100%;font-size:16px;margin-bottom:8px;padding:9px 11px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
     `<div id="gotoList">${gotoRows_(names)}</div>`;
   _gotoBounds=bounds; _gotoNames=names; showInfoSheet_("Go to stand", html);
