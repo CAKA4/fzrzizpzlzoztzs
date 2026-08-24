@@ -323,7 +323,7 @@
   .chip-tog.on{ background:#163322; border-color:var(--accent-dk); color:#cdebd6; font-weight:600 }
   .chip-tog.on::before{ content:"✓ "; color:#7fd0a0 }
   .modal{ position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50; display:flex; align-items:center; justify-content:center; padding:20px }
-  .modal-card{ background:var(--card); border:1px solid var(--line2); border-radius:14px; padding:18px; width:100%; max-width:380px; box-shadow:0 20px 60px rgba(0,0,0,.55) }
+  .modal-card{ background:var(--card); border:1px solid var(--line2); border-radius:14px; padding:18px; width:100%; max-width:380px; box-shadow:0 20px 60px rgba(0,0,0,.55); max-height:calc(100vh - 40px); overflow-y:auto; -webkit-overflow-scrolling:touch }
   .modal-title{ font-weight:700; font-size:15px; margin-bottom:12px; color:var(--text) }
   .modal-card input{ margin-bottom:14px }
   .modal-actions{ display:flex; gap:10px; justify-content:flex-end }
@@ -728,9 +728,9 @@
   </div>
 </div>
 
-<div class="modal" id="moreMenu" style="display:none">
+<div class="modal" id="moreMenu" style="display:none" onclick="if(event.target===this)closeMore()">
   <div class="modal-card">
-    <div class="modal-title">Tools</div>
+    <div class="modal-title" style="display:flex;align-items:center;justify-content:space-between;position:sticky;top:-18px;background:var(--card);padding-top:2px;margin:-2px 0 12px;z-index:2">Tools <button type="button" onclick="closeMore()" style="background:none;border:none;color:#9fc6a8;font-size:22px;line-height:1;cursor:pointer;padding:0 2px" aria-label="Close">✕</button></div>
     <div class="more-list">
       <button type="button" onclick="closeMore();openCruiser()">👤 Data-entry person</button>
       <button type="button" onclick="closeMore();openSummary()">📊 Stand summary</button>
@@ -859,7 +859,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v94";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v97";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1750,11 +1750,12 @@ function delPlot(i){
   if(!confirm(`Delete ${lbl}?\n\n${note}\n\nYou can tap Undo right afterwards.`)) return;
   lastDeleted={plot:p};
   saved.splice(i,1); persist(); renderSaved(); netDot();
+  if(fmap) renderMapPins();          // drop the pin too, so no orphaned marker is left on the map
   toast(`Deleted ${lbl}`);
 }
 function undoDelete(){
   if(!lastDeleted){ toast("Nothing to undo",true); return; }
-  saved.push(lastDeleted.plot); lastDeleted=null; persist(); renderSaved(); netDot(); toast("Plot restored");
+  saved.push(lastDeleted.plot); lastDeleted=null; persist(); renderSaved(); netDot(); if(fmap) renderMapPins(); toast("Plot restored");
 }
 function netDot(){ const q=saved.filter(p=>!p._sent).length; const d=$("netDot"); d.className="dot "+((!connected||isOffline()||q)?"off":"on"); }
 
@@ -2107,6 +2108,15 @@ function renderCrewPlots(rows, silent){
   if(!crewLayer) return;
   crewData = rows||[];                       // cache so re-labelling doesn't need a re-fetch
   crewLayer.clearLayers();
+  // Don't redraw YOUR OWN plots here — they already show as your yellow pins. Otherwise a plot you
+  // collected appears twice (yellow device copy + a coloured crew copy from the Sheet), and deleting
+  // the device copy leaves the crew dot behind.
+  const me=String(cruiserEmail||"").trim().toLowerCase();
+  const meName=String(cruiser||"").trim().toLowerCase();
+  if(me||meName) rows=(rows||[]).filter(r=>{
+    const re=String(r.email||"").trim().toLowerCase(), rn=String(r.cruiser||"").trim().toLowerCase();
+    return !((me&&re===me) || (meName&&rn===meName));
+  });
   const labelled = plotLabelField!=="none";
   const pts=[];
   (rows||[]).forEach(r=>{ const lat=parseFloat(r.lat), lon=parseFloat(r.lon);
