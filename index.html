@@ -93,6 +93,17 @@
   #sppPickerList .pick:active{ background:#eef5ec; }
   #sppPickerList .pick b{ color:#2f7a44; }
   #sppPickerSearch{ font-size:16px; }
+  .dtwrap{ overflow:auto; max-width:100%; border:1px solid #24402a; border-radius:8px; }
+  table.dtable{ border-collapse:separate; border-spacing:0; font-family:var(--mono); font-size:12px; white-space:nowrap; }
+  table.dtable th, table.dtable td{ padding:7px 10px; border-bottom:1px solid #1c3320; border-right:1px solid #16281a; text-align:left; color:#dcefe0; background:#0f1e0d; }
+  table.dtable thead th{ position:sticky; top:0; z-index:3; background:#123020; color:#8fe6a0; font-weight:700; }
+  table.dtable tbody tr:active td{ background:#17331d; }
+  /* pin the first key columns on the left as you scroll sideways */
+  table.dtable .kcol{ position:sticky; z-index:2; background:#12210f; }
+  table.dtable thead .kcol{ z-index:4; background:#143322; }
+  table.dtable .kcol:nth-child(1){ left:0; }
+  table.dtable .kcol:nth-child(2){ left:52px; }
+  table.dtable .kcol:nth-child(3){ left:110px; box-shadow:2px 0 6px rgba(0,0,0,.35); }
   .sumseg-wrap{ margin-bottom:12px }
   .sumseg-label{ font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-bottom:5px }
   .seg{ display:flex; border:1px solid #33623a; border-radius:9px; overflow:hidden }
@@ -731,6 +742,8 @@
       <button type="button" onclick="closeMore();openReportModal()">📧 Analyze &amp; email report (Excel)</button>
       <button type="button" onclick="closeMore();reattributePlots()">🧭 Re-attribute plots to compartments</button>
       <button type="button" onclick="closeMore();openTractAssign()">🏷 Assign tract / property to plots</button>
+      <button type="button" onclick="closeMore();openDataTable()">▦ View plot data table</button>
+      <button type="button" onclick="closeMore();autoAssignStands()">▧ Auto-assign stands from boundaries</button>
       <button type="button" onclick="closeMore();openImportPlots()">📥 Import past plots (audit)</button>
       <button type="button" id="pushAuditBtn" onclick="closeMore();pushAuditToSheet()" style="display:none">📤 Push audit plots to the Sheet</button>
       <button type="button" id="clearAuditBtn" onclick="closeMore();clearAuditPlots()" style="display:none">🗑 Clear audit plots</button>
@@ -846,7 +859,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v90";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v94";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1622,7 +1635,8 @@ function handleImportedFC_(fc,fname){
   showImportSummary_(out.length,dups,[...matched].sort(),[...skipped].sort(),fname);
   toast(msg);
 }
-function countImpTrees_(p){ let n=0; for(let i=1;i<=28;i++){ const sp=p[`T${i}SP`]; if(sp&&!isStruct_(sp)) n++; } return n; }
+const IMP_STRUCT=new Set(["SNG","CWD","CAV","SNAG","CAVITY"]);   // habitat features, not tally trees
+function countImpTrees_(p){ let n=0; for(let i=1;i<=28;i++){ const sp=String(p[`T${i}SP`]||"").trim().toUpperCase(); if(sp&&!IMP_STRUCT.has(sp)) n++; } return n; }
 function showImportSummary_(n,dups,matched,skipped,fname){
   let h=`<div style="color:#dcefe0;font-size:13px;line-height:1.4"><b>${esc(fname||"file")}</b><br>`+
     `${n} plot${n===1?"":"s"} added to the <b>audit set</b>.</div>`;
@@ -1647,6 +1661,30 @@ function pushAuditToSheet(){
     saved.push(q); send(q,true); moved++; });
   auditPlots=[]; persistAudit(); persist(); renderSaved(); netDot();
   toast(`Pushed ${moved} plot${moved===1?"":"s"} to the Sheet — rebuild the summary to include them`);
+}
+// Auto-assign Stand IDs to audit plots by which loaded boundary polygon each falls inside.
+// Only fills blanks by default; can overwrite if asked. Needs boundaries (or drawn polygons) loaded.
+// Auto-assign Stand IDs by which loaded boundary polygon each plot falls inside — works for BOTH
+// your device-collected plots and imported audit plots. Ideal when you collect first and add the
+// compartment boundaries afterward. Fills blanks only by default; can overwrite if you choose.
+function autoAssignStands(){
+  const total=saved.length+auditPlots.length;
+  if(!total){ toast("No plots to assign",true); return; }
+  const haveBounds = (typeof BOUND!=="undefined"&&BOUND&&BOUND.features&&BOUND.features.length) || (typeof polys!=="undefined"&&polys.length);
+  if(!haveBounds){ toast("Load your compartment boundaries first (Layers → Stand boundaries)",true); return; }
+  const allP=saved.concat(auditPlots);
+  const blanks=allP.filter(p=>!String(p.STANDID||"").trim()).length;
+  const withStand=total-blanks;
+  let overwrite=false;
+  if(withStand){ overwrite = !confirm(`${blanks} plot(s) have no Stand ID, ${withStand} already do.\n\nOK = fill only the blanks (recommended).\nCancel = also OVERWRITE the ${withStand} existing from the boundaries.`); }
+  let set=0, miss=0;
+  const doOne=p=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(!isFinite(lat)||!isFinite(lon)){ miss++; return; }
+    if(!overwrite && String(p.STANDID||"").trim()) return;
+    const s=standOrPolyAt_(lat,lon);
+    if(s && String(s)!==String(p.STANDID||"")){ p.STANDID=String(s); set++; } else if(!s && !String(p.STANDID||"").trim()) miss++; };
+  saved.forEach(doOne); auditPlots.forEach(doOne);
+  persist(); persistAudit(); renderSaved(); if(fmap) renderMapPins();
+  toast(`Assigned ${set} stand${set===1?"":"s"} from boundaries${miss?` · ${miss} still blank (outside any polygon or no GPS)`:""}`);
 }
 function clearAuditPlots(){
   if(!auditPlots.length){ toast("No audit plots",true); return; }
@@ -3032,6 +3070,82 @@ function renderMapPins(){ if(!fpins) return; fpins.clearLayers();
 function editAuditFromMap(i){ closeMap(); editAudit(i); }
 function plotPopupHtml_(p,i){ return `<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b><br>${(p.DATE||"").slice(0,16)}<br><a href="javascript:void(0)" onclick="editFromMap(${i})">✎ Edit this plot ›</a> &nbsp; <a href="javascript:void(0)" style="color:#b23b32" onclick="delFromMap(${i})">Delete ✕</a></div>`; }
 function editFromMap(i){ closeMap(); editPlot(i); }
+// A scrollable table of all plot data for quick review. Key columns are pinned on the left; each row
+// can zoom to that plot on the map. Covers your saved plots and imported audit plots.
+function openDataTable(){
+  const rowsAll = saved.map((p,i)=>({p,i,set:"mine"})).concat(auditPlots.map((p,i)=>({p,i,set:"audit"})));
+  if(!rowsAll.length){ toast("No plots to show yet",true); return; }
+  // Column order: key details first (left), then the rest of the populated fields.
+  const KEY=["set","STANDID","TRACT","PLOTNUM","DATE","TIME","_trees","Y","X","Z"];
+  const KEYLBL={set:"Set",STANDID:"Stand",TRACT:"Tract",PLOTNUM:"Plot",DATE:"Date",TIME:"Time",_trees:"Trees",Y:"Lat",X:"Lon",Z:"Elev"};
+  // gather any other fields that actually hold data, so nothing's hidden
+  const extra=[]; const seen=new Set(KEY);
+  rowsAll.forEach(({p})=>Object.keys(p).forEach(k=>{ if(k[0]==="_"&&k!=="_trees") return; if(seen.has(k)) return; if(p[k]!=null&&p[k]!=="") { seen.add(k); extra.push(k); } }));
+  const cols=KEY.concat(extra);
+  const fmtDate=v=>{ if(!v) return ""; const s=String(v); const m=s.match(/\d{4}-\d{2}-\d{2}/); return m?m[0]:s.slice(0,16); };
+  const cell=(p,k)=>{ if(k==="set") return p.__set==="audit"?'<span style="color:#4aa3e0">audit</span>':'mine';
+    if(k==="DATE") return esc(fmtDate(p[k]));
+    if(k==="Y"||k==="X") return isFinite(parseFloat(p[k]))?parseFloat(p[k]).toFixed(5):"";
+    let v=p[k]; if(v==null) return ""; if(typeof v==="number") v=Math.round(v*100)/100; return esc(String(v)); };
+  const rowHtml=({p,i,set},r)=>{ p.__set=set;
+    const tds=cols.map((k,ci)=>{
+      if(k==="STANDID"){ const val=String(p[k]||""); return `<td class="kcol" onclick="event.stopPropagation();editStandCell('${set}',${i})" title="Tap to set stand" style="cursor:text;color:${val?"#dcefe0":"#e8b84b"}">${val?esc(val):"— set —"}</td>`; }
+      return `<td class="${ci<KEY.length?"kcol":""}">${cell(p,k)}</td>`;
+    }).join("");
+    return `<tr onclick="tableZoom('${set}',${i})" style="cursor:pointer">${tds}</tr>`; };
+  const th=cols.map((k,ci)=>`<th class="${ci<KEY.length?"kcol":""}">${esc(KEYLBL[k]||k)}</th>`).join("");
+  const body=rowsAll.map(rowHtml).join("");
+  const html=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">`+
+    `<button class="btn ghost" type="button" onclick="autoAssignStands();closeDataSheet_();setTimeout(openDataTable,60)">▧ Auto-assign stands from boundaries</button>`+
+    `<button class="btn ghost" type="button" onclick="exportTableCSV()">⬇ Export table (CSV)</button></div>`+
+    `<div style="font-size:12px;color:#a9c9b0;margin-bottom:6px">${rowsAll.length} plot(s) · tap a row to zoom to it on the map · tap a Stand cell to set it. Scroll sideways for all fields.</div>`+
+    `<div class="dtwrap"><table class="dtable"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table></div>`;
+  _dtCols=cols; _dtRows=rowsAll;
+  showDataSheet_("Plot data", html);
+}
+let _dtCols=[], _dtRows=[];
+// Tap a Stand cell to set it (handy for imported plots with blank stands).
+function editStandCell(set,i){
+  const arr=(set==="audit"?auditPlots:saved); const p=arr[i]; if(!p) return;
+  const v=prompt(`Stand ID for plot ${p.PLOTNUM||i+1}:`, String(p.STANDID||""));
+  if(v==null) return; p.STANDID=v.trim();
+  if(set==="audit") persistAudit(); else persist();
+  renderSaved(); if(fmap) renderMapPins();
+  closeDataSheet_(); setTimeout(openDataTable,60);   // refresh the table
+}
+function exportTableCSV(){
+  if(!_dtRows.length){ toast("Nothing to export",true); return; }
+  const q=s=>{ s=String(s==null?"":s); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
+  const head=_dtCols.map(k=>k==="set"?"Set":k).join(",");
+  const lines=_dtRows.map(({p,set})=>{ p.__set=set; return _dtCols.map(k=>{
+    if(k==="set") return set; if(k==="DATE"){ const s=String(p[k]||""); const m=s.match(/\d{4}-\d{2}-\d{2}/); return q(m?m[0]:s); }
+    return q(p[k]); }).join(","); });
+  const blob=new Blob([head+"\n"+lines.join("\n")],{type:"text/csv"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+  a.download="plot-data-"+new Date().toISOString().slice(0,10)+".csv"; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000); toast("Table exported as CSV");
+}
+function tableZoom(set,i){
+  const p=(set==="audit"?auditPlots:saved)[i]; if(!p) return;
+  const lat=parseFloat(p.Y), lon=parseFloat(p.X);
+  if(!isFinite(lat)||!isFinite(lon)){ toast("That plot has no coordinates",true); return; }
+  closeDataSheet_();
+  if($("mapView").style.display!=="block") openMap();
+  setTimeout(()=>{ try{ fmap.setView([lat,lon],18); L.popup({offset:[0,-8]}).setLatLng([lat,lon]).setContent(`<b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b>`).openOn(fmap); }catch(e){} },250);
+}
+// Wide, scrollable sheet (bigger than showInfoSheet_) for the table.
+function showDataSheet_(title,html){
+  let m=$("dataSheet");
+  if(!m){ m=document.createElement("div"); m.id="dataSheet";
+    m.style.cssText="position:fixed;inset:0;z-index:5650;display:none;flex-direction:column;background:#0b160a";
+    m.innerHTML=`<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid #33623a;padding-top:calc(12px + env(safe-area-inset-top))">`+
+      `<div id="dataSheetTitle" style="flex:1;font:700 15px system-ui;color:#eafae8"></div>`+
+      `<button class="btn submit" type="button" onclick="closeDataSheet_()">Done</button></div>`+
+      `<div id="dataSheetBody" style="flex:1;overflow:auto;padding:10px 12px"></div>`;
+    document.body.appendChild(m); }
+  $("dataSheetTitle").textContent=title; $("dataSheetBody").innerHTML=html; m.style.display="flex";
+}
+function closeDataSheet_(){ const m=$("dataSheet"); if(m) m.style.display="none"; }
 function delFromMap(i){ if(fmap) fmap.closePopup(); delPlot(i); renderMapPins(); }
 
 /* ----- set the current plot's location + auto Stand ID ----- */
@@ -3247,11 +3361,20 @@ function openGoToStand(){
   }
   saved.forEach(p=>add(p.STANDID,parseFloat(p.Y),parseFloat(p.X)));
   auditPlots.forEach(p=>add(p.STANDID,parseFloat(p.Y),parseFloat(p.X)));
-  const names=Object.keys(bounds).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
-  if(!names.length){ toast("No stands yet — load a boundary file or save/import a plot with a Stand ID",true); return; }
-  const html=`<input id="gotoSearch" type="text" placeholder="Search stand…" oninput="filterGoto_()" style="width:100%;font-size:16px;margin-bottom:8px;padding:9px 11px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
+  let names=Object.keys(bounds).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+  let title="Go to stand";
+  // If nothing has a Stand ID (e.g. imported plots with blank stands), fall back to listing plots by number.
+  if(!names.length){
+    title="Go to plot";
+    const addP=(label,lat,lng)=>{ if(!isFinite(lat)||!isFinite(lng)) return; (bounds[label]=bounds[label]||[]).push([lat,lng]); };
+    saved.forEach((p,i)=>addP(`Plot ${p.PLOTNUM||i+1}`,parseFloat(p.Y),parseFloat(p.X)));
+    auditPlots.forEach((p,i)=>addP(`Audit ${p.PLOTNUM||i+1}`,parseFloat(p.Y),parseFloat(p.X)));
+    names=Object.keys(bounds).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+  }
+  if(!names.length){ toast("Nothing to zoom to yet — load a boundary file or save/import a plot",true); return; }
+  const html=`<input id="gotoSearch" type="text" placeholder="Search…" oninput="filterGoto_()" style="width:100%;font-size:16px;margin-bottom:8px;padding:9px 11px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
     `<div id="gotoList">${gotoRows_(names)}</div>`;
-  _gotoBounds=bounds; _gotoNames=names; showInfoSheet_("Go to stand", html);
+  _gotoBounds=bounds; _gotoNames=names; showInfoSheet_(title, html);
   setTimeout(()=>{ const s=$("gotoSearch"); if(s) s.focus(); },60);
 }
 let _gotoBounds={}, _gotoNames=[];
