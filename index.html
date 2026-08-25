@@ -206,6 +206,13 @@
   /* more menu */
   .more-list{ display:flex; flex-direction:column; gap:8px; margin-bottom:10px; }
   .more-list button{ text-align:left; padding:13px 14px; border-radius:9px; border:1px solid var(--line2,#33623a); background:#16271a; color:#e8f0e6; font:inherit; font-size:14px; cursor:pointer; }
+  .mgroup{ border:1px solid #24402a; border-radius:10px; overflow:hidden; background:#0f1e0d; }
+  .mgroup>summary{ list-style:none; cursor:pointer; padding:12px 14px; font:700 13px system-ui; color:#8fe6a0; background:#12251a; display:flex; align-items:center; justify-content:space-between; }
+  .mgroup>summary::-webkit-details-marker{ display:none; }
+  .mgroup>summary::after{ content:"▸"; color:#6f9a78; transition:transform .15s; }
+  .mgroup[open]>summary::after{ transform:rotate(90deg); }
+  .mgroup>button{ display:block; width:100%; margin:6px; margin-bottom:0; width:calc(100% - 12px); }
+  .mgroup>button:last-child{ margin-bottom:6px; }
   /* summary */
   .summary-body{ font-size:13px; color:#dfeede; line-height:1.55; }
   .summary-body .big{ display:flex; gap:8px; flex-wrap:wrap; margin:4px 0 12px; }
@@ -733,25 +740,41 @@
   <div class="modal-card">
     <div class="modal-title" style="display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--card);padding:6px 0 12px;margin:0 0 8px;z-index:2">Tools <button type="button" onclick="closeMore()" style="background:#16271a;border:1px solid #33623a;border-radius:8px;color:#cdebcf;width:40px;height:40px;font-size:20px;line-height:1;cursor:pointer;flex:none" aria-label="Close">✕</button></div>
     <div class="more-list">
-      <button type="button" onclick="closeMore();openCruiser()">👤 Data-entry person</button>
-      <button type="button" onclick="closeMore();openSummary()">📊 Stand summary</button>
-      <button type="button" onclick="closeMore();exportBackup()">⬆ Back up all data</button>
-      <button type="button" onclick="closeMore();document.getElementById('restoreInput').click()">⬇ Restore from backup</button>
-      <button type="button" onclick="closeMore();restoreFromSheet()">☁ Restore plots from Sheet</button>
-      <button type="button" onclick="closeMore();buildMySummary()">🧾 Build my summary in the Sheet</button>
-      <button type="button" onclick="closeMore();buildAllSummary()">🗂 Build summary — all plots</button>
-      <button type="button" onclick="closeMore();openReportModal()">📧 Analyze &amp; email report (Excel)</button>
-      <button type="button" onclick="closeMore();reattributePlots()">🧭 Re-attribute plots to compartments</button>
-      <button type="button" onclick="closeMore();openTractAssign()">🏷 Assign tract / property to plots</button>
-      <button type="button" onclick="closeMore();openDataTable()">▦ View plot data table</button>
-      <button type="button" onclick="closeMore();autoAssignStands()">▧ Auto-assign stands from boundaries</button>
-      <button type="button" onclick="closeMore();openImportPlots()">📥 Import past plots (audit)</button>
-      <button type="button" id="pushAuditBtn" onclick="closeMore();pushAuditToSheet()" style="display:none">📤 Push audit plots to the Sheet</button>
-      <button type="button" id="auditSumBtn" onclick="closeMore();buildAuditSummary()" style="display:none">📊 Build AUDIT summary (separate)</button>
-      <button type="button" id="includeAuditBtn" onclick="toggleIncludeAudit()" style="display:none">🔀 Audit in main: OFF (tap to include)</button>
-      <button type="button" id="auditLabelBtn" onclick="closeMore();openAuditLabelPicker()" style="display:none">🏷 Label audit plots by…</button>
-      <button type="button" id="clearAuditBtn" onclick="closeMore();clearAuditPlots()" style="display:none">🗑 Clear audit plots</button>
-      <button type="button" onclick="closeMore();clearAllData()" style="color:#e9a89f">🗑 Start new project (erase all data)</button>
+      <details class="mgroup" open><summary>📊 Analysis</summary>
+        <button type="button" onclick="closeMore();openSummary()">📊 Stand summary (on device)</button>
+        <button type="button" onclick="closeMore();openFullAnalysis('main')">📈 Full analysis — all tabs</button>
+        <button type="button" onclick="closeMore();openDataTable()">▦ View plot data table</button>
+        <button type="button" onclick="closeMore();buildMySummary()">🧾 Build my summary in the Sheet</button>
+        <button type="button" onclick="closeMore();buildAllSummary()">🗂 Build summary — all plots</button>
+      </details>
+      <details class="mgroup"><summary>📤 Export &amp; share</summary>
+        <button type="button" onclick="closeMore();exportPlotsAnalysisShp('main')">📍 Plots + analysis → shapefile (ArcGIS)</button>
+        <button type="button" onclick="closeMore();exportCompartmentsAnalysisShp('main')">⬠ Compartments + analysis → shapefile</button>
+        <button type="button" onclick="closeMore();downloadSheet()">⬇ Download workbook (Excel)</button>
+        <button type="button" onclick="closeMore();openReportModal()">📧 Analyze &amp; email report (Excel)</button>
+      </details>
+      <details class="mgroup"><summary>🗂 Plots &amp; stands</summary>
+        <button type="button" onclick="closeMore();autoAssignStands()">▧ Auto-assign stands from boundaries</button>
+        <button type="button" onclick="closeMore();openTractAssign()">🏷 Assign tract / property to plots</button>
+      </details>
+      <details class="mgroup" id="auditGroup"><summary>🔍 Imported</summary>
+        <button type="button" onclick="closeMore();openImportPlots()">📥 Import plots (another device/source)</button>
+        <button type="button" id="pushAuditBtn" onclick="closeMore();pushAuditToSheet()" style="display:none">📤 Push imported plots to the Sheet</button>
+        <button type="button" id="auditSumBtn" onclick="closeMore();buildAuditSummary()" style="display:none">📊 Build imported-set summary (separate)</button>
+        <button type="button" onclick="closeMore();openFullAnalysis('audit')">📈 Imported-set full analysis</button>
+        <button type="button" onclick="closeMore();exportPlotsAnalysisShp('audit')">📍 Imported plots + analysis → shapefile</button>
+        <button type="button" onclick="closeMore();exportCompartmentsAnalysisShp('audit')">⬠ Imported compartments + analysis → shapefile</button>
+        <button type="button" id="includeAuditBtn" onclick="toggleIncludeAudit()" style="display:none">🔀 Imported in main: OFF (tap to include)</button>
+        <button type="button" id="auditLabelBtn" onclick="closeMore();openAuditLabelPicker()" style="display:none">🏷 Label imported plots by…</button>
+        <button type="button" id="clearAuditBtn" onclick="closeMore();clearAuditPlots()" style="display:none">🗑 Clear imported plots</button>
+      </details>
+      <details class="mgroup"><summary>💾 Data &amp; backup</summary>
+        <button type="button" onclick="closeMore();openCruiser()">👤 Data-entry person</button>
+        <button type="button" onclick="closeMore();exportBackup()">⬆ Back up all data</button>
+        <button type="button" onclick="closeMore();document.getElementById('restoreInput').click()">⬇ Restore from backup</button>
+        <button type="button" onclick="closeMore();restoreFromSheet()">☁ Restore plots from Sheet</button>
+        <button type="button" onclick="closeMore();clearAllData()" style="color:#e9a89f">🗑 Start new project (erase all data)</button>
+      </details>
     </div>
     <div class="modal-actions"><button class="btn ghost" type="button" onclick="closeMore()">Close</button></div>
   </div>
@@ -760,6 +783,13 @@
 <div class="modal" id="standSummary" style="display:none">
   <div class="modal-card">
     <div class="modal-title">Stand summary</div>
+    <div class="sumseg-wrap"><div class="sumseg-label">Plots</div>
+      <div class="seg" id="sumSrcSeg">
+        <button type="button" class="seg-btn on" onclick="setSumSource('mine')">My plots</button>
+        <button type="button" class="seg-btn" onclick="setSumSource('audit')">Imported</button>
+        <button type="button" class="seg-btn" onclick="setSumSource('both')">Both</button>
+      </div>
+    </div>
     <select id="summaryStand" onchange="renderSummary()" style="width:100%;margin-bottom:10px"></select>
     <div class="sumseg-wrap"><div class="sumseg-label">Live-tree metrics include</div>
       <div class="seg" id="sumDbhSeg">
@@ -863,7 +893,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v102";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v108";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1455,7 +1485,7 @@ function finalizeSubmit(d){
     d._src=(auditPlots[editingAudit]||{})._src; d._dup=(auditPlots[editingAudit]||{})._dup||false; d._trees=treeCount();
     auditPlots[editingAudit]=d; persistAudit(); editingAudit=null; setEditMode(false);
     clearDraft(); nextPlot(); renderSaved();
-    window.scrollTo({top:0,behavior:"smooth"}); toast("Audit plot updated"); return;
+    window.scrollTo({top:0,behavior:"smooth"}); toast("Imported plot updated"); return;
   }
   const isUpdate = editingIndex!=null;
   if(isUpdate){ d._id = saved[editingIndex]._id || genId(); saved[editingIndex]=d; }
@@ -1534,7 +1564,7 @@ let editingAudit=null;
 function setEditMode(on,audit){
   $("editBanner").style.display = on?"block":"none";
   if(on){ $("editBanner").innerHTML = audit
-    ? '🔍 Editing an <b>imported audit plot</b> — changes stay in the audit set. <a href="javascript:void(0)" onclick="cancelPlot()">Cancel</a>'
+    ? '🔍 Editing an <b>imported plot</b> — changes stay in the imported plots. <a href="javascript:void(0)" onclick="cancelPlot()">Cancel</a>'
     : '✏️ Editing a saved plot — make changes, then tap <b>Update plot</b>. <a href="javascript:void(0)" onclick="cancelEdit()">Cancel</a>'; }
   document.querySelector(".btn.submit").textContent = on?"Update plot":"Submit plot";
 }
@@ -1633,7 +1663,7 @@ function handleImportedFC_(fc,fname){
     out.push(p);
   });
   auditPlots = auditPlots.concat(out); persistAudit(); renderSaved();
-  const msg = `Imported ${out.length} plot${out.length===1?"":"s"} to the audit set`+
+  const msg = `Imported ${out.length} plot${out.length===1?"":"s"}`+
     (dups?` · ${dups} flagged as possible duplicate${dups===1?"":"s"}`:"")+
     ` · matched ${matched.size} fields`+(skipped.size?` · skipped ${skipped.size} unrecognised`:"");
   showImportSummary_(out.length,dups,[...matched].sort(),[...skipped].sort(),fname);
@@ -1643,36 +1673,36 @@ const IMP_STRUCT=new Set(["SNG","CWD","CAV","SNAG","CAVITY"]);   // habitat feat
 function countImpTrees_(p){ let n=0; for(let i=1;i<=28;i++){ const sp=String(p[`T${i}SP`]||"").trim().toUpperCase(); if(sp&&!IMP_STRUCT.has(sp)) n++; } return n; }
 function showImportSummary_(n,dups,matched,skipped,fname){
   let h=`<div style="color:#dcefe0;font-size:13px;line-height:1.4"><b>${esc(fname||"file")}</b><br>`+
-    `${n} plot${n===1?"":"s"} added to the <b>audit set</b>.</div>`;
-  if(dups) h+=`<div style="margin-top:8px;color:#e8b84b;font-size:12.5px">⚠ ${dups} plot${dups===1?"":"s"} match a Stand+Plot you already have — flagged for review (look for the “dup?” tag in the audit list).</div>`;
+    `${n} plot${n===1?"":"s"} added to your <b>imported plots</b>.</div>`;
+  if(dups) h+=`<div style="margin-top:8px;color:#e8b84b;font-size:12.5px">⚠ ${dups} plot${dups===1?"":"s"} match a Stand+Plot you already have — flagged for review (look for the “dup?” tag in the imported list).</div>`;
   h+=`<div style="margin-top:10px;color:#8fe6a0;font:600 12px system-ui">Matched fields (${matched.length})</div>`+
      `<div style="color:#a9c9b0;font-size:11px;font-family:monospace;max-height:80px;overflow:auto">${matched.map(esc).join(", ")||"—"}</div>`;
   if(skipped.length) h+=`<div style="margin-top:8px;color:#8fb89a;font:600 12px system-ui">Skipped — not in this app (${skipped.length})</div>`+
      `<div style="color:#8fb89a;font-size:11px;font-family:monospace;max-height:60px;overflow:auto">${skipped.map(esc).join(", ")}</div>`;
-  h+=`<div style="margin-top:12px;color:#cdebcf;font-size:12px">Open the map or the Saved-plots list to review them (audit plots are shown in blue). When ready, use <b>⋯ More → Push audit plots to the Sheet</b>.</div>`;
+  h+=`<div style="margin-top:12px;color:#cdebcf;font-size:12px">Open the map or the Saved-plots list to review them (imported plots are shown in blue). When ready, use <b>⋯ More → Push imported plots to the Sheet</b>.</div>`;
   showInfoSheet_("Plots imported", h);
 }
 // Push audit plots into the live Sheet (for analysis). They become normal sent plots.
 function pushAuditToSheet(){
-  if(!auditPlots.length){ toast("No audit plots to push",true); return; }
+  if(!auditPlots.length){ toast("No imported plots to push",true); return; }
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   const dups=auditPlots.filter(p=>p._dup).length;
-  if(!confirm(`Send ${auditPlots.length} audit plot${auditPlots.length===1?"":"s"} to the Google Sheet for separate analysis?`+
+  if(!confirm(`Send ${auditPlots.length} imported plot${auditPlots.length===1?"":"s"} to the Google Sheet for separate analysis?`+
     (dups?`\n\n${dups} are flagged as possible duplicates of plots you already have — they'll be sent too.`:"")+
-    `\n\nThey'll be tagged as AUDIT so you can analyze them apart from your own plots (and merge later).`)) return;
+    `\n\nThey'll be kept as imported plots so you can analyze them apart from your own (and combine later).`)) return;
   let moved=0;
   auditPlots.slice().forEach(p=>{ const q=Object.assign({},p); delete q._audit; delete q._dup; delete q._src; q._sent=false;
     q.PLOTSRC="AUDIT";                       // tag so the Sheet keeps them separate from your plots
     saved.push(q); send(q,true); moved++; });
   auditPlots=[]; persistAudit(); persist(); renderSaved(); netDot();
-  toast(`Pushed ${moved} audit plot${moved===1?"":"s"} — use “Build AUDIT summary” to analyze them`);
+  toast(`Pushed ${moved} imported plot${moved===1?"":"s"} — use “Build imported-set summary” to analyze them`);
 }
 // Trigger the separate AUDIT summary in the Sheet (analyzes only the AUDIT-tagged plots).
 function buildAuditSummary(){
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   jsonpAction_("auditsummary", r=>{
-    if(r&&r.ok) toast(`AUDIT summary built (${r.plots} plots) — see the “AUDIT — …” tabs in the Sheet`);
-    else toast((r&&r.src==="AUDIT")?"No audit plots in the Sheet yet — push some first":"Couldn't build the audit summary",true);
+    if(r&&r.ok) toast(`Imported-set summary built (${r.plots} plots) — see the “AUDIT — …” tabs in the Sheet`);
+    else toast((r&&r.src==="AUDIT")?"No imported plots in the Sheet yet — push some first":"Couldn't build the imported-set summary",true);
   });
 }
 // Merge audit plots into the main set (clears the AUDIT tag, folds them into the normal summary).
@@ -1683,12 +1713,48 @@ function setIncludeAudit_(on){
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   jsonpAction_("includeaudit&on="+(on?"1":"0"), r=>{
     if(r&&r.ok){ _auditIncluded=!!r.included; renderSaved();
-      toast(_auditIncluded?"Audit plots INCLUDED in the main summary":"Audit plots kept SEPARATE from the main summary");
+      toast(_auditIncluded?"Imported plots INCLUDED in the main summary":"Imported plots kept SEPARATE from the main summary");
     } else toast("Couldn't change the setting",true);
   });
 }
 function toggleIncludeAudit(){ setIncludeAudit_(!_auditIncluded); }
-function refreshAuditState_(){ if(!connected) return; jsonpAction_("auditstate", r=>{ if(r&&r.ok){ _auditIncluded=!!r.included; const b=$("includeAuditBtn"); if(b) b.textContent=_auditIncluded?"🔀 Audit in main: ON (tap for separate)":"🔀 Audit in main: OFF (tap to include)"; } }); }
+// Download the whole workbook as Excel — routed through the Apps Script so it works for ANY app user
+// (no Google access to the Sheet needed; the script fetches it as the owner).
+function downloadSheet(){
+  const url=SCRIPT_URL+(SCRIPT_URL.includes("?")?"&":"?")+"action=download";
+  toast("Preparing the workbook…"); window.open(url,"_blank");
+}
+// Full analysis, in-app: fetch every summary tab as JSON and render scrollable tables. Works for
+// everyone (runs as owner) and works offline once fetched.
+let _analysisSet="main";
+function openFullAnalysis(set){
+  if(!connected){ toast("Connect to a Sheet first",true); return; }
+  _analysisSet=set||"main";
+  showDataSheet_("Full analysis — "+(_analysisSet==="audit"?"Audit plots":"My plots"),
+    `<div style="display:flex;gap:8px;margin-bottom:10px">
+       <button class="btn ghost" type="button" onclick="openFullAnalysis('main')" ${_analysisSet==="main"?'style="border-color:#2f7a44;color:#8fe6a0"':""}>My plots</button>
+       <button class="btn ghost" type="button" onclick="openFullAnalysis('audit')" ${_analysisSet==="audit"?'style="border-color:#2f7a44;color:#8fe6a0"':""}>Audit plots</button>
+       <button class="btn ghost" type="button" onclick="openAnalysisPage()">↗ Web page</button>
+     </div><div id="fullAnBody" style="color:#a9c9b0">Loading…</div>`);
+  jsonpAction_("summarydata&set="+encodeURIComponent(_analysisSet), r=>{
+    const el=$("fullAnBody"); if(!el) return;
+    if(!r||!r.ok||!r.sheets||!r.sheets.length){ el.innerHTML=`<div style="padding:8px">No ${_analysisSet==="audit"?"audit ":""}analysis yet. Build it first (📊 Stand summary → or “Build summary — all plots”), then reopen.</div>`; return; }
+    el.innerHTML = r.sheets.map(s=>{
+      const rows=s.rows||[]; if(!rows.length) return "";
+      const head=rows[0]||[], bodyRows=rows.slice(1);
+      const thead="<tr>"+head.map(c=>`<th>${esc(c)}</th>`).join("")+"</tr>";
+      const tb=bodyRows.map(r2=>"<tr>"+r2.map(c=>`<td>${esc(c)}</td>`).join("")+"</tr>").join("");
+      return `<div style="font:700 13px system-ui;color:#8fe6a0;margin:14px 0 5px">${esc(s.name)}</div>`+
+        `<div class="dtwrap"><table class="dtable"><thead>${thead}</thead><tbody>${tb}</tbody></table></div>`;
+    }).join("");
+  });
+}
+// The same analysis as a standalone web page (opens in the browser; shareable, works for everyone).
+function openAnalysisPage(){
+  const url=SCRIPT_URL+(SCRIPT_URL.includes("?")?"&":"?")+"action=summaryhtml&set="+encodeURIComponent(_analysisSet||"main");
+  window.open(url,"_blank");
+}
+function refreshAuditState_(){ if(!connected) return; jsonpAction_("auditstate", r=>{ if(r&&r.ok){ _auditIncluded=!!r.included; const b=$("includeAuditBtn"); if(b) b.textContent=_auditIncluded?"🔀 Imported in main: ON (tap for separate)":"🔀 Imported in main: OFF (tap to include)"; } }); }
 // Small JSONP helper for GET actions that return a result.
 function jsonpAction_(action, cb){
   const name="__cb"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
@@ -1724,8 +1790,8 @@ function autoAssignStands(){
   toast(`Assigned ${set} stand${set===1?"":"s"} from boundaries${miss?` · ${miss} still blank (outside any polygon or no GPS)`:""}`);
 }
 function clearAuditPlots(){
-  if(!auditPlots.length){ toast("No audit plots",true); return; }
-  if(!confirm(`Remove all ${auditPlots.length} audit plots from this device? (Your own saved plots are not affected.)`)) return;
+  if(!auditPlots.length){ toast("No imported plots",true); return; }
+  if(!confirm(`Remove all ${auditPlots.length} imported plots from this device? (Your own saved plots are not affected.)`)) return;
   auditPlots=[]; persistAudit(); renderSaved(); if(fmap) renderMapPins(); toast("Audit plots cleared");
 }
 function nextPlotFor(stand){
@@ -1767,19 +1833,19 @@ function renderSaved(){
     if(cb) cb.style.display=auditPlots.length?"block":"none";
     if(lb) lb.style.display=auditPlots.length?"block":"none";
     if(asb) asb.style.display=connected?"block":"none";
-    if(iab){ iab.style.display=connected?"block":"none"; iab.textContent=_auditIncluded?"🔀 Audit in main: ON (tap for separate)":"🔀 Audit in main: OFF (tap to include)"; } }
+    if(iab){ iab.style.display=connected?"block":"none"; iab.textContent=_auditIncluded?"🔀 Imported in main: ON (tap for separate)":"🔀 Imported in main: OFF (tap to include)"; } }
   if(auditPlots.length){
-    c.innerHTML += `<div class="layer-hd" style="margin:14px 0 4px;color:#7ab0d8">Imported audit plots (${auditPlots.length})</div>`+
+    c.innerHTML += `<div class="layer-hd" style="margin:14px 0 4px;color:#7ab0d8">Imported plots (${auditPlots.length})</div>`+
       `<table class="saved"><thead><tr><th>Stand</th><th>Plot</th><th>Trees</th><th>Flag</th><th></th></tr></thead><tbody>`+
       auditPlots.map((p,i)=>`<tr><td class="num">${esc(p.STANDID||"—")}</td><td class="num">${esc(p.PLOTNUM||"—")}</td>
         <td class="num">${p._trees||0}</td>
-        <td>${p._dup?`<span class="st" style="background:#4a3a12;color:#e8c86a">dup?</span>`:`<span class="st" style="background:#12324a;color:#7ab0d8">audit</span>`}</td>
-        <td style="text-align:right"><button class="tbtn" onclick="editAudit(${i})">Edit</button><button class="tbtn del" onclick="delAudit(${i})" title="Remove from audit set">🗑</button></td></tr>`).join("")+
+        <td>${p._dup?`<span class="st" style="background:#4a3a12;color:#e8c86a">dup?</span>`:`<span class="st" style="background:#12324a;color:#7ab0d8">imported</span>`}</td>
+        <td style="text-align:right"><button class="tbtn" onclick="editAudit(${i})">Edit</button><button class="tbtn del" onclick="delAudit(${i})" title="Remove imported plot">🗑</button></td></tr>`).join("")+
       `</tbody></table>`;
   }
 }
 function editAudit(i){ const p=auditPlots[i]; if(!p) return; loadPlot(p); editingAudit=i; editingIndex=null; setEditMode(true,true); window.scrollTo({top:0,behavior:"smooth"}); }
-function delAudit(i){ const p=auditPlots[i]; if(!p) return; if(!confirm(`Remove audit plot ${p.STANDID||"—"} / ${p.PLOTNUM||"—"} from this device?`)) return; auditPlots.splice(i,1); persistAudit(); renderSaved(); if(fmap) renderMapPins(); }
+function delAudit(i){ const p=auditPlots[i]; if(!p) return; if(!confirm(`Remove imported plot ${p.STANDID||"—"} / ${p.PLOTNUM||"—"} from this device?`)) return; auditPlots.splice(i,1); persistAudit(); renderSaved(); if(fmap) renderMapPins(); }
 let lastDeleted=null;
 function delPlot(i){
   const p=saved[i]; if(!p) return;
@@ -2554,13 +2620,23 @@ function computeStand(plots, includeSmall){
   const habOut=[...PETT_SKIP].map(h=>({label:HAB_LABEL[h]||h,count:hab[h].count,perHa:np?hab[h].stemsSum/np:0,baHa:np?hab[h].baSum/np:0})).filter(x=>x.count>0);
   return {nplots:np,baHa,stemsHa,qmd,meanAge,meanHt,comp,vol:volHa,hab:habOut};
 }
-function openSummary(){
-  if(!saved.length){ toast("No saved plots yet",true); return; }
-  const stands=[...new Set(saved.map(p=>p.STANDID).filter(Boolean))].sort();
+let summarySource="mine";   // "mine" | "audit" | "both"
+function sumPlots_(){ return summarySource==="audit"?auditPlots.slice() : summarySource==="both"?saved.concat(auditPlots) : saved.slice(); }
+function setSumSource(src){ summarySource=src; const seg=$("sumSrcSeg"); if(seg){ const map={mine:0,audit:1,both:2}; [...seg.children].forEach((b,i)=>b.classList.toggle("on", i===map[src])); } populateSummaryStands_(); renderSummary(); }
+function populateSummaryStands_(){
+  const base=sumPlots_();
+  const stands=[...new Set(base.map(p=>p.STANDID).filter(Boolean))].sort();
   const sel=$("summaryStand"), cur=$("STANDID").value;
-  sel.innerHTML = `<option value="__all__">All plots (${saved.length})</option>` +
-    stands.map(s=>`<option value="${esc(s)}">${esc(s)} (${saved.filter(p=>p.STANDID===s).length})</option>`).join("");
+  sel.innerHTML = `<option value="__all__">All plots (${base.length})</option>` +
+    stands.map(s=>`<option value="${esc(s)}">${esc(s)} (${base.filter(p=>p.STANDID===s).length})</option>`).join("");
   sel.value = stands.includes(cur)?cur:"__all__";
+}
+function openSummary(){
+  if(!saved.length && !auditPlots.length){ toast("No plots yet",true); return; }
+  // sensible default: if you only have audit plots loaded, start there
+  if(!saved.length && auditPlots.length) summarySource="audit";
+  const seg=$("sumSrcSeg"); if(seg){ const map={mine:0,audit:1,both:2}; [...seg.children].forEach((b,i)=>b.classList.toggle("on", i===map[summarySource])); }
+  populateSummaryStands_();
   $("standSummary").style.display="flex"; renderSummary();
 }
 let summaryInclSmall=false;   // false = trees ≥10 cm only (default); true = all trees ≥6 cm
@@ -2571,7 +2647,8 @@ function setSumThreshold(small){
 }
 function renderSummary(){
   const inclSmall=summaryInclSmall;
-  const v=$("summaryStand").value, plots = v==="__all__"?saved.slice():saved.filter(p=>p.STANDID===v), s=computeStand(plots, inclSmall);
+  const base=sumPlots_();
+  const v=$("summaryStand").value, plots = v==="__all__"?base.slice():base.filter(p=>p.STANDID===v), s=computeStand(plots, inclSmall);
   const f=(x,d=0)=>x==null?"—":x.toFixed(d);
   const comp = s.comp.slice(0,6).map(c=>`<div class="comp">${esc(c.sp||"?")} ${c.pct.toFixed(0)}%<div class="bar" style="width:${Math.max(4,Math.min(100,c.pct)).toFixed(0)}%"></div></div>`).join("") || "—";
   const hab = (s.hab&&s.hab.length)
@@ -3116,7 +3193,7 @@ function renderMapPins(){ if(!fpins) return; fpins.clearLayers();
     const lbl=auditDotLabel_(p);
     const icon=L.divIcon({className:"",html:`<div style="min-width:22px;height:22px;padding:0 5px;border-radius:11px;background:${col};border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font:700 9px/1 'Courier New',monospace;color:#0a1a28;white-space:nowrap">${esc(lbl)}</div>`,iconSize:null,iconAnchor:[11,11]});
     L.marker([lat,lon],{icon}).addTo(fpins)
-      .bindPopup(`<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b> <span style="color:#2b6ea3">audit</span>${p._dup?' <span style="color:#b6791b">· dup?</span>':""}<br>${(p.DATE||"").slice(0,16)}<br><a href="javascript:void(0)" onclick="editAuditFromMap(${i})">🔍 Review / edit ›</a></div>`);
+      .bindPopup(`<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b> <span style="color:#2b6ea3">imported</span>${p._dup?' <span style="color:#b6791b">· dup?</span>':""}<br>${(p.DATE||"").slice(0,16)}<br><a href="javascript:void(0)" onclick="editAuditFromMap(${i})">🔍 Review / edit ›</a></div>`);
   });
 }
 function editAuditFromMap(i){ closeMap(); editAudit(i); }
@@ -3128,13 +3205,13 @@ function auditDotLabel_(p){
   let s=String(v); if(s.length>6) s=s.slice(0,6); return s;
 }
 function openAuditLabelPicker(){
-  if(!auditPlots.length){ toast("No audit plots to label",true); return; }
+  if(!auditPlots.length){ toast("No imported plots to label",true); return; }
   // offer fields that actually hold data across the audit set
   const fields={}; auditPlots.forEach(p=>Object.keys(p).forEach(k=>{ if(k[0]==="_"||k==="__set") return; if(p[k]!=null&&p[k]!=="") fields[k]=(fields[k]||0)+1; }));
   const pref=["STANDID","PLOTNUM","TRACT","DATE","HTSPP","COMMENT"];
   const keys=Object.keys(fields).sort((a,b)=>{ const pa=pref.indexOf(a),pb=pref.indexOf(b); if(pa>=0||pb>=0) return (pa<0?99:pa)-(pb<0?99:pb); return a.localeCompare(b); });
   const rows=keys.map(k=>`<button type="button" onclick="setAuditLabel('${esc(k)}')" style="display:block;width:100%;text-align:left;padding:10px 12px;margin:4px 0;border-radius:8px;border:1px solid ${k===auditLabelField?"#2f7a44":"#33623a"};background:${k===auditLabelField?"#123a1c":"#16271a"};color:#e8f0e6;font:inherit;font-size:13px;cursor:pointer">${esc(k)} ${k===auditLabelField?"✓":""} <small style="color:#8fb89a">(${fields[k]})</small></button>`).join("");
-  showInfoSheet_("Label audit plots by", `<div style="color:#a9c9b0;font-size:12px;margin-bottom:8px">Pick the field to show inside the blue audit dots on the map.</div>${rows}`);
+  showInfoSheet_("Label imported plots by", `<div style="color:#a9c9b0;font-size:12px;margin-bottom:8px">Pick the field to show inside the blue imported-plot dots on the map.</div>${rows}`);
 }
 function setAuditLabel(k){ auditLabelField=k; try{ STORE&&STORE.setItem("fi_auditlabel",k); }catch(e){} closeInfoSheet_(); if(fmap) renderMapPins(); toast(`Audit plots labelled by ${k}`); }
 function plotPopupHtml_(p,i){ return `<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b><br>${(p.DATE||"").slice(0,16)}<br><a href="javascript:void(0)" onclick="editFromMap(${i})">✎ Edit this plot ›</a> &nbsp; <a href="javascript:void(0)" style="color:#b23b32" onclick="delFromMap(${i})">Delete ✕</a></div>`; }
@@ -3152,7 +3229,7 @@ function openDataTable(){
   rowsAll.forEach(({p})=>Object.keys(p).forEach(k=>{ if(k[0]==="_"&&k!=="_trees") return; if(seen.has(k)) return; if(p[k]!=null&&p[k]!=="") { seen.add(k); extra.push(k); } }));
   const cols=KEY.concat(extra);
   const fmtDate=v=>{ if(!v) return ""; const s=String(v); const m=s.match(/\d{4}-\d{2}-\d{2}/); return m?m[0]:s.slice(0,16); };
-  const cell=(p,k)=>{ if(k==="set") return p.__set==="audit"?'<span style="color:#4aa3e0">audit</span>':'mine';
+  const cell=(p,k)=>{ if(k==="set") return p.__set==="audit"?'<span style="color:#4aa3e0">imported</span>':'mine';
     if(k==="DATE") return esc(fmtDate(p[k]));
     if(k==="Y"||k==="X") return isFinite(parseFloat(p[k]))?parseFloat(p[k]).toFixed(5):"";
     let v=p[k]; if(v==null) return ""; if(typeof v==="number") v=Math.round(v*100)/100; return esc(String(v)); };
@@ -3738,7 +3815,7 @@ function finishSelect(){
 function showSelectionActions_(){
   const n=selected.length, mine=selected.filter(s=>s.set==="mine").length, aud=n-mine;
   const list=selected.slice(0,12).map(s=>`${esc(s.p.STANDID||"—")}/${esc(s.p.PLOTNUM||"?")}${s.set==="audit"?" (audit)":""}`).join(", ")+(n>12?` +${n-12} more`:"");
-  let h=`<div style="color:#dcefe0;font-size:13px;margin-bottom:6px"><b>${n}</b> plot${n===1?"":"s"} selected${aud?` (${mine} yours, ${aud} audit)`:""}.</div>`+
+  let h=`<div style="color:#dcefe0;font-size:13px;margin-bottom:6px"><b>${n}</b> plot${n===1?"":"s"} selected${aud?` (${mine} yours, ${aud} imported)`:""}.</div>`+
     `<div style="color:#a9c9b0;font-size:11px;font-family:monospace;margin-bottom:12px">${list}</div>`+
     `<div style="display:flex;flex-direction:column;gap:8px">`+
     `<button class="btn ghost" type="button" onclick="nameSelected()">🏷 Assign Stand / name to selected</button>`+
@@ -3991,6 +4068,91 @@ function exportPolyShp(){
   const blob=new Blob([zip],{type:"application/zip"}), url=URL.createObjectURL(blob), a=document.createElement("a");
   a.href=url; a.download=base+".zip"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1500);
   toast(`${all.length} polygon${all.length==1?"":"s"} → shapefile (UTM 17N)`);
+}
+
+// Export PLOTS as a point shapefile enriched with each plot's full analysis (forest type, BA, QMD,
+// stems, age, height, %AGS, volume, Plonski, stocking) — ready for ArcGIS. Analysis comes from the
+// Sheet's per-plot feed, so it's the same numbers as the Plot Summary tab.
+function exportPlotsAnalysisShp(set){
+  if(!connected){ toast("Connect to a Sheet first",true); return; }
+  const which=(set==="audit")?"audit":"main";
+  toast("Fetching plot analysis…");
+  jsonpAction_("plotanalysis&set="+which, r=>{
+    const plots=(r&&r.plots)||[];
+    if(!plots.length){ toast(`No analyzed ${which==="audit"?"imported ":""}plots with coordinates in the Sheet`,true); return; }
+    const feats=[], recs=[];
+    plots.forEach(p=>{ const u=utm17n_(p.lat,p.lon); feats.push({pts:[{x:u.x,y:u.y}], box:{xmin:u.x,ymin:u.y,xmax:u.x,ymax:u.y}});
+      recs.push([p.stand||"", p.plot||"", p.ft||"", p.dom||"", p.comp||"",
+        num_(p.ba), num_(p.qmd), num_(p.stems), (p.age===""?"":String(p.age)+(p.ageEst?"*":"")), num_(p.ht),
+        num_(p.ags), num_(p.vol), (p.plonVol===""?"":String(p.plonVol)), (p.stk===""?"":String(p.stk)),
+        p.cruiser||"", (p.date||"").slice(0,16)]); });
+    const {shp,shx}=buildShpSet_(feats,1);
+    const dbf=buildDbf_([
+      {name:"STAND",type:"C",len:12},{name:"PLOT",type:"C",len:8},{name:"FORESTTYPE",type:"C",len:16},
+      {name:"DOM_SP",type:"C",len:6},{name:"COMP",type:"C",len:60},
+      {name:"BA_HA",type:"N",len:10,dec:1},{name:"QMD_CM",type:"N",len:10,dec:1},{name:"STEMS_HA",type:"N",len:10,dec:0},
+      {name:"AGE",type:"C",len:8},{name:"HT_M",type:"N",len:8,dec:1},{name:"PCT_AGS",type:"N",len:6,dec:0},
+      {name:"VOL_M3HA",type:"N",len:10,dec:1},{name:"PLON_VOL",type:"C",len:10},{name:"STOCKING",type:"C",len:10},
+      {name:"CRUISER",type:"C",len:24},{name:"DATE",type:"C",len:16}
+    ], recs);
+    dlShp_((which==="audit"?"FRIimported_plots_analysis":"FRIplots_analysis"),shp,shx,dbf);
+    toast(`${plots.length} plot${plots.length===1?"":"s"} + analysis → shapefile`);
+  });
+}
+// Export COMPARTMENTS as a polygon shapefile enriched with each stand's full analysis. Uses your
+// loaded boundary polygons (matched by the chosen stand field) joined to the Sheet's per-stand analysis.
+function exportCompartmentsAnalysisShp(set){
+  if(!BOUND || !BOUND.features || !BOUND.features.length){ toast("Load your compartment boundaries first (Layers → Stand boundaries)",true); return; }
+  if(!standField){ toast("Pick the stand-name field first (Layers → Stand name field)",true); return; }
+  if(!connected){ toast("Connect to a Sheet first",true); return; }
+  const which=(set==="audit")?"audit":"main";
+  toast("Fetching stand analysis…");
+  jsonpAction_("standanalysis&set="+which, r=>{
+    const byStand={}; ((r&&r.stands)||[]).forEach(s=>byStand[String(s.stand).trim().toLowerCase()]=s);
+    const feats=[], recs=[]; let matched=0;
+    BOUND.features.forEach(f=>{
+      const nm=f.properties?String(f.properties[standField]||"").trim():""; if(!nm) return;
+      const rings=featureRings_(f); if(!rings.length) return;
+      const a=byStand[nm.toLowerCase()]||{};
+      if(a.stand) matched++;
+      rings.forEach(ring=>{
+        // ring: array of [lat,lon] → UTM, correct winding (outer clockwise for ESRI)
+        let u=ring.map(pt=>utm17n_(pt[0],pt[1])); let sa=0; for(let i=0;i<u.length;i++){ const j=(i+1)%u.length; sa+=u[i].x*u[j].y-u[j].x*u[i].y; }
+        if(sa>0) u=u.slice().reverse(); u.push({x:u[0].x,y:u[0].y});
+        let xmin=1/0,ymin=1/0,xmax=-1/0,ymax=-1/0; u.forEach(p=>{ xmin=Math.min(xmin,p.x); ymin=Math.min(ymin,p.y); xmax=Math.max(xmax,p.x); ymax=Math.max(ymax,p.y); });
+        feats.push({pts:u, box:{xmin,ymin,xmax,ymax}});
+        recs.push([nm, (a.nplots||0), a.ft||"", a.dom||"", a.comp||"",
+          num_(a.ba), num_(a.qmd), num_(a.stems), (a.age==null||a.age===""?"":String(a.age)+(a.ageEst?"*":"")), num_(a.ht),
+          num_(a.ags), num_(a.vol), (a.plonVol==null||a.plonVol===""?"":String(a.plonVol)), (a.stk==null||a.stk===""?"":String(a.stk))]);
+      });
+    });
+    if(!feats.length){ toast("No compartments matched the stand field",true); return; }
+    const {shp,shx}=buildShpSet_(feats,5);
+    const dbf=buildDbf_([
+      {name:"STAND",type:"C",len:12},{name:"NPLOTS",type:"N",len:6,dec:0},{name:"FORESTTYPE",type:"C",len:16},
+      {name:"DOM_SP",type:"C",len:6},{name:"COMP",type:"C",len:60},
+      {name:"BA_HA",type:"N",len:10,dec:1},{name:"QMD_CM",type:"N",len:10,dec:1},{name:"STEMS_HA",type:"N",len:10,dec:0},
+      {name:"AGE",type:"C",len:8},{name:"HT_M",type:"N",len:8,dec:1},{name:"PCT_AGS",type:"N",len:6,dec:0},
+      {name:"VOL_M3HA",type:"N",len:10,dec:1},{name:"PLON_VOL",type:"C",len:10},{name:"STOCKING",type:"C",len:10}
+    ], recs);
+    dlShp_((which==="audit"?"FRIimported_compartments_analysis":"FRIcompartments_analysis"),shp,shx,dbf);
+    toast(`${feats.length} compartment${feats.length===1?"":"s"} + analysis → shapefile · ${matched} with data`);
+  });
+}
+function num_(x){ return (x==null||x===""||!isFinite(x))?"":Number(x); }
+// Pull [lat,lon] rings out of a GeoJSON Polygon/MultiPolygon feature.
+function featureRings_(f){
+  const g=f.geometry; if(!g) return []; const out=[];
+  const push=coords=>{ const ring=coords.map(c=>[c[1],c[0]]); if(ring.length>=3) out.push(ring); };
+  if(g.type==="Polygon") g.coordinates.forEach(push);
+  else if(g.type==="MultiPolygon") g.coordinates.forEach(poly=>poly.forEach(push));
+  return out;
+}
+function dlShp_(base,shp,shx,dbf){
+  base=base+"_"+nowStr().replace(/[: ]/g,"-");
+  const zip=zipStore_([{name:base+".shp",data:shp},{name:base+".shx",data:shx},{name:base+".dbf",data:dbf},{name:base+".prj",data:new TextEncoder().encode(PRJ_17N)}]);
+  const blob=new Blob([zip],{type:"application/zip"}), url=URL.createObjectURL(blob), a=document.createElement("a");
+  a.href=url; a.download=base+".zip"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1500);
 }
 
 /* ---- import reference points / lines / polygons (shapefile, GeoJSON, GPX) ---- */
