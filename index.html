@@ -58,8 +58,10 @@
   .mapbtn{ float:right; margin-right:8px; background:#1d2c23; border:1px solid var(--blaze,#c8952a); color:#e8b84b;
     font-size:12px; padding:4px 11px; border-radius:999px; font-family:var(--mono); cursor:pointer; }
   /* ----- map overlay ----- */
-  #mapView{ display:none; position:fixed; inset:0; z-index:5000; background:#0a140a; }
-  #fmap{ position:absolute; inset:0; top:52px; background:#0a140a; }
+  #mapView{ display:none; position:fixed; top:0; left:0; right:0; bottom:0; width:100vw; height:100vh; height:100dvh; z-index:5000; background:#0a140a; }
+  body.map-open{ overflow:hidden; overscroll-behavior:none; }
+  body.map-open #mapView{ touch-action:auto; }   /* the map itself still pans/zooms */
+  #fmap{ position:absolute; top:52px; left:0; right:0; bottom:0; height:auto; background:#0a140a; }
   .leaflet-container{ background:#0a140a; }
   .map-top{ position:absolute; top:0; left:0; right:0; min-height:52px; z-index:5200;
     background:#0f1e0d; border-bottom:1px solid var(--line2,#33623a);
@@ -895,7 +897,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v110";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v112";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2244,8 +2246,41 @@ function openMyLabelPicker(){
 function setMyLabel(k){
   myLabelField=k; try{ STORE&&STORE.setItem("fi_mylabel",k); }catch(e){} closeInfoSheet_();
   const need = (k!=="num");
-  if(need && !Object.keys(_analysisByKey).length){ toast("Fetching analysis…"); fetchMyAnalysis_(ok=>{ if(fmap) renderMapPins(); toast(ok?`Plots labelled by ${k==="num"?"number":k}`:"Couldn't load analysis — showing numbers",!ok); }); }
-  else { if(fmap) renderMapPins(); toast(`Plots labelled by ${k==="num"?"number":k}`); }
+  if(need){
+    toast("Fetching analysis…");
+    fetchMyAnalysis_(ok=>{
+      if(fmap) renderMapPins();
+      if(!ok){ toast("Couldn't load analysis — showing numbers",true); return; }
+      // report how many plots matched an analysis row, so unlabeled dots are explainable
+      let matched=0, unsent=0, nostand=0;
+      saved.forEach(p=>{ const a=_analysisByKey[analysisKey_(p.STANDID,p.PLOTNUM)];
+        if(a) matched++; else { if(p._sent===false) unsent++; if(!String(p.STANDID||"").trim()) nostand++; } });
+      const miss=saved.length-matched;
+      if(miss===0){ toast(`All ${saved.length} plots labelled by ${labelName_(k)}`); return; }
+      // Some plots have no analysis row. If it's because they're not synced, offer to push them now.
+      if(unsent && connected && !isOffline()){
+        showInfoSheet_("Some plots aren't analyzed yet",
+          `<div style="color:#dcefe0;font-size:13px;margin-bottom:6px">${matched}/${saved.length} plots are labelled by <b>${esc(labelName_(k))}</b>.</div>`+
+          `<div style="color:#a9c9b0;font-size:12px;margin-bottom:12px">${miss} plot${miss===1?"":"s"} couldn't be labelled — ${unsent} ${unsent===1?"is":"are"} not yet synced to the Sheet${nostand?`, and ${nostand} ${nostand===1?"has":"have"} no Stand ID`:""}. Analysis is computed from the Sheet, so plots need to sync first.</div>`+
+          `<button class="btn" type="button" onclick="syncUnsentThenLabel_('${esc(k)}')">📤 Sync ${unsent} plot${unsent===1?"":"s"} & re-label</button>`+
+          `<button class="btn ghost" type="button" onclick="closeInfoSheet_()" style="margin-top:8px">Leave as is</button>`);
+      } else {
+        toast(`${matched}/${saved.length} labelled · ${miss} not analyzed`+(nostand?` (${nostand} no stand)`:""),true);
+      }
+    });
+  } else { if(fmap) renderMapPins(); toast(`Plots labelled by number`); }
+}
+function labelName_(k){ const o=MY_LABEL_OPTS.find(x=>x[0]===k); return o?o[1]:k; }
+// Push any unsynced plots to the Sheet, then re-fetch analysis and re-apply the label.
+function syncUnsentThenLabel_(k){
+  const unsent=saved.filter(p=>p._sent===false);
+  if(!unsent.length || !connected || isOffline()){ closeInfoSheet_(); return; }
+  closeInfoSheet_(); toast(`Syncing ${unsent.length} plot${unsent.length===1?"":"s"}…`);
+  let done=0; const total=unsent.length;
+  unsent.forEach(p=>{ send(p,false);
+    // give the sends a moment, then re-fetch analysis and redraw
+  });
+  setTimeout(()=>{ fetchMyAnalysis_(ok=>{ if(fmap) renderMapPins(); if(ok){ let m=0; saved.forEach(p=>{ if(_analysisByKey[analysisKey_(p.STANDID,p.PLOTNUM)]) m++; }); toast(`${m}/${saved.length} plots now labelled by ${labelName_(k)}`);} else toast("Synced — reopen the label to refresh",true); }); }, 1800);
 }
 function fetchCrew(silent){
   if(!connected || isOffline()) return;
@@ -2911,10 +2946,13 @@ async function loadMapLibs(){
 }
 async function openMap(){
   $("mapView").style.display="block";
+  document.body.classList.add("map-open");   // lock page scroll so the form behind can't rubber-band into view on iOS
   try{ await loadMapLibs(); }catch(e){ toast("Map needs a connection the first time",true); }
   if(!window.L){ return; }
   if(!fmap) initMap();
   setTimeout(()=>fmap.invalidateSize(),60);
+  setTimeout(()=>{ try{ fmap.invalidateSize(); }catch(e){} },350);   // iOS: recalc after the dynamic viewport / toolbar settles
+  setTimeout(()=>{ try{ fmap.invalidateSize(); }catch(e){} },800);
   if(BOUND){ pickStandField(); renderBoundaries(); renderLayerList(); document.querySelector(".map-load").classList.add("has"); }
   if(!refLabels.length) loadCachedRefFiles_();   // restore imported reference points/lines across restarts
   loadCachedPdf_();                              // restore a georeferenced PDF across restarts
@@ -2932,7 +2970,7 @@ async function openMap(){
   if(!captureMode){ const ch=$("mapCrosshair"); if(ch) ch.style.display="none"; resetDropBar(); }   // default: New-plot button, no crosshair
   centerMap();
 }
-function closeMap(){ rememberMapView_(); $("mapView").style.display="none"; stopMapGPS(); if(crewTimer){ clearInterval(crewTimer); crewTimer=null; } if(crewRoutesTimer){ clearInterval(crewRoutesTimer); crewRoutesTimer=null; } if(liveOn) stopLive();
+function closeMap(){ rememberMapView_(); $("mapView").style.display="none"; document.body.classList.remove("map-open"); stopMapGPS(); if(crewTimer){ clearInterval(crewTimer); crewTimer=null; } if(crewRoutesTimer){ clearInterval(crewRoutesTimer); crewRoutesTimer=null; } if(liveOn) stopLive();
   if(typeof placeMode!=="undefined" && placeMode){ placeMode=false; if(placeMarker){ fmap.removeLayer(placeMarker); placeMarker=null; } $("toolPlace").classList.remove("on"); resetDropBar(); }
   if(typeof captureMode!=="undefined" && captureMode){ captureMode=false; const ch=$("mapCrosshair"); if(ch) ch.style.display="none"; resetDropBar(); }
   if(typeof selectMode!=="undefined" && selectMode){ selectMode=false; const b=$("toolSelect"); if(b) b.classList.remove("on"); clearSelDraw_(); selPts=[]; resetDropBar(); }
