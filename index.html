@@ -126,10 +126,10 @@
     background:rgba(15,30,13,.95); border:1px solid var(--line2,#33623a); border-radius:9px; padding:8px 11px; box-shadow:0 4px 16px rgba(0,0,0,.5); }
   .measure-bar #measureText{ font-family:var(--mono); font-size:12px; color:#e8b84b; white-space:normal; flex:1; min-width:0; line-height:1.3; }
   .measure-bar button{ flex:none; background:#16271a; border:1px solid var(--line2,#33623a); color:#cdebcf; font:inherit; font-size:11px; text-transform:uppercase; letter-spacing:.05em; padding:6px 10px; border-radius:7px; cursor:pointer; }
-  .map-chips{ position:absolute; left:10px; right:96px; bottom:74px; z-index:5200; display:flex; gap:6px; flex-wrap:wrap; }
+  .map-chips{ position:absolute; left:10px; right:60px; bottom:74px; z-index:5300; display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-start; }
   .map-chips button{ background:rgba(15,30,13,.9); border:1px solid #33623a; color:#cdebcf; font-family:var(--mono); font-size:11px; padding:6px 10px; border-radius:16px; cursor:pointer; box-shadow:0 1px 4px rgba(0,0,0,.4); }
   .map-chips button:active{ background:#123a1c; }
-  .map-legend{ position:absolute; left:10px; bottom:118px; z-index:5200; font-family:var(--mono); font-size:10px;
+  .map-legend{ position:absolute; left:10px; bottom:150px; z-index:5150; pointer-events:none; font-family:var(--mono); font-size:10px;
     color:#9ab; background:rgba(15,30,13,.82); border:1px solid #284a2c; border-radius:7px; padding:6px 9px;
     display:flex; flex-direction:column; gap:3px; }
   .map-legend i{ display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; vertical-align:middle; }
@@ -658,6 +658,8 @@
     <span><i style="background:#4caf50"></i>You</span>
     <span><i style="background:#e8b84b;border-radius:50%"></i>Plot</span>
     <span><i style="background:transparent;border:1px solid #8fd18a"></i>Stand</span>
+    <span id="legImported" style="display:none"><i style="background:#4aa3e0;border-radius:50%"></i>Imported</span>
+    <span id="legDone" style="display:none"><i style="background:#37c26b;border-radius:50%"></i>Done ✓</span>
   </div>
   <div class="live-legend" id="liveLegend" style="display:none"></div>
   <div class="measure-bar" id="measureBar" style="display:none">
@@ -897,7 +899,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v112";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v115";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1487,9 +1489,10 @@ function finalizeSubmit(d){
   if(editingAudit!=null){
     d._audit=true; d._id=(auditPlots[editingAudit]&&auditPlots[editingAudit]._id)||genId();
     d._src=(auditPlots[editingAudit]||{})._src; d._dup=(auditPlots[editingAudit]||{})._dup||false; d._trees=treeCount();
+    d._done=true; d._doneAt=nowStr(); d._doneBy=(cruiser&&cruiser.name)||d.CRUISER||"";   // edited = field-checked/completed
     auditPlots[editingAudit]=d; persistAudit(); editingAudit=null; setEditMode(false);
     clearDraft(); nextPlot(); renderSaved();
-    window.scrollTo({top:0,behavior:"smooth"}); toast("Imported plot updated"); return;
+    window.scrollTo({top:0,behavior:"smooth"}); toast("Imported plot marked complete ✓"); return;
   }
   const isUpdate = editingIndex!=null;
   if(isUpdate){ d._id = saved[editingIndex]._id || genId(); saved[editingIndex]=d; }
@@ -1663,6 +1666,7 @@ function handleImportedFC_(fc,fname){
     p.PLOTNUM = (p.PLOTNUM!=null&&p.PLOTNUM!=="")? String(parseInt(p.PLOTNUM,10)||p.PLOTNUM) : p.PLOTNUM;
     p._id = p._id || genId(); p._sent=false;
     p._trees = countImpTrees_(p);
+    if(/\bDONE\b/.test(String(p.FLAG||""))) p._done=true;   // already completed by another crew member
     p._dup = haveKeys.has(key(p)); if(p._dup) dups++;
     out.push(p);
   });
@@ -1697,6 +1701,7 @@ function pushAuditToSheet(){
   let moved=0;
   auditPlots.slice().forEach(p=>{ const q=Object.assign({},p); delete q._audit; delete q._dup; delete q._src; q._sent=false;
     q.PLOTSRC="AUDIT";                       // tag so the Sheet keeps them separate from your plots
+    if(p._done){ q.FLAG=(String(q.FLAG||"").replace(/\bDONE\b/g,"").trim()+" DONE").trim(); }  // completion marker visible to all users
     saved.push(q); send(q,true); moved++; });
   auditPlots=[]; persistAudit(); persist(); renderSaved(); netDot();
   toast(`Pushed ${moved} imported plot${moved===1?"":"s"} — use “Build imported-set summary” to analyze them`);
@@ -1762,9 +1767,14 @@ function refreshAuditState_(){ if(!connected) return; jsonpAction_("auditstate",
 // Small JSONP helper for GET actions that return a result.
 function jsonpAction_(action, cb){
   const name="__cb"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  let settled=false;
   const clean=()=>{ try{ delete window[name]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
-  window[name]=r=>{ try{ cb(r); }finally{ clean(); } };
-  sc.onerror=()=>{ clean(); toast("Couldn't reach the Sheet",true); };
+  window[name]=r=>{ settled=true; try{ cb(r); }finally{ clean(); } };
+  sc.onerror=()=>{ if(settled) return; settled=true; clean();
+    toast("The Sheet didn't respond. If you just updated the code, redeploy: Deploy → Manage deployments → New version.",true); };
+  // If the script loads but never calls back (old deployment returns plain text), catch it after a wait.
+  setTimeout(()=>{ if(settled) return; settled=true; clean();
+    toast("No response from the Sheet — the app's script may need redeploying (New version).",true); }, 12000);
   sc.src=SCRIPT_URL+sep+"action="+encodeURIComponent(action)+"&callback="+name;
   document.body.appendChild(sc);
   toast("Working in the Sheet…");
@@ -1843,7 +1853,7 @@ function renderSaved(){
       `<table class="saved"><thead><tr><th>Stand</th><th>Plot</th><th>Trees</th><th>Flag</th><th></th></tr></thead><tbody>`+
       auditPlots.map((p,i)=>`<tr><td class="num">${esc(p.STANDID||"—")}</td><td class="num">${esc(p.PLOTNUM||"—")}</td>
         <td class="num">${p._trees||0}</td>
-        <td>${p._dup?`<span class="st" style="background:#4a3a12;color:#e8c86a">dup?</span>`:`<span class="st" style="background:#12324a;color:#7ab0d8">imported</span>`}</td>
+        <td>${p._done?`<span class="st" style="background:#12401f;color:#5fd98a">done ✓</span>`:(p._dup?`<span class="st" style="background:#4a3a12;color:#e8c86a">dup?</span>`:`<span class="st" style="background:#12324a;color:#7ab0d8">imported</span>`)}</td>
         <td style="text-align:right"><button class="tbtn" onclick="editAudit(${i})">Edit</button><button class="tbtn del" onclick="delAudit(${i})" title="Remove imported plot">🗑</button></td></tr>`).join("")+
       `</tbody></table>`;
   }
@@ -3304,14 +3314,26 @@ function renderMapPins(){ if(!fpins) return; fpins.clearLayers();
     L.marker([lat,lon],{icon}).addTo(fpins)
       .bindPopup(plotPopupHtml_(p,i));
   });
-  // Imported audit plots — blue, so they're visually distinct from your own plots.
+  // Imported reference plots. Blue = not yet visited; GREEN with a ✓ = edited/completed in the field,
+  // so the whole crew can see progress at a glance. Amber = possible duplicate of an existing plot.
   auditPlots.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)) return;
-    const col=p._dup?"#e8b84b":"#4aa3e0";
-    const lbl=auditDotLabel_(p);
-    const icon=L.divIcon({className:"",html:`<div style="min-width:22px;height:22px;padding:0 5px;border-radius:11px;background:${col};border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font:700 9px/1 'Courier New',monospace;color:#0a1a28;white-space:nowrap">${esc(lbl)}</div>`,iconSize:null,iconAnchor:[11,11]});
+    const done=!!p._done;
+    const col = done ? "#37c26b" : (p._dup ? "#e8b84b" : "#4aa3e0");
+    const lbl = auditDotLabel_(p);
+    const ring = done ? "border:2px solid #eafff0;box-shadow:0 0 0 2px #1f8f4a,0 2px 7px rgba(0,0,0,.6)"
+                      : "border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6)";
+    const check = done ? `<span style="position:absolute;top:-6px;right:-6px;width:13px;height:13px;border-radius:50%;background:#1f8f4a;border:1.5px solid #fff;color:#fff;font:700 9px/13px system-ui;text-align:center">✓</span>` : "";
+    const icon=L.divIcon({className:"",html:`<div style="position:relative;min-width:22px;height:22px;padding:0 5px;border-radius:11px;background:${col};${ring};display:flex;align-items:center;justify-content:center;font:700 9px/1 'Courier New',monospace;color:${done?"#04220f":"#0a1a28"};white-space:nowrap">${esc(lbl)}${check}</div>`,iconSize:null,iconAnchor:[11,11]});
+    const doneLine = done ? `<br><span style="color:#1f8f4a">✓ completed${p._doneBy?` · ${esc(p._doneBy)}`:""}${p._doneAt?` · ${esc(String(p._doneAt).slice(0,16))}`:""}</span>` : "";
     L.marker([lat,lon],{icon}).addTo(fpins)
-      .bindPopup(`<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b> <span style="color:#2b6ea3">imported</span>${p._dup?' <span style="color:#b6791b">· dup?</span>':""}<br>${(p.DATE||"").slice(0,16)}<br><a href="javascript:void(0)" onclick="editAuditFromMap(${i})">🔍 Review / edit ›</a></div>`);
+      .bindPopup(`<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b> <span style="color:#2b6ea3">${done?"done":"imported"}</span>${p._dup?' <span style="color:#b6791b">· dup?</span>':""}<br>${(p.DATE||"").slice(0,16)}${doneLine}<br><a href="javascript:void(0)" onclick="editAuditFromMap(${i})">🔍 Review / edit ›</a></div>`);
   });
+  // Show the imported / done legend entries only when there are imported plots to explain.
+  try{ const li=$("legImported"), ld=$("legDone");
+    const hasImp=auditPlots.length>0, hasDone=auditPlots.some(p=>p._done);
+    if(li) li.style.display=hasImp?"":"none";
+    if(ld) ld.style.display=hasDone?"":"none";
+  }catch(e){}
 }
 function editAuditFromMap(i){ closeMap(); editAudit(i); }
 // What to show inside audit dots. Default STANDID, falls back to PLOTNUM; user can pick any field.
@@ -3612,7 +3634,8 @@ function fitAllLayers_(quiet){
 }
 function zoomToMe_(){ if(mePos){ try{ fmap.setView([mePos.lat,mePos.lon],17); }catch(e){} } else toast("No GPS fix yet",true); }
 // List stands from loaded boundaries + your plots, then zoom to the chosen one.
-function openGoToStand(){
+function openGoToStand(){ try{ _openGoToStand(); }catch(e){ toast("Couldn't open the stand list: "+(e&&e.message||e),true); } }
+function _openGoToStand(){
   const bounds={};   // stand -> [[lat,lng],...]
   const add=(name,lat,lng)=>{ name=String(name||"").trim(); if(!name||!isFinite(lat)||!isFinite(lng)) return; (bounds[name]=bounds[name]||[]).push([lat,lng]); };
   // Boundaries: use the chosen stand field; if none is set, fall back to a likely name field.
