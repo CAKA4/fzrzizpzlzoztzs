@@ -903,7 +903,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v123";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v124";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2235,7 +2235,7 @@ let myLabelFields = (function(){ try{ const s=STORE&&STORE.getItem("fi_mylabels"
   const old=(STORE&&STORE.getItem("fi_mylabel"))||"num"; return [old]; })();   // migrate old single choice
 let _analysisByKey = {};      // "STAND|PLOT" -> analysis object
 let _analysisByCoord = {};    // "lat,lon" -> analysis object (fallback match for restored plots)
-let _analysisFetchedAt = 0;
+let _analysisFetchedAt = 0, _analysisFeedCount = 0, _analysisSampleKey = "";
 function analysisKey_(stand,plot){ return String(stand||"").trim().toLowerCase()+"|"+String(plot||"").trim(); }
 function coordKey_(lat,lon){ const a=parseFloat(lat), o=parseFloat(lon); if(!isFinite(a)||!isFinite(o)) return null; return a.toFixed(5)+","+o.toFixed(5); }
 function analysisFor_(p){
@@ -2249,7 +2249,7 @@ function fetchMyAnalysis_(then){
   const cb="__myan"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?";
   const sc=document.createElement("script");
   const cleanup=()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
-  window[cb]=resp=>{ try{ _analysisByKey={}; _analysisByCoord={}; ((resp&&resp.plots)||[]).forEach(a=>{ _analysisByKey[analysisKey_(a.stand,a.plot)]=a; const ck=coordKey_(a.lat,a.lon); if(ck) _analysisByCoord[ck]=a; }); _analysisFetchedAt=Date.now(); if(then) then(true); }catch(e){ if(then) then(false); } cleanup(); };
+  window[cb]=resp=>{ try{ _analysisByKey={}; _analysisByCoord={}; const arr=(resp&&resp.plots)||[]; arr.forEach(a=>{ _analysisByKey[analysisKey_(a.stand,a.plot)]=a; const ck=coordKey_(a.lat,a.lon); if(ck) _analysisByCoord[ck]=a; }); _analysisFetchedAt=Date.now(); _analysisFeedCount=arr.length; _analysisSampleKey=arr.length?analysisKey_(arr[0].stand,arr[0].plot):""; if(then) then(true); }catch(e){ if(then) then(false); } cleanup(); };
   sc.onerror=()=>{ cleanup(); if(then) then(false); };
   sc.src=SCRIPT_URL+sep+"action=plotanalysis&set=main&callback="+cb;
   document.body.appendChild(sc);
@@ -2312,6 +2312,18 @@ function applyMyLabels_(){
     let matched=0, unsent=0; saved.forEach(p=>{ if(analysisFor_(p)) matched++; else if(p._sent===false) unsent++; });
     const miss=saved.length-matched, names=myLabelFields.filter(k=>k!=="num").map(labelName_).join(" · ");
     if(miss===0){ toast(`All ${saved.length} plots labelled${names?" by "+names:""}`); return; }
+    // Diagnostic: what did the feed actually return? Helps tell "deployment stale" from "keys don't match".
+    const sampleMine = saved.length?analysisKey_(saved[0].STANDID,saved[0].PLOTNUM):"";
+    const diag = `Analysis feed returned <b>${_analysisFeedCount}</b> row${_analysisFeedCount===1?"":"s"}.`+
+      (_analysisFeedCount? ` Example feed key: <code>${esc(_analysisSampleKey)}</code><br>Your first plot key: <code>${esc(sampleMine)}</code>` : ` The Sheet returned no analysis — the Apps Script may need redeploying (Deploy → New version), or FRIPLOTS has no analyzable rows.`);
+    if(_analysisFeedCount===0 || (matched===0 && _analysisFeedCount>0)){
+      showInfoSheet_("Labeling diagnostic",
+        `<div style="color:#dcefe0;font-size:13px;margin-bottom:8px">${matched}/${saved.length} plots labelled${names?" by <b>"+esc(names)+"</b>":""}.</div>`+
+        `<div style="color:#a9c9b0;font-size:12px;margin-bottom:12px">${diag}</div>`+
+        (unsent?`<button class="btn" type="button" onclick="syncUnsentThenLabel_('multi')">📤 Sync ${unsent} unsynced plot${unsent===1?"":"s"} & re-label</button>`:"")+
+        `<button class="btn ghost" type="button" onclick="closeInfoSheet_()" style="margin-top:8px">Close</button>`);
+      return;
+    }
     if(unsent && connected && !isOffline()){
       showInfoSheet_("Some plots aren't analyzed yet",
         `<div style="color:#dcefe0;font-size:13px;margin-bottom:6px">${matched}/${saved.length} plots labelled${names?" by <b>"+esc(names)+"</b>":""}.</div>`+
