@@ -899,7 +899,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v115";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v116";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1710,7 +1710,7 @@ function pushAuditToSheet(){
 function buildAuditSummary(){
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   jsonpAction_("auditsummary", r=>{
-    if(r&&r.ok) toast(`Imported-set summary built (${r.plots} plots) — see the “AUDIT — …” tabs in the Sheet`);
+    if(r&&r.ok) toast(`Imported-set summary built (${r.plots} plots) — see the “Imported — …” tabs in the Sheet`);
     else toast((r&&r.src==="AUDIT")?"No imported plots in the Sheet yet — push some first":"Couldn't build the imported-set summary",true);
   });
 }
