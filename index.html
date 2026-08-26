@@ -631,6 +631,9 @@
     <div class="map-field" id="mapFieldRow" style="display:none">
       <label>Stand name field</label><select id="standFieldSel" onchange="setStandField(this.value)"></select>
     </div>
+    <div class="map-field" id="ageFieldRow" style="display:none">
+      <label>Age field (auto-fills plot AGE)</label><select id="ageFieldSel" onchange="setAgeField(this.value)"></select>
+    </div>
     <div class="map-field popupfields" id="popupFieldRow" style="display:none">
       <label>Tap-a-stand popup fields</label>
       <div id="popupFieldList" class="popupfield-list"></div>
@@ -900,7 +903,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v117";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v119";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1794,15 +1797,20 @@ function autoAssignStands(){
   const blanks=allP.filter(p=>!String(p.STANDID||"").trim()).length;
   const withStand=total-blanks;
   let overwrite=false;
-  if(withStand){ overwrite = !confirm(`${blanks} plot(s) have no Stand ID, ${withStand} already do.\n\nOK = fill only the blanks (recommended).\nCancel = also OVERWRITE the ${withStand} existing from the boundaries.`); }
-  let set=0, miss=0;
+  if(withStand){ overwrite = !confirm(`${blanks} plot(s) have no Stand ID, ${withStand} already do.\n\nOK = fill only the blanks (recommended).\nCancel = also OVERWRITE the ${withStand} existing from the boundaries.${ageField?`\n\nAGE will be filled from the “${ageField}” field the same way.`:""}`); }
+  let set=0, miss=0, aged=0;
   const doOne=p=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(!isFinite(lat)||!isFinite(lon)){ miss++; return; }
+    // AGE from the polygon — fill blanks (or overwrite if chosen), independent of the stand assignment below.
+    if(ageField){ const age=ageAt_(lat,lon);
+      if(age!=null && (overwrite || String(p.AGE||"").trim()==="") && String(age)!==String(p.AGE||"")){ p.AGE=String(age); if(p._sent) p._sent=false; aged++; } }
     if(!overwrite && String(p.STANDID||"").trim()) return;
     const s=standOrPolyAt_(lat,lon);
-    if(s && String(s)!==String(p.STANDID||"")){ p.STANDID=String(s); set++; } else if(!s && !String(p.STANDID||"").trim()) miss++; };
+    if(s && String(s)!==String(p.STANDID||"")){ p.STANDID=String(s); if(p._sent) p._sent=false; set++; } else if(!s && !String(p.STANDID||"").trim()) miss++; };
   saved.forEach(doOne); auditPlots.forEach(doOne);
   persist(); persistAudit(); renderSaved(); if(fmap) renderMapPins();
-  toast(`Assigned ${set} stand${set===1?"":"s"} from boundaries${miss?` · ${miss} still blank (outside any polygon or no GPS)`:""}`);
+  // push updated device plots so the Sheet reflects new stand/age
+  if(connected && !isOffline()){ const changed=saved.filter(p=>p._sent===false); changed.forEach(p=>send(p,true)); }
+  toast(`Assigned ${set} stand${set===1?"":"s"}${aged?` · filled ${aged} age${aged===1?"":"s"}`:""} from boundaries${miss?` · ${miss} still blank (outside any polygon or no GPS)`:""}`);
 }
 function clearAuditPlots(){
   if(!auditPlots.length){ toast("No imported plots",true); return; }
@@ -2936,14 +2944,14 @@ let photoLayer=null;   // markers for on-device photo locations
 const LIVE_MS=60000;   // share + poll interval (battery-friendly; map GPS already running so no extra fix cost)
 const LIVE_FRESH_MS=5*60*1000;   // within this = "live" (pulsing); older but still today = "last known"
 const CREW_PALETTE=["#ff5252","#4d8bff","#ffb300","#26c281","#b56cff","#26c6da","#ff7043","#9ccc65","#ec407a","#5c6bc0"];
-let mePos=null, meSamples=[], meHeading=null, BOUND=null, standField=null, popupFields=[], mapLibsLoaded=false, boundFiles=[];
+let mePos=null, meSamples=[], meHeading=null, BOUND=null, standField=null, ageField=null, popupFields=[], mapLibsLoaded=false, boundFiles=[];
 function rebuildBound(){ BOUND = boundFiles.length ? {type:"FeatureCollection", features:[].concat(...boundFiles.map(f=>f.features||[]))} : null; }
 // restore cached boundary files (best effort; migrate the old single-layer format)
 try{ if(STORE){
   const bf=STORE.getItem("fi_boundfiles");
   if(bf){ boundFiles=JSON.parse(bf)||[]; }
   else { const b=STORE.getItem("fi_boundaries"); if(b){ const fc=JSON.parse(b); boundFiles=[{id:genId(),name:"Boundaries",features:fc.features||[]}]; } }
-  standField=STORE.getItem("fi_standfield")||null; rebuildBound();
+  standField=STORE.getItem("fi_standfield")||null; ageField=STORE.getItem("fi_agefield")||null; rebuildBound();
   try{ popupFields=JSON.parse(STORE.getItem("fi_popupfields")||"[]")||[]; }catch(e){ popupFields=[]; }
   plotLabelField=STORE.getItem("fi_plotlabel")||"none";
 } }catch(e){}
@@ -3069,7 +3077,7 @@ function loadBoundaries(file){
 function removeBoundFile(id){
   boundFiles=boundFiles.filter(f=>f.id!==id); rebuildBound();
   cacheBoundaries(); renderBoundaries(); renderLayerList(); updateLayerStatus(); updateInStand();
-  if(!boundFiles.length){ const ml=document.querySelector(".map-load"); if(ml) ml.classList.remove("has"); $("standFieldSel").innerHTML=""; $("mapFieldRow").style.display="none"; popupFields=[]; $("popupFieldList").innerHTML=""; $("popupFieldRow").style.display="none"; }
+  if(!boundFiles.length){ const ml=document.querySelector(".map-load"); if(ml) ml.classList.remove("has"); $("standFieldSel").innerHTML=""; $("mapFieldRow").style.display="none"; if($("ageFieldRow")) $("ageFieldRow").style.display="none"; if($("ageFieldSel")) $("ageFieldSel").innerHTML=""; popupFields=[]; $("popupFieldList").innerHTML=""; $("popupFieldRow").style.display="none"; }
   toast("Boundary file removed");
 }
 function renderLayerList(){
@@ -3162,6 +3170,15 @@ function pickStandField(){
   }
   if(standField) sel.value=standField;
   $("mapFieldRow").style.display = keys.length>1 ? "flex" : "none";
+  // Age field selector — optional; "— none —" first, then all fields. Auto-guess a plausible age column.
+  const asel=$("ageFieldSel");
+  if(asel){
+    asel.innerHTML=`<option value="">— none —</option>`+keys.map(k=>`<option value="${esc(k)}">${esc(k)}</option>`).join("");
+    if(ageField && !keys.includes(ageField)) ageField=null;
+    if(!ageField){ ageField = keys.find(k=>/^age$|ageclass|age_?cl|standage|stand_age|origin|yearorig|estage|age_?yr/i.test(k)) || ""; }
+    asel.value=ageField||"";
+    $("ageFieldRow").style.display = keys.length ? "flex" : "none";
+  }
   populatePopupFields(keys);
 }
 function populatePopupFields(keys){
@@ -3179,7 +3196,8 @@ function togglePopupField(k,on){
   cacheBoundaries();
 }
 function setStandField(k){ standField=k; cacheBoundaries(); renderBoundaries(); updateInStand(); }
-function cacheBoundaries(){ try{ if(STORE){ STORE.setItem("fi_boundfiles",JSON.stringify(boundFiles)); STORE.setItem("fi_standfield",standField||""); STORE.setItem("fi_popupfields",JSON.stringify(popupFields)); STORE.removeItem("fi_boundaries"); } }catch(e){} }
+function setAgeField(k){ ageField=k||null; cacheBoundaries(); toast(ageField?`New plots will auto-fill AGE from “${ageField}”`:"Age auto-fill turned off"); }
+function cacheBoundaries(){ try{ if(STORE){ STORE.setItem("fi_boundfiles",JSON.stringify(boundFiles)); STORE.setItem("fi_standfield",standField||""); STORE.setItem("fi_agefield",ageField||""); STORE.setItem("fi_popupfields",JSON.stringify(popupFields)); STORE.removeItem("fi_boundaries"); } }catch(e){} }
 const LABEL_MIN_ZOOM=14, LABEL_MAX=200;   // labels only when zoomed in, only what's on screen, capped
 let boundLabels=[];                        // [{lat,lng,name}] — cheap data, not DOM markers
 function renderBoundaries(){
@@ -3244,6 +3262,15 @@ function standAt(lon,lat){
 }
 // Stand ID for a point: the loaded boundary file wins; otherwise fall back to a hand-drawn area polygon.
 function standOrPolyAt_(lat,lon){ let s=standAt(lon,lat); if(!s){ const h=pointInPolys_(lat,lon); if(h) s=h.name; } return s||null; }
+// AGE for a point: read the chosen age attribute from whichever loaded compartment polygon contains it.
+function ageAt_(lat,lon){
+  if(!BOUND||!ageField) return null;
+  for(const f of BOUND.features){ const polys=f.geometry.type==="Polygon"?[f.geometry.coordinates]:f.geometry.coordinates;
+    for(const rings of polys){ if(pointInRing(lon,lat,rings[0])){ const v=f.properties?f.properties[ageField]:null;
+      if(v==null||String(v).trim()==="") return null;
+      const n=parseFloat(String(v).replace(/[^0-9.\-]/g,"")); return isFinite(n)?n:String(v); } } }
+  return null;
+}
 function pointInRing(lon,lat,ring){ let inside=false;
   for(let i=0,j=ring.length-1;i<ring.length;j=i++){ const xi=ring[i][0],yi=ring[i][1],xj=ring[j][0],yj=ring[j][1];
     if(((yi>lat)!==(yj>lat)) && (lon < (xj-xi)*(lat-yi)/(yj-yi)+xi)) inside=!inside; }
@@ -3456,6 +3483,8 @@ function setLocation(lat,lon,src,alt){
   polyHint_(lat,lon);
   const stand=standAt(lon,lat);
   if(stand){ addStand(stand); standSelect(); setSel($("STANDID"),stand); if(typeof editingIndex!=="undefined"&&editingIndex==null) setField($("PLOTNUM"), nextPlotFor(stand)); }
+  const age=ageAt_(lat,lon);
+  if(age!=null && $("AGE") && String($("AGE").value||"").trim()===""){ setField($("AGE"),String(age)); }
   closeMap();
   toast(stand?`Location set · Stand ID → ${stand}`:"Location set — choose Stand ID");
 }
@@ -3612,6 +3641,9 @@ function fillPlace(lat,lon){
   polyHint_(lat,lon);
   const stand=standOrPolyAt_(lat,lon);
   if(stand){ addStand(stand); standSelect(); setSel($("STANDID"),stand); if(typeof editingIndex!=="undefined"&&editingIndex==null) setField($("PLOTNUM"),nextPlotFor(stand)); }
+  // Auto-fill AGE from the compartment polygon (only when the field is empty, so a typed age is kept).
+  const age=ageAt_(lat,lon);
+  if(age!=null && $("AGE") && String($("AGE").value||"").trim()===""){ setField($("AGE"),String(age)); }
   $("mapStandVal").textContent=stand||"—"; $("mapStandPill").classList.toggle("in",!!stand);
 }
 function confirmPlace(){
