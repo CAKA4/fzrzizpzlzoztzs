@@ -903,7 +903,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v119";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v122";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1476,8 +1476,19 @@ function send(d,isUpdate){
   if(!connected){ toast("Saved on device (not connected yet)",true); return; }
   fetch(SCRIPT_URL,{ method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain;charset=utf-8"}, body:JSON.stringify(d) })
     .then(()=>{ d._sent=true; persist(); renderSaved(); netDot();
-      toast(`${isUpdate?"Updated":"Submitted"} · Stand ${d.STANDID||"—"} plot ${d.PLOTNUM||"—"}`); })
+      toast(`${isUpdate?"Updated":"Submitted"} · Stand ${d.STANDID||"—"} plot ${d.PLOTNUM||"—"}`);
+      scheduleAnalysisRefresh_(); })
     .catch(()=>{ toast("Saved on device — no signal, will need re-send",true); renderSaved(); netDot(); });
+}
+// After a plot reaches the Sheet, refresh the on-the-fly analysis so the new plot can be labelled with
+// its analyzed values right away. Debounced so a burst of submits triggers just one fetch.
+let _analysisRefreshTimer=null;
+function scheduleAnalysisRefresh_(){
+  if(!connected || isOffline()) return;
+  if(myLabelFields && myLabelFields.length && !(myLabelFields.length===1 && myLabelFields[0]==="num")){
+    clearTimeout(_analysisRefreshTimer);
+    _analysisRefreshTimer=setTimeout(()=>{ fetchMyAnalysis_(ok=>{ if(ok && fmap) renderMapPins(); }); }, 2500);
+  }
 }
 
 function submitPlot(){
@@ -2217,77 +2228,100 @@ function openMapExport(){
 function setPlotLabel(field){ plotLabelField=field||"none"; try{ STORE&&STORE.setItem("fi_plotlabel",plotLabelField); }catch(e){}
   if(crewShown && crewData.length) renderCrewPlots(crewData, true); }   // re-label from cache, no re-fetch
 
-// ----- Label YOUR OWN plot dots by an analyzed field (forest type, BA, volume, age, …) -----
-// Own plots normally show PLOTNUM in the yellow dot. We fetch the same per-plot analysis feed the crew
-// layer uses, key it by Stand+Plot, and swap the dot text to the chosen metric.
-let myLabelField = (STORE && STORE.getItem("fi_mylabel")) || "num";   // "num" = plot number (default)
+// ----- Label YOUR OWN plot dots by one or more analyzed fields (forest type, BA, volume, age, …) -----
+// Own plots normally show PLOTNUM. We fetch the per-plot analysis feed, match by Stand+Plot (or coords),
+// and show the chosen value(s) joined with "·". Multiple fields can be selected.
+let myLabelFields = (function(){ try{ const s=STORE&&STORE.getItem("fi_mylabels"); if(s){ const a=JSON.parse(s); if(Array.isArray(a)&&a.length) return a; } }catch(e){}
+  const old=(STORE&&STORE.getItem("fi_mylabel"))||"num"; return [old]; })();   // migrate old single choice
 let _analysisByKey = {};      // "STAND|PLOT" -> analysis object
+let _analysisByCoord = {};    // "lat,lon" -> analysis object (fallback match for restored plots)
 let _analysisFetchedAt = 0;
 function analysisKey_(stand,plot){ return String(stand||"").trim().toLowerCase()+"|"+String(plot||"").trim(); }
+function coordKey_(lat,lon){ const a=parseFloat(lat), o=parseFloat(lon); if(!isFinite(a)||!isFinite(o)) return null; return a.toFixed(5)+","+o.toFixed(5); }
+function analysisFor_(p){
+  let a=_analysisByKey[analysisKey_(p.STANDID,p.PLOTNUM)];
+  if(a) return a;
+  const ck=coordKey_(p.Y,p.X); if(ck && _analysisByCoord[ck]) return _analysisByCoord[ck];
+  return null;
+}
 function fetchMyAnalysis_(then){
   if(!connected || isOffline()){ if(then) then(false); return; }
   const cb="__myan"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?";
   const sc=document.createElement("script");
   const cleanup=()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
-  window[cb]=resp=>{ try{ _analysisByKey={}; ((resp&&resp.plots)||[]).forEach(a=>{ _analysisByKey[analysisKey_(a.stand,a.plot)]=a; }); _analysisFetchedAt=Date.now(); if(then) then(true); }catch(e){ if(then) then(false); } cleanup(); };
+  window[cb]=resp=>{ try{ _analysisByKey={}; _analysisByCoord={}; ((resp&&resp.plots)||[]).forEach(a=>{ _analysisByKey[analysisKey_(a.stand,a.plot)]=a; const ck=coordKey_(a.lat,a.lon); if(ck) _analysisByCoord[ck]=a; }); _analysisFetchedAt=Date.now(); if(then) then(true); }catch(e){ if(then) then(false); } cleanup(); };
   sc.onerror=()=>{ cleanup(); if(then) then(false); };
   sc.src=SCRIPT_URL+sep+"action=plotanalysis&set=main&callback="+cb;
   document.body.appendChild(sc);
 }
-// Text to show inside a saved plot's dot, given the chosen analyzed field.
-function myDotLabel_(p){
-  if(myLabelField==="num") return esc(p.PLOTNUM||"?");
-  const a=_analysisByKey[analysisKey_(p.STANDID,p.PLOTNUM)];
-  if(!a) return esc(p.PLOTNUM||"?");         // fall back to number until analysis arrives
-  let v="";
-  switch(myLabelField){
-    case "ft":    v=a.ft||""; break;
-    case "dom":   v=a.dom||""; break;
-    case "ba":    v=(a.ba===""?"":a.ba); break;
-    case "qmd":   v=(a.qmd===""?"":a.qmd); break;
-    case "stems": v=(a.stems===""?"":a.stems); break;
-    case "age":   v=(a.age===""?"":(a.age+(a.ageEst?"*":""))); break;
-    case "ht":    v=(a.ht===""?"":a.ht); break;
-    case "ags":   v=(a.ags===""?"":a.ags); break;
-    case "vol":   v=(a.vol===""?"":a.vol); break;
-    case "stk":   v=(a.stk===""?"":a.stk); break;
-    default:      v=p.PLOTNUM||"?";
+// One field's display value from an analysis row ("" if none).
+function valForField_(a,k){
+  if(!a) return "";
+  switch(k){
+    case "ft":    return a.ft||"";
+    case "dom":   return a.dom||"";
+    case "ba":    return (a.ba===""?"":String(a.ba));
+    case "qmd":   return (a.qmd===""?"":String(a.qmd));
+    case "stems": return (a.stems===""?"":String(a.stems));
+    case "age":   return (a.age===""?"":String(a.age)+(a.ageEst?"*":""));
+    case "ht":    return (a.ht===""?"":String(a.ht));
+    case "ags":   return (a.ags===""?"":String(a.ags));
+    case "vol":   return (a.vol===""?"":String(a.vol));
+    case "stk":   return (a.stk===""?"":String(a.stk));
+    default:      return "";
   }
-  if(v===""||v==null) return esc(p.PLOTNUM||"?");
-  let s=String(v); if(s.length>7) s=s.slice(0,7); return esc(s);
+}
+// Text inside a saved plot's dot: join each selected field's value with " · ". Number-only or missing
+// analysis falls back to the plot number.
+function myDotLabel_(p){
+  const fields=(myLabelFields&&myLabelFields.length)?myLabelFields:["num"];
+  if(fields.length===1 && fields[0]==="num") return esc(p.PLOTNUM||"?");
+  const a=analysisFor_(p);
+  const parts=[];
+  fields.forEach(k=>{ if(k==="num"){ parts.push(String(p.PLOTNUM||"?")); return; } const v=valForField_(a,k); if(v!=="") parts.push(v); });
+  if(!parts.length) return esc(p.PLOTNUM||"?");
+  let s=parts.join(" · "); if(s.length>22) s=s.slice(0,22); return esc(s);
 }
 const MY_LABEL_OPTS=[["num","Plot number"],["ft","Forest type"],["dom","Dominant species"],["ba","BA m²/ha"],["qmd","QMD cm"],["stems","Stems/ha"],["age","Age"],["ht","Height m"],["ags","% AGS"],["vol","Volume m³/ha"],["stk","Stocking ratio"]];
 function openMyLabelPicker(){
   if(!saved.length){ toast("No plots to label",true); return; }
-  const rows=MY_LABEL_OPTS.map(([k,lbl])=>`<button type="button" onclick="setMyLabel('${k}')" style="display:block;width:100%;text-align:left;padding:11px 12px;margin:4px 0;border-radius:8px;border:1px solid ${k===myLabelField?"#2f7a44":"#33623a"};background:${k===myLabelField?"#123a1c":"#16271a"};color:#e8f0e6;font:inherit;font-size:13px;cursor:pointer">${lbl} ${k===myLabelField?"✓":""}</button>`).join("");
-  showInfoSheet_("Label my plots by", `<div style="color:#a9c9b0;font-size:12px;margin-bottom:8px">Show this value inside each of your yellow plot dots. Analyzed values come from the Sheet — build the summary first if a dot shows only its number.</div>${rows}`);
+  const rows=MY_LABEL_OPTS.map(([k,lbl])=>{ const on=myLabelFields.includes(k);
+    return `<button type="button" onclick="toggleMyLabel_('${k}')" style="display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:11px 12px;margin:4px 0;border-radius:8px;border:1px solid ${on?"#2f7a44":"#33623a"};background:${on?"#123a1c":"#16271a"};color:#e8f0e6;font:inherit;font-size:13px;cursor:pointer">
+      <span style="width:18px;height:18px;border-radius:4px;border:1.5px solid ${on?"#37c26b":"#5a7a5f"};background:${on?"#37c26b":"transparent"};color:#04220f;font:700 12px/18px system-ui;text-align:center">${on?"✓":""}</span>${lbl}</button>`; }).join("");
+  showInfoSheet_("Label my plots by",
+    `<div style="color:#a9c9b0;font-size:12px;margin-bottom:8px">Pick one or more values to show inside your yellow plot dots (joined with “·”). Analyzed values come from the Sheet — new plots fill in automatically once they sync.</div>${rows}`+
+    `<button class="btn" type="button" onclick="applyMyLabels_()" style="margin-top:10px">Apply</button>`);
 }
-function setMyLabel(k){
-  myLabelField=k; try{ STORE&&STORE.setItem("fi_mylabel",k); }catch(e){} closeInfoSheet_();
-  const need = (k!=="num");
-  if(need){
-    toast("Fetching analysis…");
-    fetchMyAnalysis_(ok=>{
-      if(fmap) renderMapPins();
-      if(!ok){ toast("Couldn't load analysis — showing numbers",true); return; }
-      // report how many plots matched an analysis row, so unlabeled dots are explainable
-      let matched=0, unsent=0, nostand=0;
-      saved.forEach(p=>{ const a=_analysisByKey[analysisKey_(p.STANDID,p.PLOTNUM)];
-        if(a) matched++; else { if(p._sent===false) unsent++; if(!String(p.STANDID||"").trim()) nostand++; } });
-      const miss=saved.length-matched;
-      if(miss===0){ toast(`All ${saved.length} plots labelled by ${labelName_(k)}`); return; }
-      // Some plots have no analysis row. If it's because they're not synced, offer to push them now.
-      if(unsent && connected && !isOffline()){
-        showInfoSheet_("Some plots aren't analyzed yet",
-          `<div style="color:#dcefe0;font-size:13px;margin-bottom:6px">${matched}/${saved.length} plots are labelled by <b>${esc(labelName_(k))}</b>.</div>`+
-          `<div style="color:#a9c9b0;font-size:12px;margin-bottom:12px">${miss} plot${miss===1?"":"s"} couldn't be labelled — ${unsent} ${unsent===1?"is":"are"} not yet synced to the Sheet${nostand?`, and ${nostand} ${nostand===1?"has":"have"} no Stand ID`:""}. Analysis is computed from the Sheet, so plots need to sync first.</div>`+
-          `<button class="btn" type="button" onclick="syncUnsentThenLabel_('${esc(k)}')">📤 Sync ${unsent} plot${unsent===1?"":"s"} & re-label</button>`+
-          `<button class="btn ghost" type="button" onclick="closeInfoSheet_()" style="margin-top:8px">Leave as is</button>`);
-      } else {
-        toast(`${matched}/${saved.length} labelled · ${miss} not analyzed`+(nostand?` (${nostand} no stand)`:""),true);
-      }
-    });
-  } else { if(fmap) renderMapPins(); toast(`Plots labelled by number`); }
+// Toggle a field in/out; "num" and analyzed fields can mix. Selecting "num" alone = just numbers.
+function toggleMyLabel_(k){
+  const i=myLabelFields.indexOf(k);
+  if(i>=0){ myLabelFields.splice(i,1); } else { myLabelFields.push(k); }
+  if(!myLabelFields.length) myLabelFields=["num"];
+  try{ STORE&&STORE.setItem("fi_mylabels",JSON.stringify(myLabelFields)); }catch(e){}
+  openMyLabelPicker();   // re-render checks
+}
+function applyMyLabels_(){
+  closeInfoSheet_();
+  try{ STORE&&STORE.setItem("fi_mylabels",JSON.stringify(myLabelFields)); }catch(e){}
+  const onlyNum = myLabelFields.length===1 && myLabelFields[0]==="num";
+  if(onlyNum){ if(fmap) renderMapPins(); toast("Plots labelled by number"); return; }
+  toast("Fetching analysis…");
+  fetchMyAnalysis_(ok=>{
+    if(fmap) renderMapPins();
+    if(!ok){ toast("Couldn't load analysis — showing numbers",true); return; }
+    let matched=0, unsent=0; saved.forEach(p=>{ if(analysisFor_(p)) matched++; else if(p._sent===false) unsent++; });
+    const miss=saved.length-matched, names=myLabelFields.filter(k=>k!=="num").map(labelName_).join(" · ");
+    if(miss===0){ toast(`All ${saved.length} plots labelled${names?" by "+names:""}`); return; }
+    if(unsent && connected && !isOffline()){
+      showInfoSheet_("Some plots aren't analyzed yet",
+        `<div style="color:#dcefe0;font-size:13px;margin-bottom:6px">${matched}/${saved.length} plots labelled${names?" by <b>"+esc(names)+"</b>":""}.</div>`+
+        `<div style="color:#a9c9b0;font-size:12px;margin-bottom:12px">${miss} couldn't be labelled — ${unsent} not yet synced to the Sheet. Analysis is computed from the Sheet, so plots sync first.</div>`+
+        `<button class="btn" type="button" onclick="syncUnsentThenLabel_('multi')">📤 Sync ${unsent} plot${unsent===1?"":"s"} & re-label</button>`+
+        `<button class="btn ghost" type="button" onclick="closeInfoSheet_()" style="margin-top:8px">Leave as is</button>`);
+    } else {
+      toast(`${matched}/${saved.length} labelled · ${miss} not analyzed`,true);
+    }
+  });
 }
 function labelName_(k){ const o=MY_LABEL_OPTS.find(x=>x[0]===k); return o?o[1]:k; }
 // Push any unsynced plots to the Sheet, then re-fetch analysis and re-apply the label.
@@ -2299,7 +2333,7 @@ function syncUnsentThenLabel_(k){
   unsent.forEach(p=>{ send(p,false);
     // give the sends a moment, then re-fetch analysis and redraw
   });
-  setTimeout(()=>{ fetchMyAnalysis_(ok=>{ if(fmap) renderMapPins(); if(ok){ let m=0; saved.forEach(p=>{ if(_analysisByKey[analysisKey_(p.STANDID,p.PLOTNUM)]) m++; }); toast(`${m}/${saved.length} plots now labelled by ${labelName_(k)}`);} else toast("Synced — reopen the label to refresh",true); }); }, 1800);
+  setTimeout(()=>{ fetchMyAnalysis_(ok=>{ if(fmap) renderMapPins(); if(ok){ let m=0; saved.forEach(p=>{ if(analysisFor_(p)) m++; }); const nm=(k==="multi")?myLabelFields.filter(x=>x!=="num").map(labelName_).join(" · "):labelName_(k); toast(`${m}/${saved.length} plots now labelled${nm?" by "+nm:""}`);} else toast("Synced — reopen the label to refresh",true); }); }, 1800);
 }
 function fetchCrew(silent){
   if(!connected || isOffline()) return;
@@ -2978,7 +3012,7 @@ async function openMap(){
   renderMapPins();
   // Re-apply a saved analyzed plot label: if the chosen label isn't the plain plot number, fetch the
   // per-plot analysis (once, when stale) and redraw so the dots show the metric automatically.
-  if(myLabelField && myLabelField!=="num" && connected && !isOffline()){
+  if(myLabelFields && myLabelFields.length && !(myLabelFields.length===1&&myLabelFields[0]==="num") && connected && !isOffline()){
     const stale = !Object.keys(_analysisByKey).length || (Date.now()-_analysisFetchedAt > 120000);
     if(stale) fetchMyAnalysis_(ok=>{ if(ok && fmap) renderMapPins(); });
   }
@@ -3337,7 +3371,7 @@ function nearbyPlotPopup_(latlng){
 }
 function renderMapPins(){ if(!fpins) return; fpins.clearLayers();
   saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)) return;
-    const lbl=myDotLabel_(p); const wide=(myLabelField!=="num"&&lbl.length>2);
+    const lbl=myDotLabel_(p); const nonNum=!(myLabelFields.length===1&&myLabelFields[0]==="num"); const wide=(nonNum&&lbl.length>2);
     const icon=L.divIcon({className:"",html:`<div style="${wide?"min-width:24px;height:22px;padding:0 5px;border-radius:11px":"width:24px;height:24px;border-radius:50%"};background:#e8b84b;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font:700 10px/1 'Courier New',monospace;color:#1a2e18;white-space:nowrap">${lbl}</div>`,iconSize:null,iconAnchor:[12,12]});
     L.marker([lat,lon],{icon}).addTo(fpins)
       .bindPopup(plotPopupHtml_(p,i));
@@ -3691,13 +3725,14 @@ function _openGoToStand(){
     names=Object.keys(bounds).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
   }
   if(!names.length){ toast("Nothing to zoom to yet — load a boundary file or save/import a plot",true); return; }
+  _gotoBounds=bounds; _gotoNames=names;   // set BEFORE building rows — gotoRows_ reads _gotoBounds[n].length
   const html=`<input id="gotoSearch" type="text" placeholder="Search…" oninput="filterGoto_()" style="width:100%;font-size:16px;margin-bottom:8px;padding:9px 11px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
     `<div id="gotoList">${gotoRows_(names)}</div>`;
-  _gotoBounds=bounds; _gotoNames=names; showInfoSheet_(title, html);
+  showInfoSheet_(title, html);
   setTimeout(()=>{ const s=$("gotoSearch"); if(s) s.focus(); },60);
 }
 let _gotoBounds={}, _gotoNames=[];
-function gotoRows_(names){ return names.length ? names.map(n=>`<button type="button" onclick="gotoStand_('${esc(n).replace(/'/g,"\\'")}')" style="display:block;width:100%;text-align:left;padding:10px 12px;margin:4px 0;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6;font:inherit;font-size:14px;cursor:pointer">▧ ${esc(n)} <small style="color:#8fb89a">(${_gotoBounds[n].length} pt)</small></button>`).join("") : `<div class="hint" style="padding:8px;color:#a9c9b0">No match.</div>`; }
+function gotoRows_(names){ return names.length ? names.map(n=>`<button type="button" onclick="gotoStand_('${esc(n).replace(/'/g,"\\'")}')" style="display:block;width:100%;text-align:left;padding:10px 12px;margin:4px 0;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6;font:inherit;font-size:14px;cursor:pointer">▧ ${esc(n)} <small style="color:#8fb89a">(${(_gotoBounds[n]||[]).length} pt)</small></button>`).join("") : `<div class="hint" style="padding:8px;color:#a9c9b0">No match.</div>`; }
 function filterGoto_(){ const q=($("gotoSearch").value||"").trim().toLowerCase(); $("gotoList").innerHTML=gotoRows_(_gotoNames.filter(n=>n.toLowerCase().includes(q))); }
 function gotoStand_(name){ const pts=_gotoBounds[name]; closeInfoSheet_(); if(!pts||!pts.length) return;
   try{ pts.length>1 ? fmap.fitBounds(pts,{padding:[50,50],maxZoom:18}) : fmap.setView(pts[0],17); }catch(e){}
@@ -3994,6 +4029,7 @@ function showSelectionActions_(){
     `<button class="btn ghost" type="button" onclick="nameSelected()">🏷 Assign Stand / name to selected</button>`+
     `<button class="btn ghost" type="button" onclick="tractSelected()">🏷 Assign Tract / property to selected</button>`+
     `<button class="btn ghost" type="button" onclick="numberSelected()">🔢 Auto-number plots (1,2,3… per compartment)</button>`+
+    `<button class="btn ghost" type="button" onclick="ageSelected()">🌲 Fill AGE from compartment</button>`+
     `<button class="btn ghost" type="button" onclick="exportSelected('shp')">⬇ Export selected as shapefile (.zip)</button>`+
     `<button class="btn ghost" type="button" onclick="exportSelected('csv')">⬇ Export selected as CSV</button>`+
     `<button class="btn ghost" type="button" onclick="emailSelected()">📧 Email selected (CSV)</button>`+
@@ -4027,6 +4063,26 @@ function numberSelected(){
   toast(`Numbered ${total} plot${total===1?"":"s"} across ${stands.length} compartment${stands.length===1?"":"s"}`+(nMine&&connected&&!isOffline()?" · updating the Sheet":""));
 }
 function selectedRows_(){ return selected.map(s=>s.p); }
+// Fill AGE on the selected plots from the compartment polygon each falls inside (using the chosen Age field).
+function ageSelected(){
+  const n=selected.length; if(!n) return;
+  if(!ageField){ toast("Pick an Age field first (Layers → Age field)",true); return; }
+  const withAge=selected.filter(s=>String(s.p.AGE||"").trim()!=="").length;
+  let over=false;
+  if(withAge){ over = !confirm(`${withAge} of ${n} selected plot(s) already have an age.\n\nOK = fill only the blank ones.\nCancel = also OVERWRITE the ${withAge} existing ages from the compartment.`); }
+  let set=0, miss=0, nMine=0;
+  selected.forEach(s=>{ const p=s.p; const lat=parseFloat(p.Y), lon=parseFloat(p.X);
+    if(!isFinite(lat)||!isFinite(lon)){ miss++; return; }
+    if(!over && String(p.AGE||"").trim()!=="") return;
+    const age=ageAt_(lat,lon);
+    if(age!=null && String(age)!==String(p.AGE||"")){ p.AGE=String(age); set++; if(s.set==="mine"){ nMine++; if(p._sent) p._sent=false; } }
+    else if(age==null) miss++;
+  });
+  persist(); persistAudit(); renderSaved(); if(fmap) renderMapPins();
+  if(nMine && connected && !isOffline()) selected.filter(s=>s.set==="mine"&&s.p._sent===false).forEach(s=>send(s.p,true));
+  closeInfoSheet_();
+  toast(set?`Filled AGE on ${set} plot${set===1?"":"s"}${miss?` · ${miss} outside a polygon`:""}${nMine&&connected&&!isOffline()?" · updating the Sheet":""}`:(miss?`No ages set · ${miss} outside any polygon or no GPS`:"No ages to fill"),!set);
+}
 // Assign a Stand ID / name to every selected plot (handy for grouping imported plots).
 function nameSelected(){ assignFieldToSelected_("STANDID","Stand ID / name"); }
 // Assign a Tract / property name to every selected plot.
