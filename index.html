@@ -903,7 +903,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v124";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v125";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2283,14 +2283,17 @@ function myDotLabel_(p){
   let s=parts.join(" · "); if(s.length>22) s=s.slice(0,22); return esc(s);
 }
 const MY_LABEL_OPTS=[["num","Plot number"],["ft","Forest type"],["dom","Dominant species"],["ba","BA m²/ha"],["qmd","QMD cm"],["stems","Stems/ha"],["age","Age"],["ht","Height m"],["ags","% AGS"],["vol","Volume m³/ha"],["stk","Stocking ratio"]];
+let _labelPickerOpen=false;
 function openMyLabelPicker(){
   if(!saved.length){ toast("No plots to label",true); return; }
   const rows=MY_LABEL_OPTS.map(([k,lbl])=>{ const on=myLabelFields.includes(k);
     return `<button type="button" onclick="toggleMyLabel_('${k}')" style="display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:11px 12px;margin:4px 0;border-radius:8px;border:1px solid ${on?"#2f7a44":"#33623a"};background:${on?"#123a1c":"#16271a"};color:#e8f0e6;font:inherit;font-size:13px;cursor:pointer">
       <span style="width:18px;height:18px;border-radius:4px;border:1.5px solid ${on?"#37c26b":"#5a7a5f"};background:${on?"#37c26b":"transparent"};color:#04220f;font:700 12px/18px system-ui;text-align:center">${on?"✓":""}</span>${lbl}</button>`; }).join("");
+  _labelPickerOpen=true;
   showInfoSheet_("Label my plots by",
-    `<div style="color:#a9c9b0;font-size:12px;margin-bottom:8px">Pick one or more values to show inside your yellow plot dots (joined with “·”). Analyzed values come from the Sheet — new plots fill in automatically once they sync.</div>${rows}`+
-    `<button class="btn" type="button" onclick="applyMyLabels_()" style="margin-top:10px">Apply</button>`);
+    `<div style="color:#a9c9b0;font-size:12px;margin-bottom:8px">Tick one or more values to show inside your yellow plot dots (joined with “·”), then tap <b>Done</b>. Analyzed values come from the Sheet.</div>${rows}`+
+    `<button class="btn" type="button" onclick="closeInfoSheet_()" style="margin-top:10px">Apply labels</button>`,
+    ()=>{ if(_labelPickerOpen){ _labelPickerOpen=false; applyMyLabels_(); } });   // apply when the sheet closes (Done / outside / Apply)
 }
 // Toggle a field in/out; "num" and analyzed fields can mix. Selecting "num" alone = just numbers.
 function toggleMyLabel_(k){
@@ -2298,10 +2301,10 @@ function toggleMyLabel_(k){
   if(i>=0){ myLabelFields.splice(i,1); } else { myLabelFields.push(k); }
   if(!myLabelFields.length) myLabelFields=["num"];
   try{ STORE&&STORE.setItem("fi_mylabels",JSON.stringify(myLabelFields)); }catch(e){}
-  openMyLabelPicker();   // re-render checks
+  _labelPickerOpen=false;      // re-render shouldn't fire apply; openMyLabelPicker re-arms it
+  openMyLabelPicker();         // re-render checks
 }
 function applyMyLabels_(){
-  closeInfoSheet_();
   try{ STORE&&STORE.setItem("fi_mylabels",JSON.stringify(myLabelFields)); }catch(e){}
   const onlyNum = myLabelFields.length===1 && myLabelFields[0]==="num";
   if(onlyNum){ if(fmap) renderMapPins(); toast("Plots labelled by number"); return; }
@@ -4147,22 +4150,23 @@ function emailSelected(){
 }
 function deleteSelected(){
   const n=selected.length; if(!n) return;
-  const sentIds=selected.filter(s=>s.set==="mine"&&s.p._sent&&s.p._id).map(s=>s.p._id);
+  // Match Sheet rows by the natural key (Stand|Plot|Date) since the app's _id isn't a Sheet column.
+  const sentKeys=selected.filter(s=>s.set==="mine"&&s.p._sent).map(s=>[String(s.p.STANDID||""),String(s.p.PLOTNUM||""),String(s.p.DATE||"")].join("|"));
   if(!confirm(`Delete ${n} selected plot${n===1?"":"s"}?\n\n`+
-    (sentIds.length?`${sentIds.length} already in the Sheet will be moved to a DELETED_PLOTS backup tab there (recoverable).\n`:"")+
+    (sentKeys.length?`${sentKeys.length} already in the Sheet will be moved to a DELETED_PLOTS backup tab there (recoverable).\n`:"")+
     `They'll be removed from this device.`)) return;
   // remove from device (both sets), highest index first so indices stay valid
   selected.filter(s=>s.set==="mine").sort((a,b)=>b.i-a.i).forEach(s=>saved.splice(s.i,1));
   selected.filter(s=>s.set==="audit").sort((a,b)=>b.i-a.i).forEach(s=>auditPlots.splice(s.i,1));
   persist(); persistAudit(); renderSaved(); if(fmap) renderMapPins(); closeInfoSheet_();
   // back up + delete the sent ones from the Sheet
-  if(sentIds.length && connected && !isOffline()){
+  if(sentKeys.length && connected && !isOffline()){
     fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
-      body:JSON.stringify({_action:"deleteplots",ids:sentIds,by:cruiserEmail||cruiser||""})})
-      .then(()=>toast(`Deleted ${n} · ${sentIds.length} moved to the Sheet's DELETED_PLOTS backup`))
+      body:JSON.stringify({_action:"deleteplots",keys:sentKeys,by:cruiserEmail||cruiser||""})})
+      .then(()=>toast(`Deleted ${n} · ${sentKeys.length} moved to the Sheet's DELETED_PLOTS backup`))
       .catch(()=>toast("Deleted on device; couldn't reach the Sheet to back up",true));
   } else {
-    toast(`Deleted ${n} plot${n===1?"":"s"} from this device`+(sentIds.length?" · connect to also back up in the Sheet":""));
+    toast(`Deleted ${n} plot${n===1?"":"s"} from this device`+(sentKeys.length?" · connect to also back up in the Sheet":""));
   }
 }
 
@@ -4227,7 +4231,9 @@ function countInPolygon(){
 // lightweight info sheet reused by both tools
 // A scrollable info popup that sits ABOVE the map (map view is z-index 5000, generic .modal is lower,
 // which is why it used to only appear after leaving the map). Close via Done or tapping the backdrop.
-function showInfoSheet_(title, html){
+let _infoSheetOnClose=null;
+function showInfoSheet_(title, html, onClose){
+  _infoSheetOnClose = (typeof onClose==="function") ? onClose : null;
   let m=$("infoSheet");
   if(!m){ m=document.createElement("div"); m.id="infoSheet";
     m.style.cssText="position:fixed;inset:0;z-index:5600;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.5);padding:16px";
@@ -4240,7 +4246,7 @@ function showInfoSheet_(title, html){
     document.body.appendChild(m); }
   $("infoSheetTitle").textContent=title; $("infoSheetBody").innerHTML=html; m.style.display="flex";
 }
-function closeInfoSheet_(){ const m=$("infoSheet"); if(m) m.style.display="none"; }
+function closeInfoSheet_(){ const m=$("infoSheet"); if(m) m.style.display="none"; const cb=_infoSheetOnClose; _infoSheetOnClose=null; if(cb) try{ cb(); }catch(e){} }
 // Form help — explains the top bar, every section, the red-cell prompts, and the shortcuts.
 function showFormHelp(){
   const row=(ic,t)=>`<div style="display:flex;gap:10px;align-items:flex-start;margin:7px 0"><div style="flex:none;width:30px;text-align:center;font-size:14px;color:#8fe6a0;font-weight:700">${ic}</div><div style="flex:1;color:#dcefe0;font-size:12.5px;line-height:1.35">${t}</div></div>`;
