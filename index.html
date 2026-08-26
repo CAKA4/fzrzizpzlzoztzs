@@ -121,9 +121,9 @@
   .pdf-opacity-bar label{ font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:#7a9a76; }
   .pdf-opacity-bar input[type=range]{ width:90px; accent-color:#c8952a; }
   .pdf-opacity-bar span{ font-size:10px; color:#bfe6cb; width:30px; }
-  .measure-bar{ position:absolute; left:50%; transform:translateX(-50%); bottom:64px; z-index:5300; display:flex; align-items:center; gap:8px;
-    max-width:calc(100vw - 16px); box-sizing:border-box;
-    background:rgba(15,30,13,.95); border:1px solid var(--line2,#33623a); border-radius:9px; padding:8px 11px; box-shadow:0 4px 16px rgba(0,0,0,.5); }
+  .measure-bar{ position:absolute; left:10px; right:10px; bottom:120px; z-index:5400; display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    background:rgba(15,30,13,.94); border:1px solid #33623a; border-radius:10px; padding:9px 11px; box-shadow:0 4px 16px rgba(0,0,0,.5); }
+  body.measuring .map-chips, body.measuring .map-legend, body.measuring .map-drop{ display:none !important; }   /* clear the area readout */
   .measure-bar #measureText{ font-family:var(--mono); font-size:12px; color:#e8b84b; white-space:normal; flex:1; min-width:0; line-height:1.3; }
   .measure-bar button{ flex:none; background:#16271a; border:1px solid var(--line2,#33623a); color:#cdebcf; font:inherit; font-size:11px; text-transform:uppercase; letter-spacing:.05em; padding:6px 10px; border-radius:7px; cursor:pointer; }
   .map-chips{ position:absolute; left:10px; right:60px; bottom:74px; z-index:5300; display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-start; }
@@ -903,7 +903,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v125";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v127";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2251,7 +2251,7 @@ function fetchMyAnalysis_(then){
   const cleanup=()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
   window[cb]=resp=>{ try{ _analysisByKey={}; _analysisByCoord={}; const arr=(resp&&resp.plots)||[]; arr.forEach(a=>{ _analysisByKey[analysisKey_(a.stand,a.plot)]=a; const ck=coordKey_(a.lat,a.lon); if(ck) _analysisByCoord[ck]=a; }); _analysisFetchedAt=Date.now(); _analysisFeedCount=arr.length; _analysisSampleKey=arr.length?analysisKey_(arr[0].stand,arr[0].plot):""; if(then) then(true); }catch(e){ if(then) then(false); } cleanup(); };
   sc.onerror=()=>{ cleanup(); if(then) then(false); };
-  sc.src=SCRIPT_URL+sep+"action=plotanalysis&set=main&callback="+cb;
+  sc.src=SCRIPT_URL+sep+"action=plotanalysis&set=all&callback="+cb;
   document.body.appendChild(sc);
 }
 // One field's display value from an analysis row ("" if none).
@@ -2317,8 +2317,9 @@ function applyMyLabels_(){
     if(miss===0){ toast(`All ${saved.length} plots labelled${names?" by "+names:""}`); return; }
     // Diagnostic: what did the feed actually return? Helps tell "deployment stale" from "keys don't match".
     const sampleMine = saved.length?analysisKey_(saved[0].STANDID,saved[0].PLOTNUM):"";
-    const diag = `Analysis feed returned <b>${_analysisFeedCount}</b> row${_analysisFeedCount===1?"":"s"}.`+
-      (_analysisFeedCount? ` Example feed key: <code>${esc(_analysisSampleKey)}</code><br>Your first plot key: <code>${esc(sampleMine)}</code>` : ` The Sheet returned no analysis — the Apps Script may need redeploying (Deploy → New version), or FRIPLOTS has no analyzable rows.`);
+    let coordHits=0, keyHits=0; saved.forEach(p=>{ if(_analysisByKey[analysisKey_(p.STANDID,p.PLOTNUM)]) keyHits++; const ck=coordKey_(p.Y,p.X); if(ck&&_analysisByCoord[ck]) coordHits++; });
+    const diag = `Analysis feed returned <b>${_analysisFeedCount}</b> row${_analysisFeedCount===1?"":"s"} for ${saved.length} plots.`+
+      (_analysisFeedCount? `<br>Matched by Stand+Plot: <b>${keyHits}</b> · by coordinates: <b>${coordHits}</b><br>Example feed key: <code>${esc(_analysisSampleKey)}</code> · your first plot: <code>${esc(sampleMine)}</code>` : ` The Sheet returned no analysis — the Apps Script may need redeploying (Deploy → New version), or FRIPLOTS has no analyzable rows.`);
     if(_analysisFeedCount===0 || (matched===0 && _analysisFeedCount>0)){
       showInfoSheet_("Labeling diagnostic",
         `<div style="color:#dcefe0;font-size:13px;margin-bottom:8px">${matched}/${saved.length} plots labelled${names?" by <b>"+esc(names)+"</b>":""}.</div>`+
@@ -3043,8 +3044,8 @@ function closeMap(){ rememberMapView_(); $("mapView").style.display="none"; docu
   if(typeof captureMode!=="undefined" && captureMode){ captureMode=false; const ch=$("mapCrosshair"); if(ch) ch.style.display="none"; resetDropBar(); }
   if(typeof selectMode!=="undefined" && selectMode){ selectMode=false; const b=$("toolSelect"); if(b) b.classList.remove("on"); clearSelDraw_(); selPts=[]; resetDropBar(); }
   if(typeof measureMode!=="undefined" && measureMode) clearMeasure();
-  if(typeof routeMode!=="undefined" && routeMode){ routeMode=false; $("toolRoute").classList.remove("on"); $("routeBar").style.display="none"; drawRoute(); }
-  if(typeof polyMode!=="undefined" && polyMode){ polyMode=false; $("toolPoly").classList.remove("on"); $("polyBar").style.display="none"; drawPoly(); }
+  if(typeof routeMode!=="undefined" && routeMode){ routeMode=false; $("toolRoute").classList.remove("on"); $("routeBar").style.display="none"; syncMeasuringClass_(); drawRoute(); }
+  if(typeof polyMode!=="undefined" && polyMode){ polyMode=false; $("toolPoly").classList.remove("on"); $("polyBar").style.display="none"; syncMeasuringClass_(); drawPoly(); }
   if(fmap) fmap.getContainer().style.cursor=""; closeLayersMenu(); }
 function initMap(){
   fmap=L.map("fmap",{zoomControl:false,attributionControl:false,preferCanvas:true}).setView([44.13,-79.49],14);
@@ -3798,7 +3799,7 @@ function toggleMeasure(){
   if(measureMode && routeMode) toggleRoute();
   if(measureMode && polyMode) togglePoly();
   $("toolMeasure").classList.toggle("on",measureMode);
-  if(measureMode){ fmap.getContainer().style.cursor="crosshair"; $("measureBar").style.display="flex"; $("measureText").textContent="Tap your location, then the target"; toast("Tap two points for distance + bearing"); }
+  if(measureMode){ fmap.getContainer().style.cursor="crosshair"; $("measureBar").style.display="flex"; syncMeasuringClass_(); $("measureText").textContent="Tap your location, then the target"; toast("Tap two points for distance + bearing"); }
   else clearMeasure();
 }
 function addMeasurePoint(ll){
@@ -3826,7 +3827,7 @@ function calcArea(pts){ const o=pts[0], c=pts.map(p=>[(p.lng-o.lng)*111320*Math.
   let a=0; for(let i=0;i<c.length;i++){ const j=(i+1)%c.length; a+=c[i][0]*c[j][1]-c[j][0]*c[i][1]; } return Math.abs(a)/2; }
 function clearMeasure(){ measurePts=[]; measureMarks.forEach(m=>fmap.removeLayer(m)); measureMarks=[];
   if(measureLine){ fmap.removeLayer(measureLine); measureLine=null; } measureMode=false; fmap.getContainer().style.cursor="";
-  $("toolMeasure").classList.remove("on"); $("measureBar").style.display="none"; }
+  $("toolMeasure").classList.remove("on"); $("measureBar").style.display="none"; syncMeasuringClass_(); }
 
 /* ---- cruise route: a persistent drawn line, saved across sessions, exportable ---- */
 let routeMode=false, routePts=[], routeLine=null, routeMarks=[];
@@ -3844,13 +3845,13 @@ function updateRoute(){ const n=routePts.length;
 function toggleRoute(){
   routeMode=!routeMode;
   if(routeMode){ if(placeMode) togglePlace(); if(measureMode) clearMeasure(); if(polyMode) togglePoly();
-    $("toolRoute").classList.add("on"); fmap.getContainer().style.cursor="crosshair"; $("routeBar").style.display="flex";
+    $("toolRoute").classList.add("on"); fmap.getContainer().style.cursor="crosshair"; $("routeBar").style.display="flex"; syncMeasuringClass_();
     drawRoute(); updateRoute(); toast(routePts.length?"Editing cruise route — tap to extend":"Tap along your route"); }
-  else { $("toolRoute").classList.remove("on"); fmap.getContainer().style.cursor=""; $("routeBar").style.display="none"; drawRoute(); }
+  else { $("toolRoute").classList.remove("on"); fmap.getContainer().style.cursor=""; $("routeBar").style.display="none"; syncMeasuringClass_(); drawRoute(); }
 }
 function addRoutePoint(ll){ routePts.push([ll.lat,ll.lng]); drawRoute(); updateRoute(); persistRoute(); updateLayerStatus(); shareRoute_(); }
 function undoRoutePt(){ if(!routePts.length){ return; } routePts.pop(); drawRoute(); updateRoute(); persistRoute(); updateLayerStatus(); shareRoute_(); }
-function finishRoute(){ routeMode=false; $("toolRoute").classList.remove("on"); fmap.getContainer().style.cursor=""; $("routeBar").style.display="none";
+function finishRoute(){ routeMode=false; $("toolRoute").classList.remove("on"); fmap.getContainer().style.cursor=""; $("routeBar").style.display="none"; syncMeasuringClass_();
   drawRoute(); persistRoute(); updateLayerStatus(); shareRoute_(); toast(routePts.length>1?`Route saved — ${fmtDist_(routeLen())}, ${routePts.length} pts`:"Route cleared (need 2+ points)"); }
 function clearRoute(){ routePts=[]; if(routeLine){ fmap.removeLayer(routeLine); routeLine=null; } routeMarks.forEach(m=>fmap.removeLayer(m)); routeMarks=[];
   persistRoute(); updateRoute(); updateLayerStatus(); shareRoute_(); toast("Cruise route cleared"); }
@@ -4170,12 +4171,17 @@ function deleteSelected(){
   }
 }
 
+// Hide the map chips/legend while any measure/route/area bar is showing, so its readout isn't covered.
+function syncMeasuringClass_(){
+  const any=["measureBar","routeBar","polyBar"].some(id=>{ const el=$(id); return el && el.style.display!=="none"; });
+  document.body.classList.toggle("measuring", any);
+}
 function togglePoly(){
   polyMode=!polyMode;
   if(polyMode){ if(placeMode) togglePlace(); if(measureMode) clearMeasure(); if(routeMode) toggleRoute();
-    $("toolPoly").classList.add("on"); fmap.getContainer().style.cursor="crosshair"; $("polyBar").style.display="flex"; drawPoly(); updatePoly();
+    $("toolPoly").classList.add("on"); fmap.getContainer().style.cursor="crosshair"; $("polyBar").style.display="flex"; syncMeasuringClass_(); drawPoly(); updatePoly();
     toast(polyPts.length?"Editing area — tap to add corners":"Tap the corners; Save to keep & name it"); }
-  else { $("toolPoly").classList.remove("on"); fmap.getContainer().style.cursor=""; $("polyBar").style.display="none"; drawPoly(); }
+  else { $("toolPoly").classList.remove("on"); fmap.getContainer().style.cursor=""; $("polyBar").style.display="none"; syncMeasuringClass_(); drawPoly(); }
 }
 function addPolyPoint(ll){ const s=snapLatLng_(ll); polyPts.push([s.lat,s.lon]); polyPtsSnap.push(s.snap||null); drawPoly(); updatePoly(); persistPoly(); updateLayerStatus(); }
 
@@ -4308,7 +4314,7 @@ function savePoly(){ if(polyPts.length<3){ toast("Need 3+ points to save an area
   const def= sid || ("P-"+(polys.length+1)); let name=prompt("Stand ID / name for this area:",def); if(name===null) return; name=(name||"").trim()||def;
   polys.push({name:name, pts:polyPts.slice()}); polyPts=[]; polyPtsSnap=[]; persistPoly(); drawPoly(); updatePoly(); updateLayerStatus(); toast(`Saved ${name}${traced?" · closed on boundary":""}`); }
 function finishPoly(){ if(polyPts.length>=3){ const traced=maybeTrace_(); const def="P-"+(polys.length+1); polys.push({name:def, pts:polyPts.slice()}); polyPts=[]; polyPtsSnap=[]; persistPoly(); toast(`Saved ${def}${traced?" · closed on boundary":""}`); }
-  polyMode=false; $("toolPoly").classList.remove("on"); fmap.getContainer().style.cursor=""; $("polyBar").style.display="none"; drawPoly(); updateLayerStatus(); }
+  polyMode=false; $("toolPoly").classList.remove("on"); fmap.getContainer().style.cursor=""; $("polyBar").style.display="none"; syncMeasuringClass_(); drawPoly(); updateLayerStatus(); }
 function clearPoly(){
   if(polyPts.length){ polyPts=[]; polyPtsSnap=[]; persistPoly(); drawPoly(); updatePoly(); updateLayerStatus(); toast("Current outline cleared"); return; }
   if(polys.length){ if(!confirm(`Remove all ${polys.length} drawn area${polys.length==1?"":"s"} from the map?`)) return;
