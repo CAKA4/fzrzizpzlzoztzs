@@ -903,7 +903,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v122";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v123";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3704,16 +3704,24 @@ function zoomToMe_(){ if(mePos){ try{ fmap.setView([mePos.lat,mePos.lon],17); }c
 function openGoToStand(){ try{ _openGoToStand(); }catch(e){ toast("Couldn't open the stand list: "+(e&&e.message||e),true); } }
 function _openGoToStand(){
   const bounds={};   // stand -> [[lat,lng],...]
+  _gotoTract={};     // stand -> tract name (from the compartment layer, if present)
   const add=(name,lat,lng)=>{ name=String(name||"").trim(); if(!name||!isFinite(lat)||!isFinite(lng)) return; (bounds[name]=bounds[name]||[]).push([lat,lng]); };
   // Boundaries: use the chosen stand field; if none is set, fall back to a likely name field.
   if(typeof BOUND!=="undefined"&&BOUND&&BOUND.features){
     let sf=standField;
     if(!sf){ const props=BOUND.features[0]&&BOUND.features[0].properties||{}; sf=Object.keys(props).find(k=>/stand|standid|poly|comp|unit|name|id/i.test(k))||Object.keys(props)[0]; }
+    // find a tract/property field in the layer (TRACT, PROPERTY, etc.)
+    const props0=BOUND.features[0]&&BOUND.features[0].properties||{};
+    const tf=Object.keys(props0).find(k=>/^tract$|tract|property|propname|owner|parcel/i.test(k))||null;
     BOUND.features.forEach(f=>{ const nm=f.properties&&sf?f.properties[sf]:null; if(nm==null||nm==="") return;
+      const key=String(nm).trim();
+      if(tf && f.properties[tf]!=null && String(f.properties[tf]).trim()!=="" && !_gotoTract[key]) _gotoTract[key]=String(f.properties[tf]).trim();
       const pts=[]; collectCoords_([f],pts); pts.forEach(pt=>add(nm,pt[0],pt[1])); });
   }
-  saved.forEach(p=>add(p.STANDID,parseFloat(p.Y),parseFloat(p.X)));
-  auditPlots.forEach(p=>add(p.STANDID,parseFloat(p.Y),parseFloat(p.X)));
+  // fall back to the plot's own TRACT when the polygon didn't supply one
+  const noteTract=p=>{ const s=String(p.STANDID||"").trim(); const t=String(p.TRACT||"").trim(); if(s&&t&&!_gotoTract[s]) _gotoTract[s]=t; };
+  saved.forEach(p=>{ add(p.STANDID,parseFloat(p.Y),parseFloat(p.X)); noteTract(p); });
+  auditPlots.forEach(p=>{ add(p.STANDID,parseFloat(p.Y),parseFloat(p.X)); noteTract(p); });
   let names=Object.keys(bounds).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
   let title="Go to stand";
   // If nothing has a Stand ID (e.g. imported plots with blank stands), fall back to listing plots by number.
@@ -3731,8 +3739,9 @@ function _openGoToStand(){
   showInfoSheet_(title, html);
   setTimeout(()=>{ const s=$("gotoSearch"); if(s) s.focus(); },60);
 }
-let _gotoBounds={}, _gotoNames=[];
-function gotoRows_(names){ return names.length ? names.map(n=>`<button type="button" onclick="gotoStand_('${esc(n).replace(/'/g,"\\'")}')" style="display:block;width:100%;text-align:left;padding:10px 12px;margin:4px 0;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6;font:inherit;font-size:14px;cursor:pointer">▧ ${esc(n)} <small style="color:#8fb89a">(${(_gotoBounds[n]||[]).length} pt)</small></button>`).join("") : `<div class="hint" style="padding:8px;color:#a9c9b0">No match.</div>`; }
+let _gotoBounds={}, _gotoNames=[], _gotoTract={};
+function gotoRows_(names){ return names.length ? names.map(n=>{ const t=_gotoTract[n]; const meta=t?esc(t):`${(_gotoBounds[n]||[]).length} pt`;
+  return `<button type="button" onclick="gotoStand_('${esc(n).replace(/'/g,"\\'")}')" style="display:block;width:100%;text-align:left;padding:10px 12px;margin:4px 0;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6;font:inherit;font-size:14px;cursor:pointer">▧ ${esc(n)} <small style="color:#8fb89a">(${meta})</small></button>`; }).join("") : `<div class="hint" style="padding:8px;color:#a9c9b0">No match.</div>`; }
 function filterGoto_(){ const q=($("gotoSearch").value||"").trim().toLowerCase(); $("gotoList").innerHTML=gotoRows_(_gotoNames.filter(n=>n.toLowerCase().includes(q))); }
 function gotoStand_(name){ const pts=_gotoBounds[name]; closeInfoSheet_(); if(!pts||!pts.length) return;
   try{ pts.length>1 ? fmap.fitBounds(pts,{padding:[50,50],maxZoom:18}) : fmap.setView(pts[0],17); }catch(e){}
