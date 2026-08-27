@@ -905,7 +905,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v133";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v134";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1707,7 +1707,7 @@ function showImportSummary_(n,dups,matched,skipped,fname){
   h+=`<div style="margin-top:12px;color:#cdebcf;font-size:12px">Open the map or the Saved-plots list to review them (imported plots are shown in blue). When ready, use <b>⋯ More → Push imported plots to the Sheet</b>.</div>`;
   showInfoSheet_("Plots imported", h);
 }
-// Push audit plots into the live Sheet (for analysis). They become normal sent plots.
+// Push audit plots into the live Sheet (for analysis) in ONE batch request, then verify the row count.
 function pushAuditToSheet(){
   if(!auditPlots.length){ toast("No imported plots to push",true); return; }
   if(!connected){ toast("Connect to a Sheet first",true); return; }
@@ -1715,13 +1715,47 @@ function pushAuditToSheet(){
   if(!confirm(`Send ${auditPlots.length} imported plot${auditPlots.length===1?"":"s"} to the Google Sheet for separate analysis?`+
     (dups?`\n\n${dups} are flagged as possible duplicates of plots you already have — they'll be sent too.`:"")+
     `\n\nThey'll be kept as imported plots so you can analyze them apart from your own (and combine later).`)) return;
-  let moved=0;
-  auditPlots.slice().forEach(p=>{ const q=Object.assign({},p); delete q._audit; delete q._dup; delete q._src; q._sent=false;
-    q.PLOTSRC="IMPORTED";                    // tag so the Sheet keeps them separate from your plots
-    if(p._done){ q.FLAG=(String(q.FLAG||"").replace(/\bDONE\b/g,"").trim()+" DONE").trim(); }  // completion marker visible to all users
-    saved.push(q); send(q,true); moved++; });
-  auditPlots=[]; persistAudit(); persist(); renderSaved(); netDot();
-  toast(`Pushed ${moved} imported plot${moved===1?"":"s"} — use “Build imported-set summary” to analyze them`);
+  // Build the batch: strip local-only flags, tag as IMPORTED, carry the DONE completion marker.
+  const batch=auditPlots.slice().map(p=>{ const q=Object.assign({},p); delete q._audit; delete q._dup; delete q._src; q._sent=false;
+    q.PLOTSRC="IMPORTED";
+    if(p._done){ q.FLAG=(String(q.FLAG||"").replace(/\bDONE\b/g,"").trim()+" DONE").trim(); }
+    return q; });
+  const n=batch.length;
+  toast(`Pushing ${n} imported plot${n===1?"":"s"}…`);
+  // Read the starting count, push once, then read again to confirm how many landed.
+  sheetPlotCount_(before=>{
+    fetch(SCRIPT_URL,{ method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body:JSON.stringify({ _action:"plotbatch", plots:batch }) })
+      .then(()=>{
+        // give the Sheet a moment to finish writing, then verify
+        setTimeout(()=>{ sheetPlotCount_(after=>{
+          const added=(after>=0&&before>=0)?(after-before):-1;
+          // move pushed plots into the local "saved/sent" set so they show as sent
+          batch.forEach(q=>{ q._sent=true; saved.push(q); });
+          auditPlots=[]; persistAudit(); persist(); renderSaved(); netDot();
+          if(after>=0){
+            if(added===n) toast(`✓ Pushed ${n} — Sheet now has ${after} plot rows.`);
+            else toast(`Pushed ${n}; Sheet added ${added>=0?added:"?"} (now ${after} rows). If short, tap Push again — duplicates are prevented.`,true);
+          } else {
+            toast(`Sent ${n} imported plots. Open the Sheet to confirm.`);
+          }
+        }); }, 1500);
+      })
+      .catch(()=>{ toast("Push failed — no signal. Nothing was cleared; try again.",true); });
+  });
+}
+// Fetch the current FRIPLOTS data-row count via the readable sheetinfo endpoint (JSONP). cb(-1) on failure.
+function sheetPlotCount_(cb){
+  let done=false; const fin=v=>{ if(done)return; done=true; cb(v); };
+  try{
+    const name="__pc"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+    const clean=()=>{ try{ delete window[name]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+    window[name]=r=>{ try{ fin(r&&typeof r.plotrows==="number"?r.plotrows:-1); }finally{ clean(); } };
+    sc.onerror=()=>{ clean(); fin(-1); };
+    setTimeout(()=>{ clean(); fin(-1); }, 12000);
+    sc.src=SCRIPT_URL+sep+"action=sheetinfo&callback="+name;
+    document.body.appendChild(sc);
+  }catch(e){ fin(-1); }
 }
 // Trigger the separate AUDIT summary in the Sheet (analyzes only the AUDIT-tagged plots).
 function buildAuditSummary(){
