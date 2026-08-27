@@ -908,7 +908,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v137";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v138";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1896,7 +1896,7 @@ function pushEditsBatch_(changed){
 function clearAuditPlots(){
   if(!auditPlots.length){ toast("No imported plots",true); return; }
   if(!confirm(`Remove all ${auditPlots.length} imported plots from this device? (Your own saved plots are not affected.)`)) return;
-  auditPlots=[]; persistAudit(); renderSaved(); if(fmap) renderMapPins(); if(typeof renderLayerVis_==="function") renderLayerVis_(); toast("Imported plots removed from this device");
+  auditPlots=[]; persistAudit(); renderSaved(); if(fmap) renderMapPins(); if(typeof renderLayerVis_==="function") renderLayerVis_(); if(typeof updateLayerStatus==="function") updateLayerStatus(); toast("Imported plots removed from this device");
 }
 function nextPlotFor(stand){
   let max=0; const s=stand||"";
@@ -2691,7 +2691,7 @@ function restoreFromSheet(){
         if(isImp){ r._audit=true; auditPlots.push(r); imp++; }   // imported plots go back into the imported (blue) set
         else { saved.push(r); }
         if(rid) haveIds.add(rid); added++; });
-      if(added){ persist(); persistAudit(); renderSaved(); netDot(); if(fmap) renderMapPins(); if(typeof renderLayerVis_==="function") renderLayerVis_(); }
+      if(added){ persist(); persistAudit(); renderSaved(); netDot(); if(fmap) renderMapPins(); if(typeof renderLayerVis_==="function") renderLayerVis_(); if(typeof updateLayerStatus==="function") updateLayerStatus(); }
       toast(added?`Restored ${added} plot${added>1?"s":""} from the Sheet`+(imp?` (${imp} imported)`:""):"No new plots in the Sheet");
     }catch(e){ toast("Restore failed",true); } cleanup(); };
   sc.onerror=()=>{ cleanup(); toast("Restore failed — check connection",true); };
@@ -3326,10 +3326,10 @@ function renderLayerVis_(){
   const trkN=(typeof trackLog!=="undefined"&&trackLog)?trackLog.length:0;
   const bndN=(typeof BOUND!=="undefined"&&BOUND&&BOUND.features)?BOUND.features.length:0;
   const hasPdf=(typeof pdfOverlay!=="undefined"&&pdfOverlay);
-  const impN=(typeof auditPlots!=="undefined"&&auditPlots)?auditPlots.filter(p=>isFinite(parseFloat(p.Y))).length:0;
+  const impN=(typeof auditPlots!=="undefined"&&auditPlots)?auditPlots.length:0;
   // [key, label, count, canLabel]
-  const rows=[["mine","📍 My plots", saved.filter(p=>isFinite(parseFloat(p.Y))).length, false],
-             ["imported","🔵 Imported plots", impN, false],
+  const rows=[["imported","🔵 Imported plots", impN, false],
+             ["mine","📍 My plots", saved.length, false],
              ["bound","▧ Stand boundaries", bndN, true],
              ["ref","• Imported points/lines", refN, true],
              ["track","〰 Track log", trkN, false],
@@ -3805,14 +3805,18 @@ function updateLayerStatus(){
   const near = pct>=85 ? ' <b style="color:#e05c4a">almost full</b>' : pct>=60 ? ' <span style="color:#e8b84b">getting full</span>' : '';
   const dot=c=>`<span class="ls-dot" style="background:${c}"></span>`;
   const plural=(n,w)=>`${n} ${w}${n==1?"":"s"}`;
+  const nMine=(typeof saved!=="undefined"&&saved)?saved.length:0;
+  const nImp=(typeof auditPlots!=="undefined"&&auditPlots)?auditPlots.length:0;
   const rows=[
+    `${dot("#e8b84b")}<span>My plots: <b>${nMine}</b> ${nMine==1?"plot":"plots"}</span>`,
+  ].concat(nImp?[`${dot("#4aa3e0")}<span>Imported plots: <b>${nImp}</b> ${nImp==1?"plot":"plots"}</span>`]:[]).concat([
     `${dot("#8fd18a")}<span>Stand boundaries: <b>${nb}</b> ${nb==1?"file":"files"} <span class="ls-muted">· ${plural(npoly,"polygon")}</span></span>`,
     `${dot("#ff7043")}<span>Reference: <b>${nref}</b> ${nref==1?"feature":"features"} <span class="ls-muted">· ${plural(npt,"point")}</span></span>`,
     `${dot("#90caf9")}<span>PDF map: <b>${pdfOverlay?"1":"0"}</b>${pdfOverlay&&pdfName?` <span class="ls-muted">· ${esc(pdfName)}</span>`:""}</span>`,
     `${dot("#e8b84b")}<span>Track log: <b>${trackLog.length}</b> ${trackLog.length==1?"point":"points"}</span>`,
     `${dot("#3fb7ff")}<span>Cruise route: <b>${routePts.length}</b> ${routePts.length==1?"point":"points"}${routePts.length>1?` <span class="ls-muted">· ${fmtDist_(routeLen())}</span>`:""}</span>`,
     `${dot("#b56cff")}<span>Area polygons: <b>${polys.length+(polyPts.length>=3?1:0)}</b>${(polys.length||polyPts.length>=3)?` <span class="ls-muted">· ${fmtArea_(polys.reduce((a,pg)=>a+polyAreaOf_(pg.pts),0)+(polyPts.length>=3?polyAreaOf_(polyPts):0))} total</span>`:""}</span>`
-  ];
+  ]);
   el.innerHTML=`<div class="ls-hd">Loaded layers</div>`+rows.map(r=>`<div class="ls-row">${r}</div>`).join("")
     +`<div class="ls-row ls-muted" style="margin-top:2px"><span>Saved offline ~${usedK} KB${near}</span><span style="flex:1"></span><span>${pct}%</span></div>`
     +`<div class="ls-bar"><i style="width:${pct}%;background:${barCol}"></i></div>`;
