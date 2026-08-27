@@ -903,7 +903,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v129";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v130";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1715,7 +1715,7 @@ function pushAuditToSheet(){
     `\n\nThey'll be kept as imported plots so you can analyze them apart from your own (and combine later).`)) return;
   let moved=0;
   auditPlots.slice().forEach(p=>{ const q=Object.assign({},p); delete q._audit; delete q._dup; delete q._src; q._sent=false;
-    q.PLOTSRC="AUDIT";                       // tag so the Sheet keeps them separate from your plots
+    q.PLOTSRC="IMPORTED";                    // tag so the Sheet keeps them separate from your plots
     if(p._done){ q.FLAG=(String(q.FLAG||"").replace(/\bDONE\b/g,"").trim()+" DONE").trim(); }  // completion marker visible to all users
     saved.push(q); send(q,true); moved++; });
   auditPlots=[]; persistAudit(); persist(); renderSaved(); netDot();
@@ -4108,11 +4108,22 @@ function numberSelected(){
     arr.forEach((s,idx)=>{ s.p.PLOTNUM=String(idx+1); total++; if(s.set==="mine"){ nMine++; if(s.p._sent) s.p._sent=false; } });
   });
   persist(); persistAudit(); renderSaved(); if(fmap) renderMapPins();
-  if(nMine && connected && !isOffline()) selected.filter(s=>s.set==="mine"&&s.p._sent===false).forEach(s=>send(s.p,true));
+  const _synced=syncEditedSelected_();
   closeInfoSheet_();
-  toast(`Numbered ${total} plot${total===1?"":"s"} across ${realComps||1} compartment${realComps===1?"":"s"}`+(nMine&&connected&&!isOffline()?" · updating the Sheet":""));
+  toast(`Numbered ${total} plot${total===1?"":"s"} across ${realComps||1} compartment${realComps===1?"":"s"}`+(_synced?` · updating ${_synced} in the Sheet`:""));
 }
 function selectedRows_(){ return selected.map(s=>s.p); }
+// Send edited selected plots to the Sheet — BOTH your own and imported plots. Imported plots carry the
+// AUDIT tag so they stay in the imported set; they upsert by _id just like your own.
+function syncEditedSelected_(){
+  if(!connected || isOffline()) return 0;
+  let sent=0;
+  selected.forEach(s=>{ const p=s.p;
+    if(s.set==="audit"){ if(!p._id) p._id=genId(); const q=Object.assign({},p); delete q._audit; delete q._dup; delete q._src; q.PLOTSRC="IMPORTED"; send(q,true); sent++; }
+    else if(p._sent===false){ send(p,true); sent++; }
+  });
+  return sent;
+}
 // Fill AGE on the selected plots from the compartment polygon each falls inside (using the chosen Age field).
 function ageSelected(){
   const n=selected.length; if(!n) return;
@@ -4129,9 +4140,9 @@ function ageSelected(){
     else if(age==null) miss++;
   });
   persist(); persistAudit(); renderSaved(); if(fmap) renderMapPins();
-  if(nMine && connected && !isOffline()) selected.filter(s=>s.set==="mine"&&s.p._sent===false).forEach(s=>send(s.p,true));
+  const _synced=syncEditedSelected_();
   closeInfoSheet_();
-  toast(set?`Filled AGE on ${set} plot${set===1?"":"s"}${miss?` · ${miss} outside a polygon`:""}${nMine&&connected&&!isOffline()?" · updating the Sheet":""}`:(miss?`No ages set · ${miss} outside any polygon or no GPS`:"No ages to fill"),!set);
+  toast(set?`Filled AGE on ${set} plot${set===1?"":"s"}${miss?` · ${miss} outside a polygon`:""}${_synced?` · updating ${_synced} in the Sheet`:""}`:(miss?`No ages set · ${miss} outside any polygon or no GPS`:"No ages to fill"),!set);
 }
 // Assign a Stand ID / name to every selected plot (handy for grouping imported plots).
 function nameSelected(){ assignFieldToSelected_("STANDID","Stand ID / name"); }
@@ -4146,9 +4157,9 @@ function assignFieldToSelected_(field,label){
   selected.forEach(s=>{ s.p[field]=name; if(s.set==="mine"){ nMine++; if(s.p._sent) s.p._sent=false; } });
   if(field==="TRACT" && name){ addTract(name); queueTract(name); if(typeof tractSelect==="function") tractSelect(); }   // add to shared list + sync
   persist(); persistAudit(); renderSaved(); if(fmap) renderMapPins();
-  if(nMine && connected && !isOffline()) selected.filter(s=>s.set==="mine").forEach(s=>send(s.p,true));   // update the Sheet
+  const _synced=syncEditedSelected_();   // update the Sheet (own + imported)
   closeInfoSheet_();
-  toast(`Set ${field==="TRACT"?"tract":"stand"} “${name}” on ${n} plot${n===1?"":"s"}`+(nMine&&connected&&!isOffline()?" · updating the Sheet":""));
+  toast(`Set ${field==="TRACT"?"tract":"stand"} “${name}” on ${n} plot${n===1?"":"s"}`+(_synced?` · updating ${_synced} in the Sheet`:""));
 }
 function exportSelected(kind){
   const rows=selectedRows_().filter(p=>{ if(kind==="shp"){ const x=parseFloat(p.X),y=parseFloat(p.Y); return isFinite(x)&&isFinite(y);} return true; });
