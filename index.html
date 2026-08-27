@@ -780,6 +780,7 @@
         <button type="button" id="clearAuditBtn" onclick="closeMore();clearAuditPlots()" style="display:none">🗑 Clear imported plots</button>
       </details>
       <details class="mgroup"><summary>💾 Data &amp; backup</summary>
+        <button type="button" id="pushAuditBtnMore" onclick="closeMore();pushAuditToSheet()" style="display:none">📤 Push imported plots to the Sheet</button>
         <button type="button" onclick="closeMore();openCruiser()">👤 Data-entry person</button>
         <button type="button" onclick="closeMore();exportBackup()">⬆ Back up all data</button>
         <button type="button" onclick="closeMore();document.getElementById('restoreInput').click()">⬇ Restore from backup</button>
@@ -904,7 +905,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v132";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v133";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1880,6 +1881,7 @@ function renderSaved(){
   // Audit set (imported past plots) — shown separately, editable, with duplicate flags.
   { const pb=$("pushAuditBtn"), cb=$("clearAuditBtn"), lb=$("auditLabelBtn"), asb=$("auditSumBtn"), iab=$("includeAuditBtn");
     if(pb) pb.style.display=auditPlots.length?"block":"none";
+    { const pbm=$("pushAuditBtnMore"); if(pbm) pbm.style.display=auditPlots.length?"block":"none"; }
     if(cb) cb.style.display=auditPlots.length?"block":"none";
     if(lb) lb.style.display=auditPlots.length?"block":"none";
     if(asb) asb.style.display=connected?"block":"none";
@@ -2188,7 +2190,7 @@ function zipStore(files){   // ZIP with "stored" (uncompressed) entries — enou
 /* ====================== FIELD TOOLS ====================== */
 
 /* ---------- More menu ---------- */
-function openMore(){ $("moreMenu").style.display="flex"; try{ if(connected) refreshAuditState_(); }catch(e){} }
+function openMore(){ $("moreMenu").style.display="flex"; try{ const pbm=$("pushAuditBtnMore"); if(pbm) pbm.style.display=auditPlots.length?"block":"none"; }catch(e){} try{ if(connected) refreshAuditState_(); }catch(e){} }
 function closeMore(){ $("moreMenu").style.display="none"; }
 
 /* ---------- data-entry person (per device): set once, stamped on every plot ---------- */
