@@ -908,7 +908,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v135";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v136";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1896,7 +1896,7 @@ function pushEditsBatch_(changed){
 function clearAuditPlots(){
   if(!auditPlots.length){ toast("No imported plots",true); return; }
   if(!confirm(`Remove all ${auditPlots.length} imported plots from this device? (Your own saved plots are not affected.)`)) return;
-  auditPlots=[]; persistAudit(); renderSaved(); if(fmap) renderMapPins(); toast("Audit plots cleared");
+  auditPlots=[]; persistAudit(); renderSaved(); if(fmap) renderMapPins(); if(typeof renderLayerVis_==="function") renderLayerVis_(); toast("Imported plots removed from this device");
 }
 function nextPlotFor(stand){
   let max=0; const s=stand||"";
@@ -3113,7 +3113,7 @@ if(!cruiser && $("draftRestore").style.display!=="flex") openCruiser(); // ask o
 if("serviceWorker" in navigator){ try{ navigator.serviceWorker.register("./sw.js").catch(()=>{}); }catch(e){} }
 
 /* ====================== MAP TAB ====================== */
-let fmap=null, fpins=null, fboundLayer=null, flabelLayer=null, fmeMarker=null, fmeRing=null, fwatch=null;
+let fmap=null, fpins=null, fauditpins=null, fboundLayer=null, flabelLayer=null, fmeMarker=null, fmeRing=null, fwatch=null;
 let crewLayer=null, crewShown=false, crewColors={}, crewTimer=null, crewData=[], plotLabelField="none";
 let liveLayer=null, liveOn=false, liveBroadcastTimer=null, livePollTimer=null;
 let crewRouteLayer=null, crewRoutesShown=false, crewRoutesTimer=null;
@@ -3178,7 +3178,7 @@ function initMap(){
   fmap=L.map("fmap",{zoomControl:false,attributionControl:false,preferCanvas:true}).setView([44.13,-79.49],14);
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:22,maxNativeZoom:19}).addTo(fmap);
   L.control.zoom({position:"bottomright"}).addTo(fmap);
-  fpins=L.layerGroup().addTo(fmap); fboundLayer=L.layerGroup().addTo(fmap); flabelLayer=L.layerGroup().addTo(fmap); refLayer=L.layerGroup().addTo(fmap); freflabelLayer=L.layerGroup().addTo(fmap); crewLayer=L.layerGroup().addTo(fmap); liveLayer=L.layerGroup().addTo(fmap); crewRouteLayer=L.layerGroup().addTo(fmap); photoLayer=L.layerGroup().addTo(fmap);
+  fpins=L.layerGroup().addTo(fmap); fauditpins=L.layerGroup().addTo(fmap); fboundLayer=L.layerGroup().addTo(fmap); flabelLayer=L.layerGroup().addTo(fmap); refLayer=L.layerGroup().addTo(fmap); freflabelLayer=L.layerGroup().addTo(fmap); crewLayer=L.layerGroup().addTo(fmap); liveLayer=L.layerGroup().addTo(fmap); crewRouteLayer=L.layerGroup().addTo(fmap); photoLayer=L.layerGroup().addTo(fmap);
   applyLayerVis_();
   fmap.on("moveend zoomend",rememberMapView_);
   fmap.on("click",e=>{ if(selectMode){ addSelPoint(e.latlng); return; } if(polyMode){ addPolyPoint(e.latlng); return; } if(routeMode){ addRoutePoint(e.latlng); return; } if(measureMode){ addMeasurePoint(e.latlng); return; } if(placeMode){ placeAt(e.latlng.lat,e.latlng.lng); return; }
@@ -3268,11 +3268,11 @@ function renderLayerList(){
     `<div class="layer-row"><span>${esc(f.name)} <small>(${f.features.length})</small></span><button type="button" onclick="removeBoundFile('${esc(f.id)}')">✕</button></div>`).join("");
 }
 // On/off visibility for each map overlay. Layer stays loaded — this only shows/hides it.
-var layerVis={ mine:true, bound:true, ref:true, photo:true, track:true };
+var layerVis={ mine:true, imported:true, bound:true, ref:true, photo:true, track:true };
 try{ if(typeof STORE!=="undefined"&&STORE) Object.assign(layerVis, JSON.parse(STORE.getItem("fi_layervis"))||{}); }catch(e){}
-function layerGroupFor_(k){ return {mine:fpins, bound:fboundLayer, ref:refLayer, photo:photoLayer}[k]; }
+function layerGroupFor_(k){ return {mine:fpins, imported:fauditpins, bound:fboundLayer, ref:refLayer, photo:photoLayer}[k]; }
 function applyLayerVis_(){
-  [["mine",fpins,flabelLayer],["bound",fboundLayer,flabelLayer],["ref",refLayer,freflabelLayer],["photo",photoLayer,null]].forEach(([k,lyr,lbl])=>{
+  [["mine",fpins,flabelLayer],["imported",fauditpins,null],["bound",fboundLayer,flabelLayer],["ref",refLayer,freflabelLayer],["photo",photoLayer,null]].forEach(([k,lyr,lbl])=>{
     if(!fmap||!lyr) return;
     if(layerVis[k]===false){ if(fmap.hasLayer(lyr)) fmap.removeLayer(lyr); if(k==="bound"&&lbl&&fmap.hasLayer(lbl)) fmap.removeLayer(lbl); if(k==="ref"&&lbl&&fmap.hasLayer(lbl)) fmap.removeLayer(lbl); }
     else { if(!fmap.hasLayer(lyr)) fmap.addLayer(lyr); if(k==="bound"&&lbl&&!fmap.hasLayer(lbl)) fmap.addLayer(lbl); if(k==="ref"&&lbl&&!fmap.hasLayer(lbl)) fmap.addLayer(lbl); }
@@ -3299,6 +3299,7 @@ function toggleLabels(k){ labelVis[k]=!(labelVis[k]!==false); try{ STORE&&STORE.
 function zoomToLayer(k){
   let b=[];
   if(k==="mine") saved.forEach(p=>{ const y=parseFloat(p.Y),x=parseFloat(p.X); if(isFinite(y)&&isFinite(x)) b.push([y,x]); });
+  else if(k==="imported") (auditPlots||[]).forEach(p=>{ const y=parseFloat(p.Y),x=parseFloat(p.X); if(isFinite(y)&&isFinite(x)) b.push([y,x]); });
   else if(k==="bound"){ if(typeof BOUND!=="undefined"&&BOUND&&BOUND.features) collectCoords_(BOUND.features,b); }
   else if(k==="ref") (refLabels||[]).forEach(r=>{ if(isFinite(r.lat)&&isFinite(r.lng)) b.push([r.lat,r.lng]); });
   else if(k==="track") b=(trackLog||[]).slice();
@@ -3316,8 +3317,10 @@ function renderLayerVis_(){
   const trkN=(typeof trackLog!=="undefined"&&trackLog)?trackLog.length:0;
   const bndN=(typeof BOUND!=="undefined"&&BOUND&&BOUND.features)?BOUND.features.length:0;
   const hasPdf=(typeof pdfOverlay!=="undefined"&&pdfOverlay);
+  const impN=(typeof auditPlots!=="undefined"&&auditPlots)?auditPlots.filter(p=>isFinite(parseFloat(p.Y))).length:0;
   // [key, label, count, canLabel]
   const rows=[["mine","📍 My plots", saved.filter(p=>isFinite(parseFloat(p.Y))).length, false],
+             ["imported","🔵 Imported plots", impN, false],
              ["bound","▧ Stand boundaries", bndN, true],
              ["ref","• Imported points/lines", refN, true],
              ["track","〰 Track log", trkN, false],
@@ -3327,9 +3330,10 @@ function renderLayerVis_(){
     const on=(k==="pdf")?(typeof pdfVisible==="undefined"?true:pdfVisible):(layerVis[k]!==false);
     const onTap=(k==="pdf")?"togglePDF();renderLayerVis_()":`toggleLayerVis('${k}')`;
     const lblBtn = canLabel ? `<button type="button" class="visbtn ${labelVis[k]!==false?"on":""}" title="Labels on/off" onclick="event.stopPropagation();toggleLabels('${k}')">🏷</button>` : "";
+    const rmBtn = (k==="imported"&&cnt) ? `<button type="button" class="visbtn" title="Remove imported plots from this device" onclick="event.stopPropagation();clearAuditPlots()">🗑</button>` : "";
     return `<div class="visrow"><span onclick="${onTap}" style="flex:1;cursor:pointer">${esc(label)}${cnt&&k!=="pdf"?` <small>(${cnt})</small>`:""}</span>`+
       `<button type="button" class="visbtn" title="Zoom to this layer" onclick="event.stopPropagation();zoomToLayer('${k}')">⤢</button>`+
-      lblBtn+
+      lblBtn+rmBtn+
       `<span class="visdot ${on?"on":""}" onclick="${onTap}" style="cursor:pointer">${on?"ON":"OFF"}</span></div>`;
   }).join("") : "";
 }
@@ -3528,7 +3532,7 @@ function nearbyPlotPopup_(latlng){
   L.popup({offset:[0,-8]}).setLatLng([best.lat,best.lon]).setContent(best.html).openOn(fmap);
   return true;
 }
-function renderMapPins(){ if(!fpins) return; fpins.clearLayers();
+function renderMapPins(){ if(!fpins) return; fpins.clearLayers(); if(fauditpins) fauditpins.clearLayers();
   saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)) return;
     const lbl=myDotLabel_(p); const nonNum=!(myLabelFields.length===1&&myLabelFields[0]==="num"); const wide=(nonNum&&lbl.length>2);
     const hit=_findHit_(p);
@@ -3551,7 +3555,7 @@ function renderMapPins(){ if(!fpins) return; fpins.clearLayers();
     const check = done ? `<span style="position:absolute;top:-6px;right:-6px;width:13px;height:13px;border-radius:50%;background:#1f8f4a;border:1.5px solid #fff;color:#fff;font:700 9px/13px system-ui;text-align:center">✓</span>` : "";
     const icon=L.divIcon({className:"",html:`<div style="position:relative;min-width:22px;height:22px;padding:0 5px;border-radius:11px;background:${col};${ring};display:flex;align-items:center;justify-content:center;font:700 9px/1 'Courier New',monospace;color:${done?"#04220f":"#0a1a28"};white-space:nowrap">${esc(lbl)}${check}</div>`,iconSize:null,iconAnchor:[11,11]});
     const doneLine = done ? `<br><span style="color:#1f8f4a">✓ completed${p._doneBy?` · ${esc(p._doneBy)}`:""}${p._doneAt?` · ${esc(String(p._doneAt).slice(0,16))}`:""}</span>` : "";
-    L.marker([lat,lon],{icon}).addTo(fpins)
+    L.marker([lat,lon],{icon}).addTo(fauditpins||fpins)
       .bindPopup(`<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b> <span style="color:#2b6ea3">${done?"done":"imported"}</span>${p._dup?' <span style="color:#b6791b">· dup?</span>':""}<br>${(p.DATE||"").slice(0,16)}${doneLine}<br><a href="javascript:void(0)" onclick="editAuditFromMap(${i})">🔍 Review / edit ›</a></div>`);
   });
   // Show the imported / done legend entries only when there are imported plots to explain.
