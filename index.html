@@ -903,7 +903,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v128";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v129";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -4081,26 +4081,36 @@ function showSelectionActions_(){
 // follows collection order (DATE, then existing plot number) so numbering is stable and sensible.
 function numberSelected(){
   const n=selected.length; if(!n) return;
-  const groups={};
-  selected.forEach(s=>{ const st=String(s.p.STANDID||"").trim()||"—"; (groups[st]=groups[st]||[]).push(s); });
-  const stands=Object.keys(groups);
-  const blanks=selected.filter(s=>!String(s.p.STANDID||"").trim()).length;
-  let msg=`Number ${n} plot${n===1?"":"s"} sequentially, starting at 1 within each compartment (${stands.filter(s=>s!=="—").length||1} compartment${stands.length===1?"":"s"})?`;
-  if(blanks) msg+=`\n\n${blanks} selected plot${blanks===1?" has no":"s have no"} Stand ID — ${blanks===1?"it":"they"}'ll be numbered together as one group. Assign stands first if you want them separated.`;
+  // Group by the compartment each plot actually falls inside (the loaded polygon), falling back to the
+  // plot's stored STANDID. This guarantees "4 plots in a compartment → 1..4" even if STANDID is stale.
+  const groupKeyOf=p=>{
+    const lat=parseFloat(p.Y), lon=parseFloat(p.X);
+    let g = (isFinite(lat)&&isFinite(lon)) ? standOrPolyAt_(lat,lon) : null;   // polygon wins
+    if(!g) g = String(p.STANDID||"").trim();                                    // else stored stand
+    return String(g||"").trim().toLowerCase()||"—";                            // case/space-insensitive
+  };
+  const groups={}, labelFor={};
+  selected.forEach(s=>{ const k=groupKeyOf(s.p); (groups[k]=groups[k]||[]).push(s);
+    if(!labelFor[k]){ const lat=parseFloat(s.p.Y),lon=parseFloat(s.p.X); labelFor[k]=(isFinite(lat)&&isFinite(lon)&&standOrPolyAt_(lat,lon))||String(s.p.STANDID||"").trim()||"(no stand)"; } });
+  const keys=Object.keys(groups);
+  const blanks=keys.includes("—")?groups["—"].length:0;
+  const realComps=keys.filter(k=>k!=="—").length;
+  let msg=`Number ${n} plot${n===1?"":"s"} 1,2,3… within each compartment (${realComps||1} compartment${realComps===1?"":"s"})?`;
+  if(blanks) msg+=`\n\n${blanks} plot${blanks===1?" is":"s are"} not inside any compartment — ${blanks===1?"it":"they"}'ll be numbered as one group. Assign stands / load boundaries first to separate them.`;
   if(!confirm(msg)) return;
   let nMine=0, total=0;
-  stands.forEach(st=>{
-    const arr=groups[st].slice().sort((a,b)=>{
+  keys.forEach(k=>{
+    const arr=groups[k].slice().sort((a,b)=>{
       const da=String(a.p.DATE||""), db=String(b.p.DATE||""); if(da!==db) return da<db?-1:1;
       const pa=parseInt(a.p.PLOTNUM,10), pb=parseInt(b.p.PLOTNUM,10);
       return (isFinite(pa)?pa:1e9)-(isFinite(pb)?pb:1e9);
     });
-    arr.forEach((s,k)=>{ s.p.PLOTNUM=String(k+1); total++; if(s.set==="mine"){ nMine++; if(s.p._sent) s.p._sent=false; } });
+    arr.forEach((s,idx)=>{ s.p.PLOTNUM=String(idx+1); total++; if(s.set==="mine"){ nMine++; if(s.p._sent) s.p._sent=false; } });
   });
   persist(); persistAudit(); renderSaved(); if(fmap) renderMapPins();
-  if(nMine && connected && !isOffline()) selected.filter(s=>s.set==="mine").forEach(s=>send(s.p,true));
+  if(nMine && connected && !isOffline()) selected.filter(s=>s.set==="mine"&&s.p._sent===false).forEach(s=>send(s.p,true));
   closeInfoSheet_();
-  toast(`Numbered ${total} plot${total===1?"":"s"} across ${stands.length} compartment${stands.length===1?"":"s"}`+(nMine&&connected&&!isOffline()?" · updating the Sheet":""));
+  toast(`Numbered ${total} plot${total===1?"":"s"} across ${realComps||1} compartment${realComps===1?"":"s"}`+(nMine&&connected&&!isOffline()?" · updating the Sheet":""));
 }
 function selectedRows_(){ return selected.map(s=>s.p); }
 // Fill AGE on the selected plots from the compartment polygon each falls inside (using the chosen Age field).
