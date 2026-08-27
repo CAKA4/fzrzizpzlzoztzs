@@ -903,7 +903,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v127";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v128";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1745,8 +1745,11 @@ function toggleIncludeAudit(){ setIncludeAudit_(!_auditIncluded); }
 // Download the whole workbook as Excel — routed through the Apps Script so it works for ANY app user
 // (no Google access to the Sheet needed; the script fetches it as the owner).
 function downloadSheet(){
-  const url=SCRIPT_URL+(SCRIPT_URL.includes("?")?"&":"?")+"action=download";
-  toast("Preparing the workbook…"); window.open(url,"_blank");
+  toast("Preparing the workbook…");
+  fetchJson_("download", (r,err)=>{
+    if(err||!r||!r.ok||!r.url){ toast("Couldn't prepare the download"+(err?" ("+err+")":"")+" — make sure you're signed into the Sheet's Google account",true); return; }
+    window.open(r.url,"_blank");   // owner is signed in → Google streams the .xlsx
+  });
 }
 // Full analysis, in-app: fetch every summary tab as JSON and render scrollable tables. Works for
 // everyone (runs as owner) and works offline once fetched.
@@ -1760,9 +1763,10 @@ function openFullAnalysis(set){
        <button class="btn ghost" type="button" onclick="openFullAnalysis('audit')" ${_analysisSet==="audit"?'style="border-color:#2f7a44;color:#8fe6a0"':""}>Audit plots</button>
        <button class="btn ghost" type="button" onclick="openAnalysisPage()">↗ Web page</button>
      </div><div id="fullAnBody" style="color:#a9c9b0">Loading…</div>`);
-  jsonpAction_("summarydata&set="+encodeURIComponent(_analysisSet), r=>{
+  fetchJson_("summarydata&set="+encodeURIComponent(_analysisSet), (r,err)=>{
     const el=$("fullAnBody"); if(!el) return;
-    if(!r||!r.ok||!r.sheets||!r.sheets.length){ el.innerHTML=`<div style="padding:8px">No ${_analysisSet==="audit"?"audit ":""}analysis yet. Build it first (📊 Stand summary → or “Build summary — all plots”), then reopen.</div>`; return; }
+    if(err){ el.innerHTML=`<div style="padding:8px;color:#e9a89f">Couldn't load analysis (${esc(err)}).<br>If you just changed the code, redeploy a New version.</div>`; return; }
+    if(!r||!r.ok||!r.sheets||!r.sheets.length){ el.innerHTML=`<div style="padding:8px">No ${_analysisSet==="audit"?"imported ":""}analysis yet. Build it first (Rebuild summary in FRI Tools), then reopen.</div>`; return; }
     el.innerHTML = r.sheets.map(s=>{
       const rows=s.rows||[]; if(!rows.length) return "";
       const head=rows[0]||[], bodyRows=rows.slice(1);
@@ -1780,6 +1784,17 @@ function openAnalysisPage(){
 }
 function refreshAuditState_(){ if(!connected) return; jsonpAction_("auditstate", r=>{ if(r&&r.ok){ _auditIncluded=!!r.included; const b=$("includeAuditBtn"); if(b) b.textContent=_auditIncluded?"🔀 Imported in main: ON (tap for separate)":"🔀 Imported in main: OFF (tap to include)"; } }); }
 // Small JSONP helper for GET actions that return a result.
+// For LARGE data endpoints (full analysis), fetch the JSON directly instead of JSONP <script> injection —
+// script injection breaks if any Sheet cell contains a character that isn't valid mid-script. A normal
+// fetch()+JSON.parse is robust. Apps Script /exec allows cross-origin GET reads.
+function fetchJson_(action, cb){
+  const sep=SCRIPT_URL.includes("?")?"&":"?";
+  const url=SCRIPT_URL+sep+"action="+encodeURIComponent(action);
+  let done=false; const to=setTimeout(()=>{ if(done)return; done=true; cb(null,"timeout"); }, 20000);
+  fetch(url,{method:"GET"}).then(r=>r.text()).then(t=>{ if(done)return; done=true; clearTimeout(to);
+    try{ cb(JSON.parse(t), null); }catch(err){ cb(null, "parse: "+(t||"").slice(0,80)); } })
+    .catch(err=>{ if(done)return; done=true; clearTimeout(to); cb(null, String(err)); });
+}
 function jsonpAction_(action, cb){
   const name="__cb"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
   let settled=false;
