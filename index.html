@@ -690,6 +690,7 @@
     <button type="button" onclick="fitAllLayers_()" title="Zoom to fit everything">⤢ Fit all</button>
     <button type="button" onclick="openGoToStand()" title="Zoom to a stand">▧ Stand…</button>
     <button type="button" onclick="openMyLabel()" title="Label plot dots by analysis">🏷 Label</button>
+    <button type="button" onclick="openFindPlots()" title="Search plots by attribute and highlight matches">🔎 Find</button>
     <button type="button" onclick="openMapExport()" title="Export plots / compartments + analysis to shapefile">📤 Export</button>
   </div>
   <div class="map-drop" id="mapDrop">
@@ -903,7 +904,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v131";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v132";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2223,6 +2224,57 @@ function toggleCrewPlots(){
 }
 function stopCrew(){ if(crewTimer){ clearInterval(crewTimer); crewTimer=null; } if(crewLayer) crewLayer.clearLayers(); crewShown=false; setCrewBtn(); updateLayerStatus(); }
 // Map chip → choose what to label dots by. Offers your own plots; imported set if any are loaded.
+// ----- Find plots by attribute; highlight matches with a magenta ring -----
+let _findRule=null;   // { field, op, value }
+function _findHit_(p){
+  if(!_findRule) return false;
+  const {field,op,value}=_findRule;
+  let raw = p[field]; if(raw==null) raw="";
+  const s=String(raw).trim();
+  switch(op){
+    case "blank":   return s==="";
+    case "zero":    return s==="0" || (parseFloat(s)===0 && s!=="");
+    case "eq":      return s.toLowerCase()===String(value).trim().toLowerCase();
+    case "ne":      return s.toLowerCase()!==String(value).trim().toLowerCase();
+    case "has":     return s.toLowerCase().includes(String(value).trim().toLowerCase());
+    case "gt":      return parseFloat(s)> parseFloat(value);
+    case "lt":      return parseFloat(s)< parseFloat(value);
+    default:        return false;
+  }
+}
+const FIND_FIELDS=[["STANDID","Stand ID"],["PLOTNUM","Plot number"],["TRACT","Tract"],["AGE","Age"],["CRUISER","Cruiser"],["DATE","Date"],["PLOTSRC","Source (own/imported)"],["FLAG","Flag"]];
+function findCount_(){ let n=0; saved.forEach(p=>{ if(_findHit_(p)) n++; }); auditPlots.forEach(p=>{ if(_findHit_(p)) n++; }); return n; }
+function openFindPlots(){
+  const fopts=FIND_FIELDS.map(([k,l])=>`<option value="${k}">${l}</option>`).join("");
+  const cur=_findRule||{field:"PLOTNUM",op:"zero",value:""};
+  showInfoSheet_("Find plots",
+    `<div style="color:#a9c9b0;font-size:12px;margin-bottom:10px">Highlight plots that match. Matches get a magenta ring on the map.</div>`+
+    `<div style="display:flex;gap:6px;margin-bottom:8px"><button class="btn ghost" type="button" onclick="quickFind_('PLOTNUM','zero')">Plot # = 0</button><button class="btn ghost" type="button" onclick="quickFind_('STANDID','blank')">No stand</button><button class="btn ghost" type="button" onclick="quickFind_('AGE','blank')">No age</button></div>`+
+    `<label style="font-size:12px;color:#8fb89a">Field</label><select id="findField" style="width:100%;font-size:16px;margin:3px 0 8px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">${fopts}</select>`+
+    `<label style="font-size:12px;color:#8fb89a">Condition</label><select id="findOp" onchange="findOpChange_()" style="width:100%;font-size:16px;margin:3px 0 8px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">
+       <option value="eq">equals</option><option value="ne">does not equal</option><option value="has">contains</option>
+       <option value="zero">equals 0</option><option value="blank">is blank</option><option value="gt">greater than</option><option value="lt">less than</option></select>`+
+    `<div id="findValWrap"><label style="font-size:12px;color:#8fb89a">Value</label><input id="findVal" type="text" style="width:100%;font-size:16px;margin:3px 0 10px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></div>`+
+    `<button class="btn" type="button" onclick="applyFind_()">Highlight matches</button>`+
+    (_findRule?`<button class="btn ghost" type="button" onclick="clearFind_()" style="margin-top:8px">Clear highlight</button>`:""));
+  setTimeout(()=>{ const f=$("findField"),o=$("findOp"); if(f) f.value=cur.field; if(o) o.value=cur.op; findOpChange_(); const v=$("findVal"); if(v&&cur.value!=null) v.value=cur.value; },40);
+}
+function findOpChange_(){ const o=$("findOp"), w=$("findValWrap"); if(!o||!w) return; const noVal=(o.value==="zero"||o.value==="blank"); w.style.display=noVal?"none":"block"; }
+function quickFind_(field,op){ _findRule={field,op,value:""}; renderMapPins(); closeInfoSheet_();
+  const n=findCount_(); toast(`${n} plot${n===1?"":"s"} match`); if(n) zoomToFindMatches_(); }
+function applyFind_(){
+  const field=$("findField").value, op=$("findOp").value, value=(($("findVal")||{}).value||"").trim();
+  if((op!=="zero"&&op!=="blank") && value===""){ toast("Enter a value to match",true); return; }
+  _findRule={field,op,value}; renderMapPins(); closeInfoSheet_();
+  const n=findCount_(); toast(`${n} plot${n===1?"":"s"} match ${labelFieldName_(field)} ${opWord_(op)} ${value||""}`.trim()); if(n) zoomToFindMatches_();
+}
+function clearFind_(){ _findRule=null; renderMapPins(); closeInfoSheet_(); toast("Highlight cleared"); }
+function labelFieldName_(k){ const f=FIND_FIELDS.find(x=>x[0]===k); return f?f[1]:k; }
+function opWord_(op){ return {eq:"=",ne:"≠",has:"contains",zero:"= 0",blank:"is blank",gt:">",lt:"<"}[op]||op; }
+function zoomToFindMatches_(){
+  const pts=[]; saved.concat(auditPlots).forEach(p=>{ if(_findHit_(p)){ const la=parseFloat(p.Y),lo=parseFloat(p.X); if(isFinite(la)&&isFinite(lo)) pts.push([la,lo]); } });
+  if(pts.length && fmap){ try{ fmap.fitBounds(L.latLngBounds(pts).pad(0.3), {maxZoom:17}); }catch(e){} }
+}
 function openMyLabel(){
   if(auditPlots.length){
     showInfoSheet_("Label plot dots", `<div style="color:#a9c9b0;font-size:12px;margin-bottom:8px">Which set do you want to label?</div>`+
@@ -3408,7 +3460,10 @@ function nearbyPlotPopup_(latlng){
 function renderMapPins(){ if(!fpins) return; fpins.clearLayers();
   saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)) return;
     const lbl=myDotLabel_(p); const nonNum=!(myLabelFields.length===1&&myLabelFields[0]==="num"); const wide=(nonNum&&lbl.length>2);
-    const icon=L.divIcon({className:"",html:`<div style="${wide?"min-width:24px;height:22px;padding:0 5px;border-radius:11px":"width:24px;height:24px;border-radius:50%"};background:#e8b84b;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font:700 10px/1 'Courier New',monospace;color:#1a2e18;white-space:nowrap">${lbl}</div>`,iconSize:null,iconAnchor:[12,12]});
+    const hit=_findHit_(p);
+    const base=wide?"min-width:24px;height:22px;padding:0 5px;border-radius:11px":"width:24px;height:24px;border-radius:50%";
+    const ring=hit?"border:3px solid #ff36c0;box-shadow:0 0 0 3px rgba(255,54,192,.45),0 2px 6px rgba(0,0,0,.6)":"border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6)";
+    const icon=L.divIcon({className:"",html:`<div style="${base};background:#e8b84b;${ring};display:flex;align-items:center;justify-content:center;font:700 10px/1 'Courier New',monospace;color:#1a2e18;white-space:nowrap">${lbl}</div>`,iconSize:null,iconAnchor:[12,12]});
     L.marker([lat,lon],{icon}).addTo(fpins)
       .bindPopup(plotPopupHtml_(p,i));
   });
@@ -3418,8 +3473,10 @@ function renderMapPins(){ if(!fpins) return; fpins.clearLayers();
     const done=!!p._done;
     const col = done ? "#37c26b" : (p._dup ? "#e8b84b" : "#4aa3e0");
     const lbl = auditDotLabel_(p);
-    const ring = done ? "border:2px solid #eafff0;box-shadow:0 0 0 2px #1f8f4a,0 2px 7px rgba(0,0,0,.6)"
-                      : "border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6)";
+    const hit=_findHit_(p);
+    const ring = hit ? "border:3px solid #ff36c0;box-shadow:0 0 0 3px rgba(255,54,192,.45),0 2px 7px rgba(0,0,0,.6)"
+                     : (done ? "border:2px solid #eafff0;box-shadow:0 0 0 2px #1f8f4a,0 2px 7px rgba(0,0,0,.6)"
+                      : "border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6)");
     const check = done ? `<span style="position:absolute;top:-6px;right:-6px;width:13px;height:13px;border-radius:50%;background:#1f8f4a;border:1.5px solid #fff;color:#fff;font:700 9px/13px system-ui;text-align:center">✓</span>` : "";
     const icon=L.divIcon({className:"",html:`<div style="position:relative;min-width:22px;height:22px;padding:0 5px;border-radius:11px;background:${col};${ring};display:flex;align-items:center;justify-content:center;font:700 9px/1 'Courier New',monospace;color:${done?"#04220f":"#0a1a28"};white-space:nowrap">${esc(lbl)}${check}</div>`,iconSize:null,iconAnchor:[11,11]});
     const doneLine = done ? `<br><span style="color:#1f8f4a">✓ completed${p._doneBy?` · ${esc(p._doneBy)}`:""}${p._doneAt?` · ${esc(String(p._doneAt).slice(0,16))}`:""}</span>` : "";
