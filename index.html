@@ -908,7 +908,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v138";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v139";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1863,7 +1863,8 @@ function autoAssignStands(){
   const withStand=total-blanks;
   let overwrite=false;
   const extras=[ageField?`AGE from “${ageField}”`:null, tractField?`TRACT from “${tractField}”`:null].filter(Boolean).join(" and ");
-  if(withStand){ overwrite = !confirm(`${blanks} plot(s) have no Stand ID, ${withStand} already do.\n\nOK = fill only the blanks (recommended).\nCancel = also OVERWRITE the ${withStand} existing from the boundaries.${extras?`\n\n${extras} will be filled the same way (blanks only, unless you overwrite).`:""}`); }
+  if(withStand){ overwrite = !confirm(`${blanks} plot(s) have no Stand ID, ${withStand} already do.\n\nOK = fill only the blanks (recommended).\nCancel = also OVERWRITE the ${withStand} existing from the boundaries.${extras?`\n\n${extras} will be filled the same way (blanks only, unless you overwrite).`:""}\n\nEither way, plots are then numbered 1,2,3… within each compartment.`); }
+  else { if(!confirm(`Assign stand${extras?" · "+extras.replace(/ from [^,]+/g,""):""} to ${total} plot(s) from the boundaries, and number them 1,2,3… within each compartment?`)) return; }
   let set=0, miss=0, aged=0, tracted=0;
   const doOne=p=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(!isFinite(lat)||!isFinite(lon)){ miss++; return; }
     // AGE from the polygon — fill blanks (or overwrite if chosen), independent of the stand assignment below.
@@ -1872,15 +1873,23 @@ function autoAssignStands(){
     // TRACT from the polygon — same blank-only / overwrite rule.
     if(tractField){ const tr=tractAt_(lat,lon);
       if(tr!=null && (overwrite || String(p.TRACT||"").trim()==="") && String(tr)!==String(p.TRACT||"")){ p.TRACT=String(tr); if(p._sent) p._sent=false; tracted++; } }
-    if(!overwrite && String(p.STANDID||"").trim()) return;
-    const s=standOrPolyAt_(lat,lon);
-    if(s && String(s)!==String(p.STANDID||"")){ p.STANDID=String(s); if(p._sent) p._sent=false; set++; } else if(!s && !String(p.STANDID||"").trim()) miss++; };
+    if(overwrite || !String(p.STANDID||"").trim()){
+      const s=standOrPolyAt_(lat,lon);
+      if(s && String(s)!==String(p.STANDID||"")){ p.STANDID=String(s); if(p._sent) p._sent=false; set++; } else if(!s && !String(p.STANDID||"").trim()) miss++;
+    } };
   saved.forEach(doOne); auditPlots.forEach(doOne);
+  // Auto-number 1,2,3… within each compartment (the polygon a plot falls in, else its STANDID).
+  let numbered=0;
+  { const groupKeyOf=p=>{ const la=parseFloat(p.Y),lo=parseFloat(p.X); let g=(isFinite(la)&&isFinite(lo))?standOrPolyAt_(la,lo):null; if(!g) g=String(p.STANDID||"").trim(); return String(g||"").trim().toLowerCase()||"—"; };
+    const groups={}; allP.forEach(p=>{ const k=groupKeyOf(p); (groups[k]=groups[k]||[]).push(p); });
+    Object.keys(groups).forEach(k=>{ const arr=groups[k].slice().sort((a,b)=>{ const da=String(a.DATE||""),db=String(b.DATE||""); if(da!==db) return da<db?-1:1; const pa=parseInt(a.PLOTNUM,10),pb=parseInt(b.PLOTNUM,10); return (isFinite(pa)?pa:1e9)-(isFinite(pb)?pb:1e9); });
+      arr.forEach((p,idx)=>{ const nv=String(idx+1); if(String(p.PLOTNUM||"")!==nv){ p.PLOTNUM=nv; if(p._sent) p._sent=false; numbered++; } }); });
+  }
   persist(); persistAudit(); renderSaved(); if(fmap) renderMapPins();
-  // push updated plots so the Sheet reflects new stand/age/tract — ONE batch request (never 150 at once)
+  // push updated plots so the Sheet reflects new stand/age/tract/number — ONE batch request (never 150 at once)
   const changed=allP.filter(p=>p._sent===false);
   if(connected && !isOffline() && changed.length){ pushEditsBatch_(changed); }
-  const bits=[`Assigned ${set} stand${set===1?"":"s"}`]; if(aged) bits.push(`${aged} age${aged===1?"":"s"}`); if(tracted) bits.push(`${tracted} tract${tracted===1?"":"s"}`);
+  const bits=[`Assigned ${set} stand${set===1?"":"s"}`]; if(aged) bits.push(`${aged} age${aged===1?"":"s"}`); if(tracted) bits.push(`${tracted} tract${tracted===1?"":"s"}`); if(numbered) bits.push(`numbered ${numbered}`);
   toast(`${bits.join(" · ")} from boundaries${miss?` · ${miss} still blank (outside any polygon or no GPS)`:""}`);
 }
 // Push a set of edited plots to the Sheet in ONE batch request (safe upsert by PlotID/natural key),
@@ -4263,16 +4272,17 @@ function numberSelected(){
   toast(`Numbered ${total} plot${total===1?"":"s"} across ${realComps||1} compartment${realComps===1?"":"s"}`+(_synced?` · updating ${_synced} in the Sheet`:""));
 }
 function selectedRows_(){ return selected.map(s=>s.p); }
-// Send edited selected plots to the Sheet — BOTH your own and imported plots. Imported plots carry the
-// AUDIT tag so they stay in the imported set; they upsert by _id just like your own.
+// Send edited selected plots to the Sheet in ONE batch — BOTH your own and imported plots. Imported plots
+// carry the IMPORTED tag so they stay in the imported set; all upsert by _id/natural key (no duplicates).
 function syncEditedSelected_(){
   if(!connected || isOffline()) return 0;
-  let sent=0;
+  const changed=[];
   selected.forEach(s=>{ const p=s.p;
-    if(s.set==="audit"){ if(!p._id) p._id=genId(); const q=Object.assign({},p); delete q._audit; delete q._dup; delete q._src; q.PLOTSRC="IMPORTED"; send(q,true); sent++; }
-    else if(p._sent===false){ send(p,true); sent++; }
+    if(s.set==="audit"){ if(!p._id) p._id=genId(); if(!String(p.PLOTSRC||"").trim()) p.PLOTSRC="IMPORTED"; changed.push(p); }
+    else if(p._sent===false){ changed.push(p); }
   });
-  return sent;
+  if(changed.length) pushEditsBatch_(changed);   // one request, not one-per-plot
+  return changed.length;
 }
 // Fill AGE on the selected plots from the compartment polygon each falls inside (using the chosen Age field).
 function ageSelected(){
