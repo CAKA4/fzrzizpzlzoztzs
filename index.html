@@ -903,7 +903,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v130";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v131";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2563,15 +2563,20 @@ function restoreFromSheet(){
   const sc=document.createElement("script");
   const cleanup=()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
   window[cb]=resp=>{ try{
-      const rows=(resp&&resp.plots)||[]; let added=0;
+      const rows=(resp&&resp.plots)||[]; let added=0, imp=0;
       const keyOf=p=>[p.STANDID||"",p.PLOTNUM||"",p.DATE||""].join("|");
-      const have=new Set(saved.map(keyOf));
-      rows.forEach(r=>{ const k=keyOf(r); if(have.has(k)) return;
+      const have=new Set(saved.map(keyOf)), haveAudit=new Set(auditPlots.map(keyOf));
+      rows.forEach(r=>{ const k=keyOf(r); if(have.has(k)||haveAudit.has(k)) return;
         let n=0; for(let i=1;i<=28;i++){ if(r["T"+i+"SP"]) n++; }
-        r._id=genId(); r._sent=true; r._ts=r.DATE||nowStr(); r._trees=n;
-        saved.push(r); have.add(k); added++; });
-      if(added){ persist(); renderSaved(); netDot(); }
-      toast(added?`Restored ${added} plot${added>1?"s":""} from the Sheet`:"No new plots in the Sheet");
+        r._id = r.PlotID || genId();      // KEEP the Sheet's PlotID so later edits update the row (not duplicate)
+        r._sent=true; r._ts=r.DATE||nowStr(); r._trees=n;
+        const isImp = /^(imported|audit)$/i.test(String(r.PLOTSRC||"").trim());
+        if(/\bDONE\b/.test(String(r.FLAG||""))) r._done=true;
+        if(isImp){ r._audit=true; auditPlots.push(r); imp++; }   // imported plots go back into the imported (blue) set
+        else { saved.push(r); }
+        have.add(k); added++; });
+      if(added){ persist(); persistAudit(); renderSaved(); netDot(); if(fmap) renderMapPins(); }
+      toast(added?`Restored ${added} plot${added>1?"s":""} from the Sheet`+(imp?` (${imp} imported)`:""):"No new plots in the Sheet");
     }catch(e){ toast("Restore failed",true); } cleanup(); };
   sc.onerror=()=>{ cleanup(); toast("Restore failed — check connection",true); };
   sc.src=SCRIPT_URL+sep+"action=plots&callback="+cb;
