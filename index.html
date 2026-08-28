@@ -611,6 +611,8 @@
 
     <details class="lgroup"><summary>📁 Load &amp; import layers</summary>
       <div class="lgroup-body">
+        <button type="button" onclick="closeLayersMenu();openImportPlots()">📥 Import plots (another device / source)</button>
+        <button type="button" onclick="closeLayersMenu();restoreFromSheet()">☁ Restore plots from the Sheet</button>
         <button type="button" onclick="closeLayersMenu();$('boundInput').click()">⬇ Stand boundaries (polygons)</button>
         <button type="button" onclick="closeLayersMenu();$('pointsInput').click()">⬇ Reference points / lines</button>
         <button type="button" id="refClearBtn" onclick="closeLayersMenu();clearRefFiles()" style="display:none">✕ Remove reference points / lines</button>
@@ -808,7 +810,6 @@
         <button type="button" onclick="closeMore();openTractAssign()">🏷 Assign tract / property to plots</button>
       </details>
       <details class="mgroup" id="auditGroup"><summary>🔍 Imported</summary>
-        <button type="button" onclick="closeMore();openImportPlots()">📥 Import plots (another device/source)</button>
         <button type="button" id="pushAuditBtn" onclick="closeMore();pushAuditToSheet()" style="display:none">📤 Push imported plots to the Sheet</button>
         <button type="button" id="auditSumBtn" onclick="closeMore();buildAuditSummary()" style="display:none">📊 Build imported-set summary (separate)</button>
         <button type="button" onclick="closeMore();openFullAnalysis('audit')">📈 Imported-set full analysis</button>
@@ -823,7 +824,6 @@
         <button type="button" onclick="closeMore();openCruiser()">👤 Data-entry person</button>
         <button type="button" onclick="closeMore();exportBackup()">⬆ Back up all data</button>
         <button type="button" onclick="closeMore();document.getElementById('restoreInput').click()">⬇ Restore from backup</button>
-        <button type="button" onclick="closeMore();restoreFromSheet()">☁ Restore plots from Sheet</button>
         <button type="button" onclick="closeMore();clearAllData()" style="color:#e9a89f">🗑 Start new project (erase all data)</button>
       </details>
     </div>
@@ -944,7 +944,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v150";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v151";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
