@@ -944,7 +944,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v151";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v152";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3605,11 +3605,16 @@ function nearbyPlotPopup_(latlng){
   L.popup({offset:[0,-8]}).setLatLng([best.lat,best.lon]).setContent(best.html).openOn(fmap);
   return true;
 }
-// A plot "needs work" only for imported reference plots that haven't been completed (field-checked) yet.
-// Own plots you create are always considered entered — an empty plot is a valid regeneration plot, so it
-// stays plain yellow and is never ringed.
+// A plot "needs work" only for imported reference plots that are still EMPTY (no tally trees) and haven't
+// been marked done. Imported plots that already contain measured data are treated as complete. Own plots
+// you create are always considered entered (an empty plot is a valid regeneration plot) and are never ringed.
 function plotNeedsWork_(p, isAudit){
-  return isAudit ? !p._done : false;
+  if(!isAudit || !p) return false;
+  if(p._done) return false;
+  const trees = (p._trees!=null) ? p._trees : 0;
+  if(trees>0) return false;                                   // has overstory tally → has data
+  const hasRegen=[1,2,3,4,5].some(i=> String(p["ADRGNSP"+i]||"").trim() || String(p["EARGNSP"+i]||"").trim());
+  return !hasRegen;                                           // to-do only when there's no overstory AND no regen
 }
 function renderMapPins(){ if(!fpins) return; fpins.clearLayers(); if(fauditpins) fauditpins.clearLayers();
   saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)) return;
