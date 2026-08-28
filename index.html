@@ -947,7 +947,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v159";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v160";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3275,7 +3275,8 @@ function initMap(){
     if(nearbyPlotPopup_(e.latlng)) return;                    // a plot pin near the tap wins over the boundary
     if(popupFields.length){ const bf=boundaryFeatureAt(e.latlng.lat,e.latlng.lng); if(bf) showBoundPopup(e.latlng,bf); } });
   // Keep taps on the on-map controls from also being treated as map clicks (which in draw modes would drop a stray point).
-  try{ ["measureBar","routeBar","polyBar","mapDrop"].forEach(id=>{ const el=$(id); if(el){ L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); } });
+  try{ ["measureBar","routeBar","polyBar","mapDrop","layersMenu"].forEach(id=>{ const el=$(id); if(el){ L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); } });
+    const sc=document.querySelector(".layers-scroll"); if(sc){ L.DomEvent.disableClickPropagation(sc); L.DomEvent.disableScrollPropagation(sc); }
     const rail=document.querySelector(".map-rail"); if(rail) L.DomEvent.disableClickPropagation(rail); }catch(e){}
   fmap.on("moveend zoomend",()=>{ try{ renderLabels(); renderRefLabels(); }catch(e){} });
   $("boundInput").addEventListener("change",e=>{ const f=e.target.files[0]; e.target.value=""; if(f) loadBoundaries(f); });
