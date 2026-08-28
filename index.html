@@ -948,7 +948,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v163";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v164";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1555,6 +1555,7 @@ function finalizeSubmit(d){
     window.scrollTo({top:0,behavior:"smooth"}); toast("Imported plot marked complete ✓"); return;
   }
   const isUpdate = editingIndex!=null;
+  if(!String(d.PLOTSRC||"").trim()) d.PLOTSRC="FIELD";   // note the source of a field-collected plot (imported plots use "IMPORTED")
   if(isUpdate){ d._id = saved[editingIndex]._id || genId(); saved[editingIndex]=d; }
   else { d._id = genId(); saved.push(d); }
   persist();
@@ -1724,6 +1725,9 @@ function handleImportedFC_(fc,fname){
     if(p.DATE instanceof Date) p.DATE=p.DATE.toISOString();
     if(p.DATE&&typeof p.DATE!=="string") p.DATE=String(p.DATE);
     p.PLOTNUM = (p.PLOTNUM!=null&&p.PLOTNUM!=="")? String(parseInt(p.PLOTNUM,10)||p.PLOTNUM) : p.PLOTNUM;
+    // Imported quality is numeric (0 = AGS, -1 = UGS); the app uses text. Convert so it analyses correctly.
+    for(let i=1;i<=28;i++){ const k=`T${i}Q`, v=p[k]; if(v!=null&&v!==""){ const s=String(v).trim().toUpperCase();
+      if(s==="AGS"||s==="UGS") p[k]=s; else { const n=parseFloat(s); if(n===-1) p[k]="UGS"; else if(n===0) p[k]="AGS"; } } }
     p._id = p._id || genId(); p._sent=false;
     p._trees = countImpTrees_(p);
     if(/\bDONE\b/.test(String(p.FLAG||""))) p._done=true;   // already completed by another crew member
@@ -2908,11 +2912,18 @@ function discardDraft(){ clearDraft(); $("draftRestore").style.display="none"; t
 /* ---------- pre-submit validation ---------- */
 function validatePlot(d){
   const blocks=[], warns=[];
+  const isAuditEdit = (typeof editingAudit!=="undefined" && editingAudit!=null);
+  // Required identity fields for a field plot (not enforced when completing an imported plot, which is
+  // numbered from the map). These are shown with an OK button and block submission until filled.
+  if(!isAuditEdit){
+    if(!String(d.STANDID||"").trim() || d.STANDID==="-") blocks.push("Stand ID is required.");
+    if(!String(d.PLOTNUM||"").trim()) blocks.push("Plot number is required.");
+  }
   if(!d.X || !d.Y) warns.push("No GPS location captured (X/Y empty).");
   const n = d._trees!=null ? d._trees : treeCount();
   if(!n) warns.push("No trees tallied — is this an empty / non-forested plot?");
   let incomplete=0; for(let i=1;i<=28;i++){ const sp=d["T"+i+"SP"], s=d["T"+i+"S"]; if((sp&&!s)||(!sp&&s)) incomplete++; }
-  if(incomplete) warns.push(`${incomplete} tree row${incomplete>1?"s":""} missing species or DBH.`);
+  if(incomplete) blocks.push(`${incomplete} tree row${incomplete>1?"s":""} missing species or DBH — complete or clear them.`);
   if(d.CC==="") warns.push("Crown closure (CC) not set.");
   const dup = d.STANDID && d.STANDID!=="-" && saved.some((p,idx)=> idx!==editingIndex && p.PLOTNUM && p.STANDID===d.STANDID && p.PLOTNUM===d.PLOTNUM);
   if(dup) warns.push(`Stand ${d.STANDID} already has a plot ${d.PLOTNUM}.`);
