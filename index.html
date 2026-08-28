@@ -109,6 +109,8 @@
   #sppPickerSearch{ font-size:16px; }
   .dtwrap{ overflow:auto; max-width:100%; border:1px solid #24402a; border-radius:8px; }
   table.dtable{ border-collapse:separate; border-spacing:0; font-family:var(--mono); font-size:12px; white-space:nowrap; }
+  table.dtable.wrap{ white-space:normal; table-layout:auto; }
+  table.dtable.wrap th, table.dtable.wrap td{ max-width:120px; min-width:38px; overflow-wrap:break-word; word-break:break-word; vertical-align:top; line-height:1.25; padding:6px 8px; }
   table.dtable th, table.dtable td{ padding:7px 10px; border-bottom:1px solid #1c3320; border-right:1px solid #16281a; text-align:left; color:#dcefe0; background:#0f1e0d; }
   table.dtable thead th{ position:sticky; top:0; z-index:3; background:#123020; color:#8fe6a0; font-weight:700; }
   table.dtable tbody tr:active td{ background:#17331d; }
@@ -947,7 +949,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v170";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v173";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1889,7 +1891,7 @@ function openFullAnalysis(set){
       const thead="<tr>"+head.map(c=>`<th>${esc(c)}</th>`).join("")+"</tr>";
       const tb=bodyRows.map(r2=>"<tr>"+r2.map(c=>`<td>${esc(c)}</td>`).join("")+"</tr>").join("");
       return `<div style="font:700 13px system-ui;color:#8fe6a0;margin:14px 0 5px">${esc(s.name)}</div>`+
-        `<div class="dtwrap"><table class="dtable"><thead>${thead}</thead><tbody>${tb}</tbody></table></div>`;
+        `<div class="dtwrap"><table class="dtable wrap"><thead>${thead}</thead><tbody>${tb}</tbody></table></div>`;
     }).join("");
   });
 }
@@ -3992,14 +3994,39 @@ function positionCornerImg_(map,img,corners){
   if(!img.naturalWidth) return;
   const p=corners.map(c=>map.latLngToLayerPoint(L.latLng(c[0],c[1])));  // TL,TR,BR,BL on screen
   const W=img.naturalWidth, H=img.naturalHeight;
-  // Solve the affine that maps image (0,0)->TL, (W,0)->TR, (0,H)->BL. (BR follows for a parallelogram;
-  // GeoPDF frames are affine so this is exact.)
-  const a=(p[1].x-p[0].x)/W, b=(p[1].y-p[0].y)/W;      // x-axis (image right)
-  const c=(p[3].x-p[0].x)/H, d=(p[3].y-p[0].y)/H;      // y-axis (image down)
-  const e=p[0].x, f=p[0].y;
   L.DomUtil.setPosition(img,new L.Point(0,0));
-  img.style.transform=`matrix(${a},${b},${c},${d},${e},${f})`;
-  img.style.width=W+"px"; img.style.height=H+"px";
+  img.style.width=W+"px"; img.style.height=H+"px"; img.style.transformOrigin="0 0";
+  // Full 4-corner projective (perspective) placement — maps the image's pixel corners exactly onto all
+  // four ground corners, so rotated frames and meridian convergence land true (like Avenza). A 3-corner
+  // affine would force a parallelogram and drift, worse far from the UTM zone's central meridian.
+  const t=quadTransform_(W,H,p[0],p[1],p[2],p[3]);
+  if(t){ img.style.transform="matrix3d("+t.join(",")+")"; }
+  else { // degenerate geometry — fall back to a 3-corner affine
+    const a=(p[1].x-p[0].x)/W,b=(p[1].y-p[0].y)/W,c=(p[3].x-p[0].x)/H,d=(p[3].y-p[0].y)/H;
+    img.style.transform=`matrix(${a},${b},${c},${d},${p[0].x},${p[0].y})`;
+  }
+}
+// Homography mapping image pixels (0,0)(W,0)(W,H)(0,H) → dest screen points d0,d1,d2,d3 (TL,TR,BR,BL),
+// returned as a 16-value column-major matrix3d array; null if degenerate.
+function quadTransform_(W,H,d0,d1,d2,d3){
+  const s=basisToPoints_(0,0, W,0, W,H, 0,H);
+  const d=basisToPoints_(d0.x,d0.y, d1.x,d1.y, d2.x,d2.y, d3.x,d3.y);
+  if(!s||!d) return null;
+  const m=multmm3_(d,adj3_(s));
+  if(!isFinite(m[8])||Math.abs(m[8])<1e-9) return null;
+  for(let i=0;i<9;i++) m[i]/=m[8];
+  return [m[0],m[3],0,m[6], m[1],m[4],0,m[7], 0,0,1,0, m[2],m[5],0,m[8]];
+}
+function adj3_(m){ return [
+  m[4]*m[8]-m[5]*m[7], m[2]*m[7]-m[1]*m[8], m[1]*m[5]-m[2]*m[4],
+  m[5]*m[6]-m[3]*m[8], m[0]*m[8]-m[2]*m[6], m[2]*m[3]-m[0]*m[5],
+  m[3]*m[7]-m[4]*m[6], m[1]*m[6]-m[0]*m[7], m[0]*m[4]-m[1]*m[3] ]; }
+function multmm3_(a,b){ const c=[]; for(let i=0;i<3;i++) for(let j=0;j<3;j++){ let s=0; for(let k=0;k<3;k++) s+=a[3*i+k]*b[3*k+j]; c[3*i+j]=s; } return c; }
+function multmv3_(m,v){ return [ m[0]*v[0]+m[1]*v[1]+m[2]*v[2], m[3]*v[0]+m[4]*v[1]+m[5]*v[2], m[6]*v[0]+m[7]*v[1]+m[8]*v[2] ]; }
+function basisToPoints_(x1,y1,x2,y2,x3,y3,x4,y4){
+  const m=[x1,x2,x3, y1,y2,y3, 1,1,1];
+  const v=multmv3_(adj3_(m),[x4,y4,1]);
+  return multmm3_(m,[v[0],0,0, 0,v[1],0, 0,0,v[2]]);
 }
 /* ---- GPS track log (records your path; export as GeoJSON) ---- */
 let trackActive=false, trackLog=[], trackLine=null, _lastTrackPersist=0;
@@ -5131,8 +5158,8 @@ function renderPDF(buf,geo){
           const cropped=document.createElement("canvas"); cropped.width=cropW; cropped.height=cropH;
           cropped.getContext("2d").drawImage(full,cropX,cropY,cropW,cropH,0,0,cropW,cropH);
           // report each geo corner's position within THIS cropped image (0..1)
-          geo.corners.forEach(c=>{ c.px=Math.min(1,Math.max(0,(c.px*pageW - left)/(right-left)));
-                                   c.py=Math.min(1,Math.max(0,(c.py*pageH - (pageH-top))/(top-bottom))); });
+          geo.corners.forEach(c=>{ c.px=Math.min(1,Math.max(0,(c.px*geo.pageW - left)/(right-left)));
+                                   c.py=Math.min(1,Math.max(0,(c.py*geo.pageH - (geo.pageH-top))/(top-bottom))); });
           return { url: cropped.toDataURL("image/jpeg",.92) };
         }
       }
