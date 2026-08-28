@@ -949,7 +949,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v173";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v174";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -5150,16 +5150,19 @@ function renderPDF(buf,geo){
     return page.render({canvasContext:full.getContext("2d"),viewport:vp}).promise.then(()=>{
       const view=page.view, pageWpts=view[2]-view[0], pageHpts=view[3]-view[1];
       if(geo&&geo.bboxPts&&geo.corners&&geo.corners.length===4){
-        const {left,bottom,right,top}=geo.bboxPts, scaleX=full.width/pageWpts, scaleY=full.height/pageHpts;
-        const cropX=Math.round(left*scaleX), cropY=Math.round((pageHpts-top)*scaleY), cropW=Math.round((right-left)*scaleX), cropH=Math.round((top-bottom)*scaleY);
+        const bb=geo.bboxPts, scaleX=full.width/pageWpts, scaleY=full.height/pageHpts;
+        // Some GeoPDFs (e.g. ArcGIS) give the viewport BBox with y inverted (bottom > top) or x reversed;
+        // normalize so the crop rectangle is always valid regardless of the order the corners are listed.
+        const x0=Math.min(bb.left,bb.right), x1=Math.max(bb.left,bb.right), y0=Math.min(bb.bottom,bb.top), y1=Math.max(bb.bottom,bb.top);
+        const cropX=Math.round(x0*scaleX), cropY=Math.round((pageHpts-y1)*scaleY), cropW=Math.round((x1-x0)*scaleX), cropH=Math.round((y1-y0)*scaleY);
         if(cropW>10&&cropH>10){
           // Crop to the georeferenced map frame and hand it back flat — the corner overlay does the
           // geo-placement (including any rotation), so no north-up warp here.
           const cropped=document.createElement("canvas"); cropped.width=cropW; cropped.height=cropH;
           cropped.getContext("2d").drawImage(full,cropX,cropY,cropW,cropH,0,0,cropW,cropH);
           // report each geo corner's position within THIS cropped image (0..1)
-          geo.corners.forEach(c=>{ c.px=Math.min(1,Math.max(0,(c.px*geo.pageW - left)/(right-left)));
-                                   c.py=Math.min(1,Math.max(0,(c.py*geo.pageH - (geo.pageH-top))/(top-bottom))); });
+          geo.corners.forEach(c=>{ c.px=Math.min(1,Math.max(0,(c.px*geo.pageW - x0)/(x1-x0)));
+                                   c.py=Math.min(1,Math.max(0,(c.py*geo.pageH - (geo.pageH-y1))/(y1-y0))); });
           return { url: cropped.toDataURL("image/jpeg",.92) };
         }
       }
