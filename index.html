@@ -757,7 +757,7 @@
     <div id="archiveMeta" class="hint" style="margin-bottom:8px">—</div>
     <div id="archiveGrid" class="archive-grid"></div>
     <div class="modal-actions" style="flex-wrap:wrap;gap:8px">
-      <button class="btn ghost" type="button" onclick="reuploadPhotos()">⬆ Back up to Drive</button>
+      <button class="btn ghost" type="button" onclick="reconcilePhotos_()">⬆ Back up / re-check Drive</button>
       <button class="btn ghost" type="button" onclick="mapPhotoLocations()">🗺 Map photos</button>
       <button class="btn ghost" type="button" onclick="clearArchive()" style="border-color:#7a3a32;color:#e9a89f">Clear all</button>
       <button class="btn submit" type="button" onclick="closeArchive()">Done</button>
@@ -947,7 +947,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v168";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v169";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2167,6 +2167,7 @@ function flushPhotos(){
       if(!pending.length){ _photoFlushing=false; return; }
       for(const r of pending){ await uploadPhotoOnce_(r); }   // upload one at a time
       const confirmed = await photoConfirmSet_();             // which filenames actually reached Drive
+      if(!confirmed){ toast("Uploaded — couldn't confirm on Drive yet, will retry",true); _photoFlushing=false; return; }
       let ok=0;
       for(const r of pending){
         if(confirmed.has(r.filename)){ ok++; if(HAS_IDB){ await idbSetUploaded(r.filename); } else { pendingMem=pendingMem.filter(x=>x.filename!==r.filename); } }
@@ -2192,15 +2193,38 @@ function photoConfirmSet_(){
     try{
       const name="__pl"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
       const clean=()=>{ try{ delete window[name]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
-      window[name]=r=>{ try{ fin(new Set((r&&r.files)||[])); }finally{ clean(); } };
-      sc.onerror=()=>{ clean(); fin(new Set()); };
-      setTimeout(()=>{ clean(); fin(new Set()); }, 15000);
+      window[name]=r=>{ try{ fin((r&&r.ok)? new Set(r.files||[]) : null); }finally{ clean(); } };   // null = couldn't verify
+      sc.onerror=()=>{ clean(); fin(null); };
+      setTimeout(()=>{ clean(); fin(null); }, 15000);
       sc.src=SCRIPT_URL+sep+"action=photolist&callback="+name;
       document.body.appendChild(sc);
-    }catch(e){ fin(new Set()); }
+    }catch(e){ fin(null); }
   });
 }
-function uploadPhoto_(r){ flushPhotos(); }   // legacy entry \u2014 route through the verified flush
+// Set the uploaded flag (true/false) for one photo in IndexedDB.
+function idbSetUploadedVal_(fn,val){ return new Promise(res=>{ if(!HAS_IDB) return res(); idbOpen().then(db=>{ const tx=db.transaction(PHOTO_STORE,"readwrite"), st=tx.objectStore(PHOTO_STORE), g=st.get(fn);
+  g.onsuccess=()=>{ const r=g.result; if(r){ r.uploaded=!!val; st.put(r); } }; tx.oncomplete=()=>{db.close();res();}; tx.onerror=()=>{db.close();res();}; }).catch(()=>res()); }); }
+// Re-verify EVERY on-device photo against Drive and re-queue any that aren't really there (fixes photos
+// an older build marked "uploaded" without actually saving them). Then flush.
+async function reconcilePhotos_(silent){
+  if(!connected || isOffline()) return;
+  const confirmed = await photoConfirmSet_();
+  if(!confirmed){ if(!silent) toast("Couldn't reach Drive to verify photos — is the backend deployed?",true); return; }
+  const list = HAS_IDB ? await idbAll() : pendingMem.slice();
+  if(!list.length){ if(!silent) toast("No photos on this phone."); return; }
+  let missing=0;
+  for(const r of list){ const onDrive=confirmed.has(r.filename);
+    if(HAS_IDB){ if(r.uploaded && !onDrive){ await idbSetUploadedVal_(r.filename,false); missing++; }
+                 else if(!r.uploaded && onDrive){ await idbSetUploadedVal_(r.filename,true); }
+                 else if(!r.uploaded && !onDrive){ missing++; } }
+    else { if(!onDrive){ missing++; if(!pendingMem.some(x=>x.filename===r.filename)) pendingMem.push(r); } }
+  }
+  updateArchiveBadge();
+  try{ if($("photoArchive") && $("photoArchive").style.display==="flex") renderArchive(); }catch(e){}
+  if(missing){ toast(`${missing} photo${missing>1?"s":""} not on Drive — uploading…`); flushPhotos(); }
+  else if(!silent) toast("All photos confirmed on Drive ✓");
+}
+function uploadPhoto_(r){ flushPhotos(); }   // legacy entry — route through the verified flush
 function clearPhotos(){ $("photoThumbs").innerHTML=""; }   // new-plot reset clears the strip only — the on-device archive is kept
 
 /* ---------- on-device photo archive (review + clear) ---------- */
@@ -3257,6 +3281,7 @@ flushQueue(); // push anything left queued from a previous offline session
 flushSpecies(); fetchSpecies(); seedShrubsToSheet_(); // sync the shared species list; seed shrubs once
 flushTracts(); fetchTracts(); // sync the shared tract list
 flushPhotos(); updateArchiveBadge(); // upload any photos queued before the app was last closed, and show the on-device count
+setTimeout(()=>{ try{ reconcilePhotos_(true); }catch(e){} }, 4000); // silently re-verify photos against Drive, re-upload any missing
 $("restoreInput").addEventListener("change", e=>{ const f=e.target.files[0]; e.target.value=""; if(f) importBackup(f); }); // restore from a backup file
 $("importPlotsInput").addEventListener("change", e=>{ const f=e.target.files[0]; e.target.value=""; if(f) importPlotsFile(f); }); // import past plots (audit set)
 // draft auto-save: persist the in-progress plot continuously, and flush immediately if the app is hidden/closed
