@@ -2,7 +2,7 @@
    © 2026 Silv-Econ Ltd. All rights reserved. Proprietary — no license granted.
    Caches the app shell + map libraries so the form (and map shell) open with no signal
    after the first online visit. Bump CACHE when you change index.html so devices update. */
-const CACHE = "fi-plotcard-v155";
+const CACHE = "fi-plotcard-v156";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 // Map libraries (cross-origin). Cached so the Map view works offline after one online load.
 // (Satellite imagery tiles are NOT cached here — those still need a connection.)
