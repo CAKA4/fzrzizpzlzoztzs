@@ -57,6 +57,7 @@
     font-size:12px; padding:4px 10px; border-radius:999px; font-family:var(--mono); }
   .mapbtn{ float:right; margin-right:8px; background:#1d2c23; border:1px solid var(--blaze,#c8952a); color:#e8b84b;
     font-size:12px; padding:4px 11px; border-radius:999px; font-family:var(--mono); cursor:pointer; }
+  .mapbtn.toolsbtn{ background:#e8b84b; border-color:#f0c860; color:#1a1000; font-weight:700; padding:5px 14px; box-shadow:0 1px 5px rgba(0,0,0,.35); }
   /* ----- map overlay ----- */
   #mapView{ display:none; position:fixed; top:0; left:0; right:0; bottom:0; width:100vw; height:100vh; height:100dvh; z-index:5000; background:#0a140a; }
   body.map-open{ overflow:hidden; overscroll-behavior:none; }
@@ -66,8 +67,8 @@
   .map-top{ position:absolute; top:0; left:0; right:0; min-height:52px; z-index:5200;
     background:#0f1e0d; border-bottom:1px solid var(--line2,#33623a);
     display:flex; align-items:center; gap:6px; padding:6px 10px; padding-top:calc(6px + env(safe-area-inset-top)); }
-  .map-back{ background:none; border:1px solid var(--line2,#33623a); color:#e8f0e6; font:inherit; font-size:13px;
-    padding:6px 12px; border-radius:7px; cursor:pointer; flex:none; }
+  .map-back{ background:#2b6ea3; border:1px solid #4a90c0; color:#fff; font:inherit; font-size:13px; font-weight:700;
+    padding:8px 14px; border-radius:8px; cursor:pointer; flex:none; box-shadow:0 2px 8px rgba(0,0,0,.4); }
   .map-standpill{ font-family:var(--mono); text-align:center; flex:1 1 auto; min-width:0; overflow:hidden; }
   .map-standpill .k{ display:block; font-size:8px; letter-spacing:.12em; text-transform:uppercase; color:#7a9a76; white-space:nowrap; }
   .map-standpill b{ font-size:15px; color:#7a9a76; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; }
@@ -75,9 +76,18 @@
   .map-load{ background:#16271a; border:1px solid var(--line2,#33623a); color:#bfe6cb; font:inherit;
     font-size:11px; padding:6px 10px; border-radius:7px; cursor:pointer; font-family:var(--mono); flex:none; }
   .map-load.has{ border-color:#c8952a; color:#e8b84b; }
+  .map-load.accent{ background:#e8b84b; border:1px solid #f0c860; color:#1a1000; font-weight:700; font-size:13px; padding:8px 14px; box-shadow:0 2px 8px rgba(0,0,0,.4); }
+  .map-load.accent.has{ background:#e8b84b; color:#1a1000; }
   .layers-menu{ position:absolute; top:calc(54px + env(safe-area-inset-top)); right:10px; z-index:5300; background:#0f1e0d; border:1px solid var(--line2,#33623a);
     border-radius:10px; padding:8px; box-shadow:0 6px 20px rgba(0,0,0,.6); display:flex; flex-direction:column; gap:6px; width:min(82vw,300px); max-height:calc(100vh - 80px - env(safe-area-inset-top)); overflow-y:auto; }
-  .layers-menu>button{ text-align:left; padding:11px 12px; border-radius:8px; border:1px solid var(--line2,#33623a); background:#16271a; color:#e8f0e6; font:inherit; font-size:13px; cursor:pointer; }
+  .layers-menu>button, .lgroup-body>button{ text-align:left; padding:11px 12px; border-radius:8px; border:1px solid var(--line2,#33623a); background:#16271a; color:#e8f0e6; font:inherit; font-size:13px; cursor:pointer; width:100%; }
+  .lgroup{ border:1px solid #284a2c; border-radius:9px; background:#0e1b0c; overflow:hidden; }
+  .lgroup>summary{ list-style:none; cursor:pointer; padding:11px 12px; font-family:var(--mono); font-size:12px; letter-spacing:.04em; color:#bfe6cb; background:#16271a; display:flex; align-items:center; justify-content:space-between; }
+  .lgroup>summary::-webkit-details-marker{ display:none; }
+  .lgroup>summary::after{ content:"▸"; color:#7a9a76; font-size:13px; transition:transform .15s; }
+  .lgroup[open]>summary::after{ transform:rotate(90deg); }
+  .lgroup[open]>summary{ border-bottom:1px solid #284a2c; color:#e8b84b; }
+  .lgroup-body{ display:flex; flex-direction:column; gap:6px; padding:8px; }
   .layer-list{ border-top:1px solid #284a2c; padding-top:6px; display:flex; flex-direction:column; gap:5px; }
   .layer-hd{ font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:#7a9a76; padding:2px 2px 0; }
   .layer-row{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:#cdebcf; }
@@ -162,8 +172,8 @@
   .live-legend .lr i{ width:11px; height:11px; border-radius:50%; flex:none; border:1px solid #fff8; }
   .live-legend .lr b{ font-weight:700; } .live-legend .lr span{ color:#9bb6a3; margin-left:auto; padding-left:8px; }
   .map-drop{ position:absolute; left:10px; right:60px; bottom:10px; z-index:5200; }
-  .dropbtn{ width:100%; padding:14px; border-radius:10px; border:1px solid #33623a; background:#3d7a35; color:#0b160a;
-    font:inherit; font-size:14px; font-weight:700; letter-spacing:.03em; cursor:pointer; box-shadow:0 4px 16px rgba(0,0,0,.5); }
+  .dropbtn{ width:100%; padding:15px; border-radius:10px; border:1px solid #f0c860; background:#f2a83d; color:#1a1000;
+    font:inherit; font-size:15px; font-weight:800; letter-spacing:.03em; cursor:pointer; box-shadow:0 4px 18px rgba(0,0,0,.55), 0 0 0 2px rgba(242,168,61,.25); }
   .standlabel{ font-family:var(--mono); font-size:11px; font-weight:700; color:#fff; text-shadow:0 1px 3px #000,0 0 6px #000; white-space:nowrap; }
   .ptlabel{ font-family:var(--mono); font-size:10px; font-weight:600; color:#ffe0b2; text-shadow:0 1px 3px #000,0 0 5px #000; white-space:nowrap; text-align:left; }
   .layer-status{ font-size:11.5px; color:#cdebcf; background:#0b1709; border:1px solid #284a2c; border-radius:8px; padding:7px 9px; display:flex; flex-direction:column; gap:3px; }
@@ -209,11 +219,13 @@
   /* more menu */
   .more-list{ display:flex; flex-direction:column; gap:8px; margin-bottom:10px; }
   .more-list button{ text-align:left; padding:13px 14px; border-radius:9px; border:1px solid var(--line2,#33623a); background:#16271a; color:#e8f0e6; font:inherit; font-size:14px; cursor:pointer; }
-  .mgroup{ border:1px solid #24402a; border-radius:10px; overflow:hidden; background:#0f1e0d; }
+  .mgroup{ border:1px solid #24402a; border-radius:10px; overflow:hidden; background:#0f1e0d; transition:border-color .15s, box-shadow .15s; }
+  .mgroup[open]{ border-color:#e8b84b; box-shadow:0 0 0 1px rgba(232,184,75,.35); background:#141f10; }
   .mgroup>summary{ list-style:none; cursor:pointer; padding:12px 14px; font:700 13px system-ui; color:#8fe6a0; background:#12251a; display:flex; align-items:center; justify-content:space-between; }
+  .mgroup[open]>summary{ color:#f0c860; background:#1c2c12; border-bottom:1px solid #3a4a1e; }
   .mgroup>summary::-webkit-details-marker{ display:none; }
   .mgroup>summary::after{ content:"▸"; color:#6f9a78; transition:transform .15s; }
-  .mgroup[open]>summary::after{ transform:rotate(90deg); }
+  .mgroup[open]>summary::after{ transform:rotate(90deg); color:#f0c860; }
   .mgroup>button{ display:block; width:100%; margin:6px; margin-bottom:0; width:calc(100% - 12px); }
   .mgroup>button:last-child{ margin-bottom:6px; }
   /* summary */
@@ -369,7 +381,7 @@
       <button class="mapbtn" type="button" onclick="openMap()" title="Map">🗺</button>
       <button class="mapbtn" type="button" onclick="startCapture()" title="Capture a plot location">🎯</button>
       <button class="mapbtn" type="button" onclick="showFormHelp()" title="How to use the form">?</button>
-      <button class="mapbtn" type="button" onclick="openMore()" title="More">⋯</button>
+      <button class="mapbtn toolsbtn" type="button" onclick="openMore()" title="Tools & menu">⋯ Tools</button>
       <span class="chip" id="savedChip">0 saved</span>
     </div>
   </div>
@@ -591,64 +603,84 @@
     <button class="map-back" type="button" onclick="closeMap()">‹ Form</button>
     <div class="map-standpill" id="mapStandPill"><span class="k">In stand</span><b id="mapStandVal">—</b></div>
     <button class="map-load" type="button" onclick="showMapHelp()" title="How to use this map" style="margin-left:8px;min-width:0;padding:0 12px">?</button>
-    <button class="map-load" type="button" onclick="toggleLayersMenu()">＋ Layers</button>
+    <button class="map-load accent" type="button" onclick="toggleLayersMenu()">＋ Layers</button>
   </div>
   <div class="layers-menu" id="layersMenu" style="display:none">
     <div id="layerStatus" class="layer-status"></div>
     <div id="layerVisList"></div>
-    <button type="button" onclick="closeLayersMenu();$('boundInput').click()">⬇ Stand boundaries (polygons)</button>
-    <button type="button" onclick="closeLayersMenu();$('pointsInput').click()">⬇ Reference points / lines</button>
-    <button type="button" id="refClearBtn" onclick="closeLayersMenu();clearRefFiles()" style="display:none">✕ Remove reference points / lines</button>
-    <button type="button" onclick="closeLayersMenu();$('pdfInput').click()">🗺 Georeferenced PDF map</button>
-    <button type="button" id="pdfUnloadBtn" onclick="closeLayersMenu();unloadPDF()" style="display:none">✕ Unload PDF map</button>
-    <button type="button" id="crewBtn" onclick="closeLayersMenu();toggleCrewPlots()">👥 Show crew plots (from Sheet)</button>
-    <div id="plotLabelRow" style="display:none;padding:0 0 2px">
-      <label style="font-size:12px;color:#cfe6d4;display:block;margin:0 2px 3px">Label plots by</label>
-      <select id="plotLabelSel" onchange="setPlotLabel(this.value)">
-        <option value="none">None (dots only)</option>
-        <option value="ft">Forest type</option>
-        <option value="dom">Dominant species</option>
-        <option value="ba">BA (m²/ha)</option>
-        <option value="vol">Volume (m³/ha)</option>
-        <option value="age">Estimated age</option>
-        <option value="ags">% AGS</option>
-        <option value="stk">Stocking ratio</option>
-        <option value="stems">Stems/ha</option>
-      </select>
-    </div>
-    <button type="button" id="crewRouteBtn" onclick="closeLayersMenu();toggleCrewRoutes()">🧭 Show crew routes (from Sheet)</button>
-    <button type="button" id="liveBtn" onclick="closeLayersMenu();toggleLive()">📡 Share my live location (off)</button>
-    <button type="button" id="trackShowBtn" onclick="closeLayersMenu();toggleTrackShown()">〰 Hide track log</button>
-    <button type="button" onclick="closeLayersMenu();exportTrack()">⤓ Export track log (GeoJSON)</button>
-    <button type="button" onclick="closeLayersMenu();exportTrackShp()">⤓ Export track log (Shapefile · UTM 17N)</button>
-    <button type="button" onclick="closeLayersMenu();exportRoute()">⤓ Export cruise route (GeoJSON)</button>
-    <button type="button" onclick="closeLayersMenu();exportRouteShp()">⤓ Export cruise route (Shapefile · UTM 17N)</button>
-    <button type="button" onclick="closeLayersMenu();exportPoly()">⤓ Export area polygon (GeoJSON)</button>
-    <button type="button" onclick="closeLayersMenu();exportPolyShp()">⤓ Export area polygon (Shapefile · UTM 17N)</button>
-    <button type="button" onclick="closeLayersMenu();syncPolys()">↻ Sync areas to Sheet &amp; recalc plots</button>
-    <button type="button" onclick="closeLayersMenu();clearTrack()">✕ Clear track log</button>
-    <div id="boundFileList" class="layer-list" style="display:none"></div>
-    <div class="map-field" id="mapFieldRow" style="display:none">
-      <label>Stand name field</label><select id="standFieldSel" onchange="setStandField(this.value)"></select>
-    </div>
-    <button type="button" id="sendAreasBtn" class="btn ghost" style="display:none;width:100%;margin:4px 0" onclick="pushCompartmentAreas_(false)">📐 Send compartment areas to Sheet</button>
-    <div class="map-field" id="ageFieldRow" style="display:none">
-      <label>Age field (auto-fills plot AGE)</label><select id="ageFieldSel" onchange="setAgeField(this.value)"></select>
-    </div>
-    <div class="map-field" id="tractFieldRow" style="display:none">
-      <label>Tract field (auto-fills plot TRACT)</label><select id="tractFieldSel" onchange="setTractField(this.value)"></select>
-    </div>
-    <div class="map-field" id="areaFieldRow" style="display:none">
-      <label>Area field (official hectares — used if filled, else calculated)</label><select id="areaFieldSel" onchange="setAreaField(this.value)"></select>
-    </div>
-    <div class="map-field popupfields" id="popupFieldRow" style="display:none">
-      <label>Tap-a-stand popup fields</label>
-      <div id="popupFieldList" class="popupfield-list"></div>
-    </div>
-    <div class="map-field" id="refFieldRow" style="display:none">
-      <label>Point label field</label><select id="refFieldSel" onchange="setRefField(this.value)"></select>
-    </div>
-    <button type="button" id="clearRefBtn" class="ls-clear" style="display:none" onclick="clearRef()">✕ Clear reference points</button>
+
+    <details class="lgroup"><summary>📁 Load &amp; import layers</summary>
+      <div class="lgroup-body">
+        <button type="button" onclick="closeLayersMenu();$('boundInput').click()">⬇ Stand boundaries (polygons)</button>
+        <button type="button" onclick="closeLayersMenu();$('pointsInput').click()">⬇ Reference points / lines</button>
+        <button type="button" id="refClearBtn" onclick="closeLayersMenu();clearRefFiles()" style="display:none">✕ Remove reference points / lines</button>
+        <button type="button" onclick="closeLayersMenu();$('pdfInput').click()">🗺 Georeferenced PDF map</button>
+        <button type="button" id="pdfUnloadBtn" onclick="closeLayersMenu();unloadPDF()" style="display:none">✕ Unload PDF map</button>
+      </div>
+    </details>
+
+    <details class="lgroup" id="lgroupFields"><summary>🗂 Boundary fields &amp; areas</summary>
+      <div class="lgroup-body">
+        <div id="boundFileList" class="layer-list" style="display:none"></div>
+        <div class="map-field" id="mapFieldRow" style="display:none">
+          <label>Stand name field</label><select id="standFieldSel" onchange="setStandField(this.value)"></select>
+        </div>
+        <button type="button" id="sendAreasBtn" class="btn ghost" style="display:none;width:100%;margin:4px 0" onclick="pushCompartmentAreas_(false)">📐 Send compartment areas to Sheet</button>
+        <div class="map-field" id="ageFieldRow" style="display:none">
+          <label>Age field (auto-fills plot AGE)</label><select id="ageFieldSel" onchange="setAgeField(this.value)"></select>
+        </div>
+        <div class="map-field" id="tractFieldRow" style="display:none">
+          <label>Tract field (auto-fills plot TRACT)</label><select id="tractFieldSel" onchange="setTractField(this.value)"></select>
+        </div>
+        <div class="map-field" id="areaFieldRow" style="display:none">
+          <label>Area field (official hectares — used if filled, else calculated)</label><select id="areaFieldSel" onchange="setAreaField(this.value)"></select>
+        </div>
+        <div class="map-field popupfields" id="popupFieldRow" style="display:none">
+          <label>Tap-a-stand popup fields</label>
+          <div id="popupFieldList" class="popupfield-list"></div>
+        </div>
+        <div class="map-field" id="refFieldRow" style="display:none">
+          <label>Point label field</label><select id="refFieldSel" onchange="setRefField(this.value)"></select>
+        </div>
+        <button type="button" id="clearRefBtn" class="ls-clear" style="display:none" onclick="clearRef()">✕ Clear reference points</button>
+      </div>
+    </details>
+
+    <details class="lgroup"><summary>👥 Crew &amp; live location</summary>
+      <div class="lgroup-body">
+        <button type="button" id="crewBtn" onclick="closeLayersMenu();toggleCrewPlots()">👥 Show crew plots (from Sheet)</button>
+        <div id="plotLabelRow" style="display:none;padding:0 0 2px">
+          <label style="font-size:12px;color:#cfe6d4;display:block;margin:0 2px 3px">Label plots by</label>
+          <select id="plotLabelSel" onchange="setPlotLabel(this.value)">
+            <option value="none">None (dots only)</option>
+            <option value="ft">Forest type</option>
+            <option value="dom">Dominant species</option>
+            <option value="ba">BA (m²/ha)</option>
+            <option value="vol">Volume (m³/ha)</option>
+            <option value="age">Estimated age</option>
+            <option value="ags">% AGS</option>
+            <option value="stk">Stocking ratio</option>
+            <option value="stems">Stems/ha</option>
+          </select>
+        </div>
+        <button type="button" id="crewRouteBtn" onclick="closeLayersMenu();toggleCrewRoutes()">🧭 Show crew routes (from Sheet)</button>
+        <button type="button" id="liveBtn" onclick="closeLayersMenu();toggleLive()">📡 Share my live location (off)</button>
+      </div>
+    </details>
+
+    <details class="lgroup"><summary>〰 Track, route &amp; area exports</summary>
+      <div class="lgroup-body">
+        <button type="button" id="trackShowBtn" onclick="closeLayersMenu();toggleTrackShown()">〰 Hide track log</button>
+        <button type="button" onclick="closeLayersMenu();exportTrack()">⤓ Export track log (GeoJSON)</button>
+        <button type="button" onclick="closeLayersMenu();exportTrackShp()">⤓ Export track log (Shapefile · UTM 17N)</button>
+        <button type="button" onclick="closeLayersMenu();exportRoute()">⤓ Export cruise route (GeoJSON)</button>
+        <button type="button" onclick="closeLayersMenu();exportRouteShp()">⤓ Export cruise route (Shapefile · UTM 17N)</button>
+        <button type="button" onclick="closeLayersMenu();exportPoly()">⤓ Export area polygon (GeoJSON)</button>
+        <button type="button" onclick="closeLayersMenu();exportPolyShp()">⤓ Export area polygon (Shapefile · UTM 17N)</button>
+        <button type="button" onclick="closeLayersMenu();syncPolys()">↻ Sync areas to Sheet &amp; recalc plots</button>
+        <button type="button" onclick="closeLayersMenu();clearTrack()">✕ Clear track log</button>
+      </div>
+    </details>
   </div>
   <div id="fmap"></div>
   <div class="map-rail">
@@ -671,6 +703,7 @@
     <span><i style="background:transparent;border:1px solid #8fd18a"></i>Stand</span>
     <span id="legImported" style="display:none"><i style="background:#4aa3e0;border-radius:50%"></i>Imported</span>
     <span id="legDone" style="display:none"><i style="background:#37c26b;border-radius:50%"></i>Done ✓</span>
+    <span id="legTodo" style="display:none"><i style="background:transparent;border:2px dashed #ff8c1a;border-radius:50%"></i>To do / empty</span>
   </div>
   <div class="live-legend" id="liveLegend" style="display:none"></div>
   <div class="measure-bar" id="measureBar" style="display:none">
@@ -695,9 +728,8 @@
   <div class="map-chips" id="mapChips">
     <button type="button" onclick="zoomToMe_()" title="Center on my GPS">◎ Me</button>
     <button type="button" onclick="fitAllLayers_()" title="Zoom to fit everything">⤢ Fit all</button>
-    <button type="button" onclick="openGoToStand()" title="Zoom to a stand">▧ Stand…</button>
+    <button type="button" onclick="openSearch()" title="Search stands / compartments, or filter plots by attribute">🔎 Search</button>
     <button type="button" onclick="openMyLabel()" title="Label plot dots by analysis">🏷 Label</button>
-    <button type="button" onclick="openFindPlots()" title="Search plots by attribute and highlight matches">🔎 Find</button>
     <button type="button" onclick="openMapExport()" title="Export plots / compartments + analysis to shapefile">📤 Export</button>
   </div>
   <div class="map-drop" id="mapDrop">
@@ -758,7 +790,7 @@
   <div class="modal-card">
     <div class="modal-title" style="display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--card);padding:6px 0 12px;margin:0 0 8px;z-index:2">Tools <button type="button" onclick="closeMore()" style="background:#16271a;border:1px solid #33623a;border-radius:8px;color:#cdebcf;width:40px;height:40px;font-size:20px;line-height:1;cursor:pointer;flex:none" aria-label="Close">✕</button></div>
     <div class="more-list">
-      <details class="mgroup" open><summary>📊 Analysis</summary>
+      <details class="mgroup"><summary>📊 Analysis</summary>
         <button type="button" onclick="closeMore();openSummary()">📊 Stand summary (on device)</button>
         <button type="button" onclick="closeMore();openFullAnalysis('main')">📈 Full analysis — all tabs</button>
         <button type="button" onclick="closeMore();openDataTable()">▦ View plot data table</button>
@@ -912,7 +944,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v143";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v150";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1831,8 +1863,11 @@ function refreshAuditState_(){ if(!connected) return; jsonpAction_("auditstate",
 // script injection breaks if any Sheet cell contains a character that isn't valid mid-script. A normal
 // fetch()+JSON.parse is robust. Apps Script /exec allows cross-origin GET reads.
 function fetchJson_(action, cb){
+  const amp=action.indexOf("&");
+  const name=amp>=0?action.slice(0,amp):action;         // the action itself
+  const rest=amp>=0?action.slice(amp):"";               // any "&set=…" params, kept intact
   const sep=SCRIPT_URL.includes("?")?"&":"?";
-  const url=SCRIPT_URL+sep+"action="+encodeURIComponent(action);
+  const url=SCRIPT_URL+sep+"action="+encodeURIComponent(name)+rest;
   let done=false; const to=setTimeout(()=>{ if(done)return; done=true; cb(null,"timeout"); }, 20000);
   fetch(url,{method:"GET"}).then(r=>r.text()).then(t=>{ if(done)return; done=true; clearTimeout(to);
     try{ cb(JSON.parse(t), null); }catch(err){ cb(null, "parse: "+(t||"").slice(0,80)); } })
@@ -2256,7 +2291,14 @@ function zipStore(files){   // ZIP with "stored" (uncompressed) entries — enou
 /* ====================== FIELD TOOLS ====================== */
 
 /* ---------- More menu ---------- */
-function openMore(){ $("moreMenu").style.display="flex"; try{ const pbm=$("pushAuditBtnMore"); if(pbm) pbm.style.display=auditPlots.length?"block":"none"; }catch(e){} try{ if(connected) refreshAuditState_(); }catch(e){} }
+function openMore(){ const mm=$("moreMenu"); mm.style.display="flex";
+  try{ const pbm=$("pushAuditBtnMore"); if(pbm) pbm.style.display=auditPlots.length?"block":"none"; }catch(e){}
+  try{ const groups=mm.querySelectorAll("details.mgroup");
+    groups.forEach(d=>{ d.open=false;
+      if(!d._accordion){ d._accordion=true; d.addEventListener("toggle",()=>{ if(d.open) groups.forEach(o=>{ if(o!==d) o.open=false; }); }); }
+    });
+  }catch(e){}
+  try{ if(connected) refreshAuditState_(); }catch(e){} }
 function closeMore(){ $("moreMenu").style.display="none"; }
 
 /* ---------- data-entry person (per device): set once, stamped on every plot ---------- */
@@ -3563,12 +3605,20 @@ function nearbyPlotPopup_(latlng){
   L.popup({offset:[0,-8]}).setLatLng([best.lat,best.lon]).setContent(best.html).openOn(fmap);
   return true;
 }
+// A plot "needs work" only for imported reference plots that haven't been completed (field-checked) yet.
+// Own plots you create are always considered entered — an empty plot is a valid regeneration plot, so it
+// stays plain yellow and is never ringed.
+function plotNeedsWork_(p, isAudit){
+  return isAudit ? !p._done : false;
+}
 function renderMapPins(){ if(!fpins) return; fpins.clearLayers(); if(fauditpins) fauditpins.clearLayers();
   saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)) return;
     const lbl=myDotLabel_(p); const nonNum=!(myLabelFields.length===1&&myLabelFields[0]==="num"); const wide=(nonNum&&lbl.length>2);
-    const hit=_findHit_(p);
+    const hit=_findHit_(p); const needs=plotNeedsWork_(p,false);
     const base=wide?"min-width:24px;height:22px;padding:0 5px;border-radius:11px":"width:24px;height:24px;border-radius:50%";
-    const ring=hit?"border:3px solid #ff36c0;box-shadow:0 0 0 3px rgba(255,54,192,.45),0 2px 6px rgba(0,0,0,.6)":"border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6)";
+    const ring=hit?"border:3px solid #ff36c0;box-shadow:0 0 0 3px rgba(255,54,192,.45),0 2px 6px rgba(0,0,0,.6)"
+              :(needs?"border:3px dashed #ff8c1a;box-shadow:0 0 0 3px rgba(255,140,26,.4),0 2px 6px rgba(0,0,0,.6)"
+              :"border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6)");
     const icon=L.divIcon({className:"",html:`<div style="${base};background:#e8b84b;${ring};display:flex;align-items:center;justify-content:center;font:700 10px/1 'Courier New',monospace;color:#1a2e18;white-space:nowrap">${lbl}</div>`,iconSize:null,iconAnchor:[12,12]});
     L.marker([lat,lon],{icon}).addTo(fpins)
       .bindPopup(plotPopupHtml_(p,i));
@@ -3579,10 +3629,11 @@ function renderMapPins(){ if(!fpins) return; fpins.clearLayers(); if(fauditpins)
     const done=!!p._done;
     const col = done ? "#37c26b" : (p._dup ? "#e8b84b" : "#4aa3e0");
     const lbl = auditDotLabel_(p);
-    const hit=_findHit_(p);
+    const hit=_findHit_(p); const needs=plotNeedsWork_(p,true);
     const ring = hit ? "border:3px solid #ff36c0;box-shadow:0 0 0 3px rgba(255,54,192,.45),0 2px 7px rgba(0,0,0,.6)"
-                     : (done ? "border:2px solid #eafff0;box-shadow:0 0 0 2px #1f8f4a,0 2px 7px rgba(0,0,0,.6)"
-                      : "border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6)");
+                     : (needs ? "border:3px dashed #ff8c1a;box-shadow:0 0 0 3px rgba(255,140,26,.4),0 2px 7px rgba(0,0,0,.6)"
+                      : (done ? "border:2px solid #eafff0;box-shadow:0 0 0 2px #1f8f4a,0 2px 7px rgba(0,0,0,.6)"
+                       : "border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6)"));
     const check = done ? `<span style="position:absolute;top:-6px;right:-6px;width:13px;height:13px;border-radius:50%;background:#1f8f4a;border:1.5px solid #fff;color:#fff;font:700 9px/13px system-ui;text-align:center">✓</span>` : "";
     const icon=L.divIcon({className:"",html:`<div style="position:relative;min-width:22px;height:22px;padding:0 5px;border-radius:11px;background:${col};${ring};display:flex;align-items:center;justify-content:center;font:700 9px/1 'Courier New',monospace;color:${done?"#04220f":"#0a1a28"};white-space:nowrap">${esc(lbl)}${check}</div>`,iconSize:null,iconAnchor:[11,11]});
     const doneLine = done ? `<br><span style="color:#1f8f4a">✓ completed${p._doneBy?` · ${esc(p._doneBy)}`:""}${p._doneAt?` · ${esc(String(p._doneAt).slice(0,16))}`:""}</span>` : "";
@@ -3590,10 +3641,12 @@ function renderMapPins(){ if(!fpins) return; fpins.clearLayers(); if(fauditpins)
       .bindPopup(`<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b> <span style="color:#2b6ea3">${done?"done":"imported"}</span>${p._dup?' <span style="color:#b6791b">· dup?</span>':""}<br>${(p.DATE||"").slice(0,16)}${doneLine}<br><a href="javascript:void(0)" onclick="editAuditFromMap(${i})">🔍 Review / edit ›</a> · <a href="javascript:void(0)" onclick="deleteAuditFromMap(${i})" style="color:#c0392b">🗑 Delete</a></div>`);
   });
   // Show the imported / done legend entries only when there are imported plots to explain.
-  try{ const li=$("legImported"), ld=$("legDone");
+  try{ const li=$("legImported"), ld=$("legDone"), lt=$("legTodo");
     const hasImp=auditPlots.length>0, hasDone=auditPlots.some(p=>p._done);
+    const hasTodo=saved.some(p=>plotNeedsWork_(p,false))||auditPlots.some(p=>plotNeedsWork_(p,true));
     if(li) li.style.display=hasImp?"":"none";
     if(ld) ld.style.display=hasDone?"":"none";
+    if(lt) lt.style.display=hasTodo?"":"none";
   }catch(e){}
 }
 function editAuditFromMap(i){ closeMap(); editAudit(i); }
@@ -3837,7 +3890,7 @@ function exportTrackShp(){
   toast(`Track shapefile (UTM 17N) exported — ${trackLog.length} pts`);
 }
 
-function toggleLayersMenu(){ const m=$("layersMenu"); const show=m.style.display==="none"; if(show){ renderLayerList(); updateLayerStatus(); setTrackBtn(); } m.style.display = show?"flex":"none"; document.body.classList.toggle("layers-open", show); }
+function toggleLayersMenu(){ const m=$("layersMenu"); const show=m.style.display==="none"; if(show){ renderLayerList(); updateLayerStatus(); setTrackBtn(); m.querySelectorAll("details.lgroup").forEach(d=>d.open=false); } m.style.display = show?"flex":"none"; document.body.classList.toggle("layers-open", show); }
 function closeLayersMenu(){ $("layersMenu").style.display="none"; document.body.classList.remove("layers-open"); }
 function storageBytes_(){ let t=0; try{ for(let i=0;i<STORE.length;i++){ const k=STORE.key(i); t+=(k||"").length+(STORE.getItem(k)||"").length; } }catch(e){} return t; }
 function updateLayerStatus(){
@@ -3926,16 +3979,13 @@ function fitAllLayers_(quiet){
 }
 function zoomToMe_(){ if(mePos){ try{ fmap.setView([mePos.lat,mePos.lon],17); }catch(e){} } else toast("No GPS fix yet",true); }
 // List stands from loaded boundaries + your plots, then zoom to the chosen one.
-function openGoToStand(){ try{ _openGoToStand(); }catch(e){ toast("Couldn't open the stand list: "+(e&&e.message||e),true); } }
-function _openGoToStand(){
-  const bounds={};   // stand -> [[lat,lng],...]
-  _gotoTract={};     // stand -> tract name (from the compartment layer, if present)
+// Build the stand/compartment index (from boundaries + plots) → sets _gotoBounds/_gotoNames/_gotoTract.
+function buildStandIndex_(){
+  const bounds={}; _gotoTract={};
   const add=(name,lat,lng)=>{ name=String(name||"").trim(); if(!name||!isFinite(lat)||!isFinite(lng)) return; (bounds[name]=bounds[name]||[]).push([lat,lng]); };
-  // Boundaries: use the chosen stand field; if none is set, fall back to a likely name field.
   if(typeof BOUND!=="undefined"&&BOUND&&BOUND.features){
     let sf=standField;
     if(!sf){ const props=BOUND.features[0]&&BOUND.features[0].properties||{}; sf=Object.keys(props).find(k=>/stand|standid|poly|comp|unit|name|id/i.test(k))||Object.keys(props)[0]; }
-    // find a tract/property field in the layer (TRACT, PROPERTY, etc.)
     const props0=BOUND.features[0]&&BOUND.features[0].properties||{};
     const tf=Object.keys(props0).find(k=>/^tract$|tract|property|propname|owner|parcel/i.test(k))||null;
     BOUND.features.forEach(f=>{ const nm=f.properties&&sf?f.properties[sf]:null; if(nm==null||nm==="") return;
@@ -3943,25 +3993,53 @@ function _openGoToStand(){
       if(tf && f.properties[tf]!=null && String(f.properties[tf]).trim()!=="" && !_gotoTract[key]) _gotoTract[key]=String(f.properties[tf]).trim();
       const pts=[]; collectCoords_([f],pts); pts.forEach(pt=>add(nm,pt[0],pt[1])); });
   }
-  // fall back to the plot's own TRACT when the polygon didn't supply one
   const noteTract=p=>{ const s=String(p.STANDID||"").trim(); const t=String(p.TRACT||"").trim(); if(s&&t&&!_gotoTract[s]) _gotoTract[s]=t; };
   saved.forEach(p=>{ add(p.STANDID,parseFloat(p.Y),parseFloat(p.X)); noteTract(p); });
   auditPlots.forEach(p=>{ add(p.STANDID,parseFloat(p.Y),parseFloat(p.X)); noteTract(p); });
   let names=Object.keys(bounds).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
-  let title="Go to stand";
-  // If nothing has a Stand ID (e.g. imported plots with blank stands), fall back to listing plots by number.
+  let title="Stands / compartments";
   if(!names.length){
-    title="Go to plot";
+    title="Plots";
     const addP=(label,lat,lng)=>{ if(!isFinite(lat)||!isFinite(lng)) return; (bounds[label]=bounds[label]||[]).push([lat,lng]); };
     saved.forEach((p,i)=>addP(`Plot ${p.PLOTNUM||i+1}`,parseFloat(p.Y),parseFloat(p.X)));
-    auditPlots.forEach((p,i)=>addP(`Audit ${p.PLOTNUM||i+1}`,parseFloat(p.Y),parseFloat(p.X)));
+    auditPlots.forEach((p,i)=>addP(`Imported ${p.PLOTNUM||i+1}`,parseFloat(p.Y),parseFloat(p.X)));
     names=Object.keys(bounds).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
   }
-  if(!names.length){ toast("Nothing to zoom to yet — load a boundary file or save/import a plot",true); return; }
-  _gotoBounds=bounds; _gotoNames=names;   // set BEFORE building rows — gotoRows_ reads _gotoBounds[n].length
+  _gotoBounds=bounds; _gotoNames=names;
+  return {names, title};
+}
+// Unified Search: pick a stand/compartment from the list (tap to zoom), OR filter plots by attribute
+// (highlight + zoom to matches). Combines the old “Stand…” and “Find” tools into one.
+function openSearch(){ try{ _openSearch(); }catch(e){ toast("Couldn't open search: "+(e&&e.message||e),true); } }
+function _openSearch(){
+  const idx=buildStandIndex_();
+  const fopts=FIND_FIELDS.map(([k,l])=>`<option value="${k}">${l}</option>`).join("");
+  const cur=_findRule||{field:"PLOTNUM",op:"zero",value:""};
+  const hasList=idx.names.length>0;
+  const html=
+    `<details class="lgroup" id="searchFilterGrp"><summary>🎛 Filter plots by attribute</summary><div class="lgroup-body">`+
+      `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"><button class="btn ghost" type="button" onclick="quickFind_('PLOTNUM','zero')">Plot # = 0</button><button class="btn ghost" type="button" onclick="quickFind_('STANDID','blank')">No stand</button><button class="btn ghost" type="button" onclick="quickFind_('AGE','blank')">No age</button></div>`+
+      `<label style="font-size:12px;color:#8fb89a">Field</label><select id="findField" style="width:100%;font-size:16px;margin:3px 0 8px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">${fopts}</select>`+
+      `<label style="font-size:12px;color:#8fb89a">Condition</label><select id="findOp" onchange="findOpChange_()" style="width:100%;font-size:16px;margin:3px 0 8px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
+        `<option value="eq">equals</option><option value="ne">does not equal</option><option value="has">contains</option><option value="zero">equals 0</option><option value="blank">is blank</option><option value="gt">greater than</option><option value="lt">less than</option></select>`+
+      `<div id="findValWrap"><label style="font-size:12px;color:#8fb89a">Value</label><input id="findVal" type="text" style="width:100%;font-size:16px;margin:3px 0 10px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></div>`+
+      `<button class="btn" type="button" onclick="applyFind_()">Highlight &amp; zoom to matches</button>`+
+      (_findRule?`<button class="btn ghost" type="button" onclick="clearFind_()" style="margin-top:8px">Clear highlight</button>`:"")+
+    `</div></details>`+
+    `<input id="gotoSearch" type="text" placeholder="Search ${hasList?idx.title.toLowerCase():"…"}" oninput="filterGoto_()" style="width:100%;font-size:16px;margin:10px 0 6px;padding:9px 11px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
+    (hasList?`<div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#7a9a76;margin:2px 2px 4px">${esc(idx.title)} · tap to zoom</div>`:"")+
+    `<div id="gotoList">${gotoRows_(idx.names)}</div>`;
+  showInfoSheet_("Search", html);
+  setTimeout(()=>{ const f=$("findField"),o=$("findOp"); if(f) f.value=cur.field; if(o) o.value=cur.op; findOpChange_(); const v=$("findVal"); if(v&&cur.value!=null) v.value=cur.value; },40);
+}
+function openGoToStand(){ openSearch(); }   // back-compat: both old tools now open the unified Search
+function openFindPlots(){ openSearch(); }
+function _openGoToStand(){
+  const idx=buildStandIndex_();
+  if(!idx.names.length){ toast("Nothing to zoom to yet — load a boundary file or save/import a plot",true); return; }
   const html=`<input id="gotoSearch" type="text" placeholder="Search…" oninput="filterGoto_()" style="width:100%;font-size:16px;margin-bottom:8px;padding:9px 11px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
-    `<div id="gotoList">${gotoRows_(names)}</div>`;
-  showInfoSheet_(title, html);
+    `<div id="gotoList">${gotoRows_(idx.names)}</div>`;
+  showInfoSheet_(idx.title, html);
   setTimeout(()=>{ const s=$("gotoSearch"); if(s) s.focus(); },60);
 }
 let _gotoBounds={}, _gotoNames=[], _gotoTract={};
