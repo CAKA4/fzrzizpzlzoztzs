@@ -944,7 +944,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v152";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v153";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2058,6 +2058,13 @@ let currentPhotoNames=[];   // filenames of photos taken for the plot being ente
 function idbOpen(){ return new Promise((res,rej)=>{ const r=indexedDB.open(PHOTO_DB,1);
   r.onupgradeneeded=()=>{ const db=r.result; if(!db.objectStoreNames.contains(PHOTO_STORE)) db.createObjectStore(PHOTO_STORE,{keyPath:"filename"}); };
   r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+// Boundary layers live in their own IndexedDB store (localStorage's ~5 MB cap was too small for shapefiles).
+const LAYER_DB="fi_layers_db", LAYER_STORE="layers";
+function ldbOpen(){ return new Promise((res,rej)=>{ const r=indexedDB.open(LAYER_DB,1);
+  r.onupgradeneeded=()=>{ const db=r.result; if(!db.objectStoreNames.contains(LAYER_STORE)) db.createObjectStore(LAYER_STORE); };
+  r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+function ldbPut(key,val){ return new Promise((res,rej)=>{ ldbOpen().then(db=>{ const tx=db.transaction(LAYER_STORE,"readwrite"); tx.objectStore(LAYER_STORE).put(val,key); tx.oncomplete=()=>{db.close();res();}; tx.onerror=()=>{db.close();rej(tx.error);}; }).catch(rej); }); }
+function ldbGet(key){ return new Promise((res,rej)=>{ ldbOpen().then(db=>{ const tx=db.transaction(LAYER_STORE,"readonly"); const rq=tx.objectStore(LAYER_STORE).get(key); rq.onsuccess=()=>{db.close();res(rq.result);}; rq.onerror=()=>{db.close();rej(rq.error);}; }).catch(rej); }); }
 function idbPut(rec){ return new Promise((res,rej)=>{ idbOpen().then(db=>{ const tx=db.transaction(PHOTO_STORE,"readwrite"); tx.objectStore(PHOTO_STORE).put(rec); tx.oncomplete=()=>{db.close();res();}; tx.onerror=()=>{db.close();rej(tx.error);}; }).catch(rej); }); }
 function idbAll(){ return new Promise((res,rej)=>{ idbOpen().then(db=>{ const tx=db.transaction(PHOTO_STORE,"readonly"); const rq=tx.objectStore(PHOTO_STORE).getAll(); rq.onsuccess=()=>{db.close();res(rq.result||[]);}; rq.onerror=()=>{db.close();rej(rq.error);}; }).catch(rej); }); }
 function idbDelete(fn){ return new Promise((res,rej)=>{ idbOpen().then(db=>{ const tx=db.transaction(PHOTO_STORE,"readwrite"); tx.objectStore(PHOTO_STORE).delete(fn); tx.oncomplete=()=>{db.close();res();}; tx.onerror=()=>{db.close();rej(tx.error);}; }).catch(rej); }); }
@@ -2927,7 +2934,7 @@ function exportBackup(){
   const store={};
   if(STORE){ for(let i=0;i<STORE.length;i++){ const k=STORE.key(i); if(k && k.indexOf("fi_")===0){ try{ store[k]=STORE.getItem(k); }catch(e){} } } }
   else { store[PKEY]=JSON.stringify(saved); }
-  const backup={ app:"FRI Plot Card", version:1, exportedAt:new Date().toISOString(), plots:saved.length, store };
+  const backup={ app:"FRI Plot Card", version:1, exportedAt:new Date().toISOString(), plots:saved.length, store, boundFiles:(typeof boundFiles!=="undefined"?boundFiles:[]) };
   const blob=new Blob([JSON.stringify(backup)],{type:"application/json"}), url=URL.createObjectURL(blob), a=document.createElement("a");
   a.href=url; a.download=`FRI-backup_${nowStr().replace(/[: ]/g,"-")}.json`; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),1500);
@@ -2950,7 +2957,13 @@ function importBackup(file){
       });
       if(store.fi_ctree!==undefined){ const out=safeArr(STORE.getItem("fi_ctree")).map(normTree); safeArr(store.fi_ctree).map(normTree).forEach(o=>{ if(o.name && !out.some(x=>x.code.toLowerCase()===o.code.toLowerCase())) out.push(o); }); STORE.setItem("fi_ctree",JSON.stringify(out)); }
       if(store.fi_photonum!==undefined){ const mx=Math.max(parseInt(STORE.getItem("fi_photonum")||"0",10)||0, parseInt(store.fi_photonum,10)||0); STORE.setItem("fi_photonum",String(mx)); }
-      ["fi_boundfiles","fi_boundaries","fi_standfield"].forEach(k=>{ if(store[k]!==undefined && !STORE.getItem(k)) STORE.setItem(k,store[k]); });
+      STORE.setItem("fi_standfield", (store.fi_standfield!==undefined?store.fi_standfield:(STORE.getItem("fi_standfield")||"")));
+      try{ let bfs=null;
+        if(b.boundFiles && b.boundFiles.length) bfs=b.boundFiles;
+        else if(store.fi_boundfiles){ bfs=JSON.parse(store.fi_boundfiles)||null; }
+        else if(store.fi_boundaries){ const fc=JSON.parse(store.fi_boundaries); bfs=[{id:genId(),name:"Boundaries",features:(fc&&fc.features)||[]}]; }
+        if(bfs && bfs.length){ ldbPut("boundfiles", bfs); }
+      }catch(e){}
       toast("Restored — reloading…"); setTimeout(()=>location.reload(),700);
     } else { saved=merged; renderSaved(); toast(`Restored ${merged.length} plots (not saved — storage unavailable)`,true); }
   }).catch(()=>toast("Couldn't read that file",true));
@@ -3187,15 +3200,25 @@ const LIVE_FRESH_MS=5*60*1000;   // within this = "live" (pulsing); older but st
 const CREW_PALETTE=["#ff5252","#4d8bff","#ffb300","#26c281","#b56cff","#26c6da","#ff7043","#9ccc65","#ec407a","#5c6bc0"];
 let mePos=null, meSamples=[], meHeading=null, BOUND=null, standField=null, ageField=null, tractField=null, areaField=null, popupFields=[], mapLibsLoaded=false, boundFiles=[];
 function rebuildBound(){ BOUND = boundFiles.length ? {type:"FeatureCollection", features:[].concat(...boundFiles.map(f=>f.features||[]))} : null; }
-// restore cached boundary files (best effort; migrate the old single-layer format)
+// Small layer settings stay in localStorage (tiny). Boundary files now load from IndexedDB (async),
+// migrating any old localStorage copy on first run so nothing is lost.
 try{ if(STORE){
-  const bf=STORE.getItem("fi_boundfiles");
-  if(bf){ boundFiles=JSON.parse(bf)||[]; }
-  else { const b=STORE.getItem("fi_boundaries"); if(b){ const fc=JSON.parse(b); boundFiles=[{id:genId(),name:"Boundaries",features:fc.features||[]}]; } }
-  standField=STORE.getItem("fi_standfield")||null; ageField=STORE.getItem("fi_agefield")||null; tractField=STORE.getItem("fi_tractfield")||null; areaField=STORE.getItem("fi_areafield")||null; rebuildBound();
+  standField=STORE.getItem("fi_standfield")||null; ageField=STORE.getItem("fi_agefield")||null; tractField=STORE.getItem("fi_tractfield")||null; areaField=STORE.getItem("fi_areafield")||null;
   try{ popupFields=JSON.parse(STORE.getItem("fi_popupfields")||"[]")||[]; }catch(e){ popupFields=[]; }
   plotLabelField=STORE.getItem("fi_plotlabel")||"none";
 } }catch(e){}
+(function loadBoundaries_(){
+  const finish=()=>{ try{ rebuildBound(); if(typeof fmap!=="undefined"&&fmap){ if(typeof renderBoundaries==="function") renderBoundaries(); if(typeof renderLayerList==="function") renderLayerList(); if(typeof updateLayerStatus==="function") updateLayerStatus(); } }catch(e){} };
+  let migrated=null;
+  try{ if(STORE){ const bf=STORE.getItem("fi_boundfiles"); if(bf){ migrated=JSON.parse(bf)||[]; }
+    else { const b=STORE.getItem("fi_boundaries"); if(b){ const fc=JSON.parse(b); migrated=[{id:genId(),name:"Boundaries",features:fc.features||[]}]; } } } }catch(e){}
+  ldbGet("boundfiles").then(v=>{
+    if(v && v.length){ boundFiles=v; finish(); }
+    else if(migrated && migrated.length){ boundFiles=migrated; finish();
+      try{ ldbPut("boundfiles",boundFiles); }catch(e){} try{ STORE&&STORE.removeItem("fi_boundfiles"); STORE&&STORE.removeItem("fi_boundaries"); }catch(e){} }
+    else finish();
+  }).catch(()=>{ if(migrated&&migrated.length){ boundFiles=migrated; } finish(); });
+})();
 
 function loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement("script"); s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
 async function loadMapLibs(){
@@ -3460,7 +3483,10 @@ function setStandField(k){ standField=k; cacheBoundaries(); renderBoundaries(); 
 function setAgeField(k){ ageField=k||null; cacheBoundaries(); toast(ageField?`New plots will auto-fill AGE from “${ageField}”`:"Age auto-fill turned off"); }
 function setTractField(k){ tractField=k||null; cacheBoundaries(); toast(tractField?`Auto-assign will fill TRACT from “${tractField}”`:"Tract auto-fill turned off"); }
 function setAreaField(k){ areaField=k||null; cacheBoundaries(); scheduleAreaPush_(); toast(areaField?`Using “${areaField}” as official area (ha) where filled`:"Areas will be calculated from shape"); }
-function cacheBoundaries(){ try{ if(STORE){ STORE.setItem("fi_boundfiles",JSON.stringify(boundFiles)); STORE.setItem("fi_standfield",standField||""); STORE.setItem("fi_agefield",ageField||""); STORE.setItem("fi_tractfield",tractField||""); STORE.setItem("fi_areafield",areaField||""); STORE.setItem("fi_popupfields",JSON.stringify(popupFields)); STORE.removeItem("fi_boundaries"); } }catch(e){} }
+function cacheBoundaries(){
+  try{ if(STORE){ STORE.setItem("fi_standfield",standField||""); STORE.setItem("fi_agefield",ageField||""); STORE.setItem("fi_tractfield",tractField||""); STORE.setItem("fi_areafield",areaField||""); STORE.setItem("fi_popupfields",JSON.stringify(popupFields)); STORE.removeItem("fi_boundaries"); STORE.removeItem("fi_boundfiles"); } }catch(e){}
+  try{ ldbPut("boundfiles", boundFiles).catch(()=>{ toast("Couldn't save boundaries to device storage",true); }); }catch(e){}
+}
 const LABEL_MIN_ZOOM=14, LABEL_MAX=200;   // labels only when zoomed in, only what's on screen, capped
 let boundLabels=[];                        // [{lat,lng,name}] — cheap data, not DOM markers
 function renderBoundaries(){
