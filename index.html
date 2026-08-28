@@ -947,7 +947,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v169";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v170";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2157,6 +2157,7 @@ function addThumb(dataUrl,num){
   $("photoThumbs").appendChild(div);
 }
 let _photoFlushing=false;
+function sleep_(ms){ return new Promise(r=>setTimeout(r,ms)); }
 function flushPhotos(){
   if(_photoFlushing) return; if(!connected || isOffline()) return;
   _photoFlushing=true;
@@ -2165,26 +2166,32 @@ function flushPhotos(){
       const list = HAS_IDB ? await idbAll() : pendingMem.slice();
       const pending = list.filter(r=>!r.uploaded && r.data);
       if(!pending.length){ _photoFlushing=false; return; }
-      for(const r of pending){ await uploadPhotoOnce_(r); }   // upload one at a time
+      let sent=0;
+      for(const r of pending){ await uploadPhotoOnce_(r); sent++; await sleep_(250); }   // one at a time, small gap
+      await sleep_(900);                                       // let Apps Script finish the last Drive write + index
       const confirmed = await photoConfirmSet_();             // which filenames actually reached Drive
-      if(!confirmed){ toast("Uploaded — couldn't confirm on Drive yet, will retry",true); _photoFlushing=false; return; }
+      if(!confirmed){ toast("Uploaded "+sent+" — couldn't confirm on Drive yet, will retry",true); _photoFlushing=false; return; }
       let ok=0;
       for(const r of pending){
-        if(confirmed.has(r.filename)){ ok++; if(HAS_IDB){ await idbSetUploaded(r.filename); } else { pendingMem=pendingMem.filter(x=>x.filename!==r.filename); } }
+        if(confirmed.has(r.filename)){ ok++; if(HAS_IDB){ await idbSetUploadedVal_(r.filename,true); } else { pendingMem=pendingMem.filter(x=>x.filename!==r.filename); } }
       }
       updateArchiveBadge();
       try{ if($("photoArchive") && $("photoArchive").style.display==="flex") renderArchive(); }catch(e){}
       const left=pending.length-ok;
-      if(ok && left) toast(`Uploaded ${ok} photo${ok>1?"s":""} \u00b7 ${left} still pending \u2014 will retry`);
-      else if(ok) toast(`\u2713 ${ok} photo${ok>1?"s":""} backed up to Drive`);
-      else if(pending.length) toast(`Photos couldn\u2019t be confirmed on Drive \u2014 will retry`,true);
-    }catch(e){}
+      if(ok && left) toast(`Uploaded ${ok} · ${left} still pending — will retry`);
+      else if(ok) toast(`✓ ${ok} photo${ok>1?"s":""} backed up to Drive`);
+      else toast(`Upload failed for ${pending.length} photo${pending.length>1?"s":""} — none confirmed on Drive`,true);
+    }catch(e){ toast("Photo upload error: "+(e&&e.message||e),true); }
     _photoFlushing=false;
   })();
 }
 function uploadPhotoOnce_(r){
-  return fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
-    body:JSON.stringify({_action:"photo",filename:r.filename,data:r.data})}).then(()=>{}).catch(()=>{});
+  return new Promise(resolve=>{
+    let done=false; const fin=()=>{ if(done)return; done=true; resolve(); };
+    setTimeout(fin, 20000);   // never let one photo hang the queue
+    fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body:JSON.stringify({_action:"photo",filename:r.filename,data:r.data})}).then(fin).catch(fin);
+  });
 }
 // Ask the Sheet which photo filenames are actually in Drive (via the Photos index). JSONP; empty set on failure.
 function photoConfirmSet_(){
@@ -2234,7 +2241,14 @@ function updateArchiveBadge(){
   const set=n=>btn.textContent=`📁 On-device photos (${n})`;
   if(HAS_IDB) idbAll().then(l=>set(l.length)).catch(()=>set(0)); else set(pendingMem.length);
 }
-function openArchive(){ $("photoArchive").style.display="flex"; renderArchive(); }
+function openArchive(){ $("photoArchive").style.display="flex"; renderArchive();
+  // Show how many are actually confirmed on Drive vs. only on this phone.
+  (async ()=>{ try{ if(!connected||isOffline()) return; const conf=await photoConfirmSet_(); if(!conf) return;
+    const list = HAS_IDB ? await idbAll() : pendingMem.slice(); if(!list.length) return;
+    const onDrive=list.filter(r=>conf.has(r.filename)).length, off=list.length-onDrive;
+    const meta=$("archiveMeta"); if(meta) meta.textContent = `${list.length} on this phone · ${onDrive} confirmed on Drive`+(off?` · ${off} NOT on Drive (tap “Back up / re-check Drive”)`:" · all backed up ✓");
+  }catch(e){} })();
+}
 function closeArchive(){ $("photoArchive").style.display="none"; }
 function renderArchive(){
   const grid=$("archiveGrid"), meta=$("archiveMeta");
