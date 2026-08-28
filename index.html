@@ -912,7 +912,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v141";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v142";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -4166,9 +4166,12 @@ function featureAreaHa_(f){
 // used; otherwise the area is calculated from the shape. Multiple polygons sharing a compartment ID are summed.
 function compartmentAreas_(){
   const map={}, tally={}; if(!BOUND||!BOUND.features||!standField) return {areas:map,srcs:{}};
-  BOUND.features.forEach(f=>{ const nm=String((f.properties&&f.properties[standField])||"").trim(); if(!nm) return;
+  BOUND.features.forEach(f=>{ const pr=f.properties||{};
+    const stand=String((pr[standField]!=null?pr[standField]:"")).trim(); if(!stand) return;
+    const tract=tractField?String((pr[tractField]!=null?pr[tractField]:"")).trim():"";
+    const nm = tract ? (tract+" · "+stand) : stand;    // match the summary's "Tract · Stand" key so different properties' same stand names don't collide
     let ha=NaN, official=false;
-    if(areaField){ const raw=f.properties?f.properties[areaField]:null; const v=parseFloat(raw); if(isFinite(v)&&v>0){ ha=v; official=true; } }
+    if(areaField){ const raw=pr[areaField]; const v=parseFloat(raw); if(isFinite(v)&&v>0){ ha=v; official=true; } }
     if(!isFinite(ha)) ha=featureAreaHa_(f);        // fall back to calculated area for this polygon
     if(isFinite(ha)&&ha>0){ map[nm]=(map[nm]||0)+ha; const t=tally[nm]||(tally[nm]={off:0,calc:0}); official?t.off++:t.calc++; }
   });
