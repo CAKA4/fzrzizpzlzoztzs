@@ -389,8 +389,7 @@
   </div>
   <div class="buildstamp" id="buildStamp" role="button" tabindex="0" title="Tap to update to the latest version" onclick="forceUpdate()"></div>
   <div class="hdrstats">
-    <span class="hs"><span class="lab">Stems</span><b id="tStems">0</b></span>
-    <span class="hs"><span class="lab">Basal area</span><b id="tBA">0</b><span class="u">m²/ha</span></span>
+    <span class="hs"><span class="lab">Live stems</span><b id="tStems">0</b></span>
     <span class="hbaf">BAF 2.0</span>
   </div>
 </div>
@@ -458,7 +457,7 @@
         <div class="qt-list" id="qtList"></div>
       </div>
       <div class="rows" id="treeRows"></div>
-      <button class="addbtn" type="button" onclick="addTree(null,true)">＋ Add tree (in)</button>
+      <button class="addbtn" type="button" onclick="addTree(null,true)">＋ Add new tree (in)</button>
       <div class="hint">Each “in” tree on the BAF 2.0 prism. Up to 28 map to <span class="pill">T1…T28</span>: species, DBH (cm), quality, class, merch. logs.</div>
     </div>
   </details>
@@ -948,7 +947,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v164";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v168";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -986,7 +985,7 @@ DOM.STICNEST = ["","None","Northern Goshawk","Cooper's Hawk","Sharp-shinned Hawk
 DOM.PLOTNUM= (()=>{ const a=[""]; for(let v=1; v<=99; v++) a.push(String(v)); return a; })();
 DOM.AGE    = (()=>{ const a=[""]; for(let v=0; v<=250; v+=5) a.push(String(v)); return a; })();  // 5-yr classes
 DOM.HT     = (()=>{ const a=[""]; for(let v=0; v<=45; v+=1) a.push(String(v)); return a; })();   // 1-m classes
-DOM.CC     = (()=>{ const a=[""]; for(let v=0; v<=100; v+=10) a.push(String(v)); return a; })(); // 10% classes
+DOM.CC     = (()=>{ const a=[""]; for(let v=100; v>=0; v-=10) a.push(String(v)); return a; })(); // 10% classes, 100 → 0
 DOM.CAI    = (()=>{ const a=[""]; for(let v=0; v<=30; v++) a.push((v/10).toFixed(1)); return a; })(); // 0–3.0 by 0.1
 DOM.COUNT  = (()=>{ const a=[""]; for(let v=0; v<=20; v++) a.push(String(v)); [25,30,40,50,75,100].forEach(x=>a.push(String(x))); return a; })();
 DOM.COVER  = (()=>{ const a=[""]; for(let v=0; v<=100; v+=5) a.push(String(v)); return a; })();  // % cover by 5
@@ -1018,6 +1017,17 @@ const ADD_SENTINEL="__ADD__";
 const ABUND_OPTS=[["",""],["None","None"],["Few","Few · ≈2×2 m"],["Small","Small · ≈4×4 m"],["Medium","Medium · ≈10×10 m"],["Large","Large · >10×10 m"]];
 function abundSelect(s){ s.innerHTML=ABUND_OPTS.map(([v,l])=>`<option value="${esc(v)}">${l===""?"—":esc(l)}</option>`).join(""); }
 function numRangeSelect(s,max){ if(!s) return; let h=`<option value="">—</option>`; for(let i=1;i<=max;i++) h+=`<option value="${i}">${i}</option>`; s.innerHTML=h; }
+// Height list ordered so the most-used heights sit at the top. Seeds a sensible forestry default order,
+// then real usage from prior plots takes over (×10 so a few entries outweigh the seed).
+function htSelect_(s){ if(!s) return;
+  const counts={}; const add=p=>{ const v=String((p&&p.HT)||"").trim(); if(v) counts[v]=(counts[v]||0)+1; };
+  try{ if(typeof saved!=="undefined") saved.forEach(add); if(typeof auditPlots!=="undefined") auditPlots.forEach(add); }catch(e){}
+  const seed={"18":9,"20":8,"16":7,"22":6,"14":5,"24":4,"12":3,"26":2,"10":1};
+  const all=[]; for(let i=1;i<=50;i++) all.push(String(i));
+  const score=v=>((counts[v]||0)*10)+(seed[v]||0);
+  all.sort((a,b)=> score(b)-score(a) || (parseInt(a,10)-parseInt(b,10)));
+  s.innerHTML=`<option value="">—</option>`+all.map(v=>`<option value="${v}">${v}</option>`).join("");
+}
 function sppSelect(s){
   const opts = SPECIES.filter(([c])=>c!=="").map(([c,l])=>({code:c,name:l.slice(c.length+1)}))
     .concat(customTree.map(o=>({code:o.code,name:o.name})));
@@ -1160,7 +1170,12 @@ for(const id in ADDABLE){ const a=ADDABLE[id]; a.sentinel="__ADD_"+id+"__"; a.li
   if(STORE){ try{ a.list=JSON.parse(STORE.getItem(a.key))||[]; }catch(e){} } }
 function addableAdd(id,name){ const a=ADDABLE[id]; if(!a) return; name=String(name||"").trim();
   if(name && name!==a.sentinel && !(a.base||[]).includes(name) && !a.list.some(x=>x.toLowerCase()===name.toLowerCase())){
-    a.list.push(name); a.list.sort((x,y)=>x.localeCompare(y)); if(STORE){ try{ STORE.setItem(a.key,JSON.stringify(a.list)); }catch(e){} } } }
+    a.list.push(name); a.list.sort((x,y)=>x.localeCompare(y)); if(STORE){ try{ STORE.setItem(a.key,JSON.stringify(a.list)); }catch(e){} }
+    // Pests & diseases are shared on the Sheet (like species) so they're available on every device next time.
+    if(id==="PESTS"||id==="DISEASE"){ const t=(id==="PESTS")?"pest":"disease";
+      if(!pendingSpecies.some(p=>p.t===t&&p.n.toLowerCase()===name.toLowerCase())) pendingSpecies.push({t,n:name});
+      persistCustom(); flushSpecies(); }
+  } }
 function addableBuild(id){ const a=ADDABLE[id], el=$(id); if(!a||!el) return; const cur=el.value;
   el.innerHTML = `<option value="">—</option>` +
     (a.base||[]).filter(Boolean).map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join("") +
@@ -1168,6 +1183,13 @@ function addableBuild(id){ const a=ADDABLE[id], el=$(id); if(!a||!el) return; co
     `<option value="${a.sentinel}">＋ Add ${esc(a.noun)}…</option>`;
   if(cur && cur!==a.sentinel) setSel(el,cur); }
 function addableBuildAll(){ for(const id in ADDABLE) addableBuild(id); }
+// One-time: push the built-in shrub list to the shared Sheet so the full list lives there and can be
+// edited/added to. The backend dedupes; the picker already dedupes base vs. fetched, so no doubles show.
+function seedShrubsToSheet_(){
+  if(!STORE) return; if(STORE.getItem("fi_shrubseeded")) return;
+  try{ SHRUB_SPECIES.filter(Boolean).forEach(n=>{ if(!pendingSpecies.some(p=>p.t==="shrub"&&p.n.toLowerCase()===String(n).toLowerCase())) pendingSpecies.push({t:"shrub",n:String(n)}); });
+    persistCustom(); flushSpecies(); STORE.setItem("fi_shrubseeded","1"); }catch(e){}
+}
 function addSpeciesToList(name,isShrub,code){
   const t=isShrub?"shrub":"tree";
   if(isShrub){ if(!customShrub.some(x=>String(x).toLowerCase()===name.toLowerCase())) customShrub.push(name); }
@@ -1193,6 +1215,13 @@ function fetchSpecies(){
       ((resp&&resp.shrub)||[]).forEach(n=>{ if(n && !customShrub.some(x=>String(x).toLowerCase()===String(n).toLowerCase())) customShrub.push(String(n)); });
       let gChanged=false;
       ((resp&&resp.ground)||[]).forEach(n=>{ n=String(n||""); if(n && ![...GROUND_SPECIES,...customGround].some(x=>x.toLowerCase()===n.toLowerCase())){ customGround.push(n); gChanged=true; } });
+      // pests & diseases (shared list, merged into the addable dropdowns)
+      let pdChanged=false;
+      ((resp&&resp.pest)||[]).forEach(n=>{ n=String(n||""); if(n && !(ADDABLE.PESTS.base||[]).includes(n) && !ADDABLE.PESTS.list.some(x=>x.toLowerCase()===n.toLowerCase())){ ADDABLE.PESTS.list.push(n); pdChanged=true; } });
+      ((resp&&resp.disease)||[]).forEach(n=>{ n=String(n||""); if(n && !(ADDABLE.DISEASE.base||[]).includes(n) && !ADDABLE.DISEASE.list.some(x=>x.toLowerCase()===n.toLowerCase())){ ADDABLE.DISEASE.list.push(n); pdChanged=true; } });
+      if(pdChanged){ ADDABLE.PESTS.list.sort((a,b)=>a.localeCompare(b)); ADDABLE.DISEASE.list.sort((a,b)=>a.localeCompare(b));
+        if(STORE){ try{ STORE.setItem(ADDABLE.PESTS.key,JSON.stringify(ADDABLE.PESTS.list)); STORE.setItem(ADDABLE.DISEASE.key,JSON.stringify(ADDABLE.DISEASE.list)); }catch(e){} }
+        addableBuild("PESTS"); addableBuild("DISEASE"); }
       persistCustom(); refreshSpeciesSelects();
       if(gChanged) renderGround(getGround());   // keep current selection, add the newly-known chips
     }catch(e){} cleanup(); };
@@ -1255,7 +1284,8 @@ async function forceUpdate(){
 }
 opts($("STBNDRY"),DOM.YESNO);
 document.querySelectorAll(".abund").forEach(abundSelect); sppSelect($("HTSPP"));
-numRangeSelect($("HT"),50); numRangeSelect($("AGECORED"),200);
+htSelect_($("HT")); numRangeSelect($("AGECORED"),200);
+{ const iv=$("INVASP"); if(iv && [...iv.options].some(o=>o.value==="None")) iv.value="None"; }   // invasive defaults to None
 
 /* ---------- ground-species chip multi-select (Ontario forest understory) ---------- */
 const GROUND_SPECIES = ["Baneberry","Bellwort","Bishop's Cap","Bloodroot","Blue Cohosh","Bracken Fern","Bunchberry",
@@ -1420,7 +1450,10 @@ function addTree(v,scroll){
 }
 function renumberTrees(){ [...treeRows.children].forEach((r,k)=>{ r.querySelectorAll("label.n")[0].textContent=`T${k+1} · spp`; }); }
 function treeCount(){ return [...treeRows.children].filter(r=>r.querySelector(".t_sp").value||r.querySelector(".t_s").value).length; }
-function updateTally(){ const n=treeCount(); $("tStems").textContent=n; $("tBA").textContent=(n*BAF).toFixed(0); $("liveStems").textContent=n; }
+// Live-tree count for the top-of-form summary: excludes snags, cavity trees and coarse woody debris.
+function liveTreeCount(){ const ST=["SNG","CWD","CAV","SNAG","CAVITY"]; let n=0;
+  [...treeRows.children].forEach(r=>{ const sp=String(r.querySelector(".t_sp").value||"").trim().toUpperCase(); const s=r.querySelector(".t_s").value; if((sp||s)&&ST.indexOf(sp)<0) n++; }); return n; }
+function updateTally(){ const n=liveTreeCount(); const t=$("tStems"); if(t) t.textContent=n; const ls=$("liveStems"); if(ls) ls.textContent=n; }
 
 /* ---------- regen / shrub pairs ---------- */
 const PAIR={ adrgn:{el:"adrgnRows",label:"Adv"}, eargn:{el:"eargnRows",label:"Early"}, shrub:{el:"shrubRows",label:"Shrub"} };
@@ -1505,7 +1538,7 @@ function loadPlot(d){
   treeRows.innerHTML="";
   for(let i=1;i<=28;i++){ const sp=d["T"+i+"SP"],s=d["T"+i+"S"],q=d["T"+i+"Q"],ql=d["T"+i+"QL"],logs=d["T"+i+"LOGS"];
     if(sp||s||q||ql||logs) addTree({sp:codeFor(sp),s,q,ql,logs}); }
-  if(!treeRows.children.length) addTree();
+  // no auto empty row — the tally shows only the "Add new tree (in)" button until the user adds one
   const map={adrgn:"ADRGN",eargn:"EARGN",shrub:"SHRUB"};
   for(const kind in map){ const pre=map[kind]; $(PAIR[kind].el).innerHTML="";
     for(let i=1;i<=5;i++){ const sp=d[pre+"SP"+i],n=d[pre+"N"+i]; if(sp||n) addPair(kind,{sp:(kind==="shrub"?sp:codeFor(sp)),n}); } }
@@ -1968,7 +2001,9 @@ function nextPlot(){
   standSelect(); setSel($("STANDID"), carryStand);                 // carry the prior plot's stand forward
   tractSelect(); setSel($("TRACT"), tract===ADD_TRACT?"":tract);   // carry the prior plot's tract forward
   { const ht=$("HTSPP"); if(ht) sppSelect(ht); }                   // rebuild so most-used species stay at the top
-  setField($("PLOTNUM"), nextPlotFor(carryStand)); renderGround([]); currentPhotoNames=[]; clearPhotos(); addTree(); setNow(); updateTally(); autoGPS();
+  htSelect_($("HT"));                                              // refresh height order from latest usage
+  { const iv=$("INVASP"); if(iv && [...iv.options].some(o=>o.value==="None")) iv.value="None"; }   // invasive defaults to None
+  setField($("PLOTNUM"), nextPlotFor(carryStand)); renderGround([]); currentPhotoNames=[]; clearPhotos(); setNow(); updateTally(); autoGPS();
 }
 
 /* ---------- saved list ---------- */
@@ -2042,6 +2077,7 @@ function flushQueue(manual){
 window.addEventListener("online", ()=>{ toast("Back online — sending queued plots"); netDot(); renderSaved(); flushQueue(); flushSpecies(); fetchSpecies(); flushTracts(); fetchTracts(); flushPhotos(); });
 window.addEventListener("offline", ()=>{ netDot(); renderSaved(); });
 setInterval(()=>{ if(saved.some(p=>!p._sent)) flushQueue(); }, 60000); // safety retry every 60s
+setInterval(()=>{ try{ flushPhotos(); }catch(e){} }, 90000);            // retry any unconfirmed photo uploads
 
 /* ---------- GPS ---------- */
 function captureGPS(auto){
@@ -2120,18 +2156,51 @@ function addThumb(dataUrl,num){
   div.innerHTML=`<img src="${dataUrl}" alt="photo ${num}"><span class="tnum">#${num}</span>`;
   $("photoThumbs").appendChild(div);
 }
+let _photoFlushing=false;
 function flushPhotos(){
-  if(!connected || isOffline()) return;
-  if(HAS_IDB){ idbAll().then(list=>{ list.filter(r=>!r.uploaded).forEach(uploadPhoto_); }).catch(()=>{}); }
-  else { pendingMem.slice().forEach(uploadPhoto_); }
+  if(_photoFlushing) return; if(!connected || isOffline()) return;
+  _photoFlushing=true;
+  (async ()=>{
+    try{
+      const list = HAS_IDB ? await idbAll() : pendingMem.slice();
+      const pending = list.filter(r=>!r.uploaded && r.data);
+      if(!pending.length){ _photoFlushing=false; return; }
+      for(const r of pending){ await uploadPhotoOnce_(r); }   // upload one at a time
+      const confirmed = await photoConfirmSet_();             // which filenames actually reached Drive
+      let ok=0;
+      for(const r of pending){
+        if(confirmed.has(r.filename)){ ok++; if(HAS_IDB){ await idbSetUploaded(r.filename); } else { pendingMem=pendingMem.filter(x=>x.filename!==r.filename); } }
+      }
+      updateArchiveBadge();
+      try{ if($("photoArchive") && $("photoArchive").style.display==="flex") renderArchive(); }catch(e){}
+      const left=pending.length-ok;
+      if(ok && left) toast(`Uploaded ${ok} photo${ok>1?"s":""} \u00b7 ${left} still pending \u2014 will retry`);
+      else if(ok) toast(`\u2713 ${ok} photo${ok>1?"s":""} backed up to Drive`);
+      else if(pending.length) toast(`Photos couldn\u2019t be confirmed on Drive \u2014 will retry`,true);
+    }catch(e){}
+    _photoFlushing=false;
+  })();
 }
-function uploadPhoto_(r){
-  fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
-    body:JSON.stringify({_action:"photo",filename:r.filename,data:r.data})})
-    .then(()=>{ if(HAS_IDB){ idbSetUploaded(r.filename).then(()=>{ updateArchiveBadge(); if($("photoArchive").style.display==="flex") renderArchive(); }); }
-                else { pendingMem=pendingMem.filter(x=>x.filename!==r.filename); } })
-    .catch(()=>{});
+function uploadPhotoOnce_(r){
+  return fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
+    body:JSON.stringify({_action:"photo",filename:r.filename,data:r.data})}).then(()=>{}).catch(()=>{});
 }
+// Ask the Sheet which photo filenames are actually in Drive (via the Photos index). JSONP; empty set on failure.
+function photoConfirmSet_(){
+  return new Promise(resolve=>{
+    let done=false; const fin=v=>{ if(done)return; done=true; resolve(v); };
+    try{
+      const name="__pl"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+      const clean=()=>{ try{ delete window[name]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+      window[name]=r=>{ try{ fin(new Set((r&&r.files)||[])); }finally{ clean(); } };
+      sc.onerror=()=>{ clean(); fin(new Set()); };
+      setTimeout(()=>{ clean(); fin(new Set()); }, 15000);
+      sc.src=SCRIPT_URL+sep+"action=photolist&callback="+name;
+      document.body.appendChild(sc);
+    }catch(e){ fin(new Set()); }
+  });
+}
+function uploadPhoto_(r){ flushPhotos(); }   // legacy entry \u2014 route through the verified flush
 function clearPhotos(){ $("photoThumbs").innerHTML=""; }   // new-plot reset clears the strip only — the on-device archive is kept
 
 /* ---------- on-device photo archive (review + clear) ---------- */
@@ -3185,7 +3254,7 @@ document.addEventListener("change",e=>{
 });
 $("addModalInput").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); confirmAddSpecies(); } });
 flushQueue(); // push anything left queued from a previous offline session
-flushSpecies(); fetchSpecies(); // sync the shared species list
+flushSpecies(); fetchSpecies(); seedShrubsToSheet_(); // sync the shared species list; seed shrubs once
 flushTracts(); fetchTracts(); // sync the shared tract list
 flushPhotos(); updateArchiveBadge(); // upload any photos queued before the app was last closed, and show the on-device count
 $("restoreInput").addEventListener("change", e=>{ const f=e.target.files[0]; e.target.value=""; if(f) importBackup(f); }); // restore from a backup file
