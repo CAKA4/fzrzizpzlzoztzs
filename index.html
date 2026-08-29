@@ -39,7 +39,7 @@
     background:#12201a; border-bottom:1px solid var(--line);
     color:var(--text); padding:max(12px,env(safe-area-inset-top)) 16px 12px;
     box-shadow:0 2px 12px rgba(0,0,0,.4); }
-  .appbar h1{ margin:0; font-size:16px; letter-spacing:.03em; font-weight:700; text-transform:uppercase;
+  .appbar h1{ margin:0; font-size:15px; letter-spacing:0; font-weight:700; text-transform:uppercase;
     display:flex; align-items:center; gap:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; flex:1 1 auto; }
   .appbar-top{ display:flex; align-items:center; gap:8px; }
   .appbar-btns{ display:flex; align-items:center; gap:6px; flex:none; }
@@ -387,7 +387,6 @@
       <button class="mapbtn" type="button" onclick="openMap()" title="Map">🗺</button>
       <button class="mapbtn" type="button" onclick="startCapture()" title="Capture a plot location">🎯</button>
       <button class="mapbtn" type="button" onclick="showFormHelp()" title="How to use the form">?</button>
-      <button class="mapbtn toolsbtn" type="button" onclick="openMore()" title="Tools & menu">⋯ Tools</button>
       <span class="chip" id="savedChip">0 saved</span>
     </div>
   </div>
@@ -956,7 +955,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v184";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v185";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
