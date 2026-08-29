@@ -955,7 +955,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v179";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v180";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1024,6 +1024,8 @@ function opts(s,a){ s.innerHTML=a.map(v=>`<option value="${esc(v)}">${v===""?"�
 const ADD_SENTINEL="__ADD__";
 const ABUND_OPTS=[["",""],["None","None"],["Few","Few · ≈2×2 m"],["Small","Small · ≈4×4 m"],["Medium","Medium · ≈10×10 m"],["Large","Large · >10×10 m"]];
 function abundSelect(s){ s.innerHTML=ABUND_OPTS.map(([v,l])=>`<option value="${esc(v)}">${l===""?"—":esc(l)}</option>`).join(""); }
+// Pest, disease, Species-at-Risk and invasive fields all start at "None" (blank means "not checked").
+function defaultNoneFields_(){ ["PESTS","PESTQUAN","DISEASE","DISEQUAN","RPD","SAROSPEC","DSV","EUROBUCK","GARLMUST","MANIMAPL","POISIVY","INVASP","INVAQUAN"].forEach(id=>{ const el=$(id); if(el && [...el.options].some(o=>o.value==="None")) el.value="None"; }); }
 function numRangeSelect(s,max){ if(!s) return; let h=`<option value="">—</option>`; for(let i=1;i<=max;i++) h+=`<option value="${i}">${i}</option>`; s.innerHTML=h; }
 // Height list ordered so the most-used heights sit at the top. Seeds a sensible forestry default order,
 // then real usage from prior plots takes over (×10 so a few entries outweigh the seed).
@@ -1165,8 +1167,8 @@ function standSelect(){ const cur=$("STANDID").value; $("STANDID").innerHTML =
 
 // Generic "add your own + remembered" dropdowns: keeps any base list, plus user-added values kept on-device.
 const ADDABLE={
-  PESTS:   {key:"fi_pests",   base:[],           noun:"pest"},
-  DISEASE: {key:"fi_disease", base:[],           noun:"disease"},
+  PESTS:   {key:"fi_pests",   base:["None"],     noun:"pest"},
+  DISEASE: {key:"fi_disease", base:["None"],     noun:"disease"},
   HARVEST: {key:"fi_harv",    base:DOM.HARVEST,  noun:"harvest treatment"},
   RENEWAL: {key:"fi_renew",   base:DOM.RENEWAL,  noun:"renewal treatment"},
   TENDING: {key:"fi_tend",    base:DOM.TENDING,  noun:"tending treatment"},
@@ -1293,7 +1295,7 @@ async function forceUpdate(){
 opts($("STBNDRY"),DOM.YESNO);
 document.querySelectorAll(".abund").forEach(abundSelect); sppSelect($("HTSPP"));
 htSelect_($("HT")); numRangeSelect($("AGECORED"),200);
-{ const iv=$("INVASP"); if(iv && [...iv.options].some(o=>o.value==="None")) iv.value="None"; }   // invasive defaults to None
+defaultNoneFields_();   // pest / disease / SAR / invasive fields default to None
 
 /* ---------- ground-species chip multi-select (Ontario forest understory) ---------- */
 const GROUND_SPECIES = ["Baneberry","Bellwort","Bishop's Cap","Bloodroot","Blue Cohosh","Bracken Fern","Bunchberry",
@@ -2022,7 +2024,7 @@ function nextPlot(){
   tractSelect(); setSel($("TRACT"), tract===ADD_TRACT?"":tract);   // carry the prior plot's tract forward
   { const ht=$("HTSPP"); if(ht) sppSelect(ht); }                   // rebuild so most-used species stay at the top
   htSelect_($("HT"));                                              // refresh height order from latest usage
-  { const iv=$("INVASP"); if(iv && [...iv.options].some(o=>o.value==="None")) iv.value="None"; }   // invasive defaults to None
+  defaultNoneFields_();   // pest / disease / SAR / invasive fields default to None
   setField($("PLOTNUM"), nextPlotFor(carryStand)); renderGround([]); currentPhotoNames=[]; clearPhotos(); setNow(); updateTally(); autoGPS();
 }
 
@@ -3268,7 +3270,7 @@ if(!connected) $("setupWarn").style.display="block";
 treeRows.addEventListener("input",e=>{ if(e.target.classList.contains("t_s")||e.target.classList.contains("t_sp")) updateTally(); });
 treeRows.addEventListener("change",e=>{ if(e.target.classList.contains("t_s")||e.target.classList.contains("t_sp")) updateTally(); });
 saved.forEach(p=>{ if(p.TRACT) addTract(p.TRACT); if(p.STANDID) addStand(p.STANDID); for(const id in ADDABLE){ if(p[id]) addableAdd(id,p[id]); } });   // seed lists from saved plots
-tractSelect(); standSelect(); addableBuildAll();
+tractSelect(); standSelect(); addableBuildAll(); defaultNoneFields_();
 document.addEventListener("change", e=>{ const el=e.target, a=el&&el.id&&ADDABLE[el.id]; if(a && el.value===a.sentinel) openAddable(el.id); });
 $("TRACT").addEventListener("change", ()=>{ if($("TRACT").value===ADD_TRACT) openAddTract(); });
 $("STANDID").addEventListener("change", ()=>{
