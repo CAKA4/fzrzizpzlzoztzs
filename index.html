@@ -350,6 +350,7 @@
   .chip-tog.on{ background:#163322; border-color:var(--accent-dk); color:#cdebd6; font-weight:600 }
   .chip-tog.on::before{ content:"✓ "; color:#7fd0a0 }
   .modal{ position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50; display:flex; align-items:center; justify-content:center; padding:20px }
+  body.map-open .modal{ z-index:6000; }   /* Tools & other menus opened from the map must sit above it (mapView is z-index 5000) */
   .modal-card{ background:var(--card); border:1px solid var(--line2); border-radius:14px; padding:18px; width:100%; max-width:380px; box-shadow:0 20px 60px rgba(0,0,0,.55); max-height:calc(100vh - 40px); overflow-y:auto; -webkit-overflow-scrolling:touch }
   .modal-title{ font-weight:700; font-size:15px; margin-bottom:12px; color:var(--text) }
   .modal-card input{ margin-bottom:14px }
@@ -608,6 +609,7 @@
     <div class="map-standpill" id="mapStandPill"><span class="k">In stand</span><b id="mapStandVal">—</b></div>
     <button class="map-load" type="button" onclick="showMapHelp()" title="How to use this map" style="margin-left:8px;min-width:0;padding:0 12px">?</button>
     <button class="map-load accent" type="button" onclick="toggleLayersMenu()">＋ Layers</button>
+    <button class="map-load" type="button" onclick="openMore()" title="Tools & menu" style="min-width:0;padding:8px 12px;font-weight:700">⋯ Tools</button>
   </div>
   <div class="layers-menu" id="layersMenu" style="display:none">
     <div class="layers-scroll">
@@ -813,7 +815,6 @@
       <details class="mgroup"><summary>📤 Export &amp; share</summary>
         <button type="button" onclick="closeMore();exportPlotsAnalysisShp('main')">📍 Plots + analysis → shapefile (ArcGIS)</button>
         <button type="button" onclick="closeMore();exportCompartmentsAnalysisShp('main')">⬠ Compartments + analysis → shapefile</button>
-        <button type="button" onclick="closeMore();downloadSheet()">⬇ Download workbook (Excel)</button>
         <button type="button" onclick="closeMore();openReportModal()">📧 Analyze &amp; email report (Excel)</button>
       </details>
       <details class="mgroup"><summary>🗂 Plots &amp; stands</summary>
@@ -955,7 +956,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v182";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v184";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
