@@ -109,8 +109,9 @@
   #sppPickerSearch{ font-size:16px; }
   .dtwrap{ overflow:auto; max-width:100%; border:1px solid #24402a; border-radius:8px; }
   table.dtable{ border-collapse:separate; border-spacing:0; font-family:var(--mono); font-size:12px; white-space:nowrap; }
-  table.dtable.wrap{ white-space:normal; table-layout:auto; }
-  table.dtable.wrap th, table.dtable.wrap td{ max-width:120px; min-width:38px; overflow-wrap:break-word; word-break:break-word; vertical-align:top; line-height:1.25; padding:6px 8px; }
+  table.dtable.wrap{ white-space:normal; table-layout:auto; width:auto; }
+  table.dtable.wrap th, table.dtable.wrap td{ min-width:56px; max-width:150px; overflow-wrap:break-word; vertical-align:top; line-height:1.3; padding:6px 8px; }
+  table.dtable.wrap td:nth-child(5), table.dtable.wrap td:nth-child(6){ max-width:120px; }   /* composition columns wrap wider */
   table.dtable th, table.dtable td{ padding:7px 10px; border-bottom:1px solid #1c3320; border-right:1px solid #16281a; text-align:left; color:#dcefe0; background:#0f1e0d; }
   table.dtable thead th{ position:sticky; top:0; z-index:3; background:#123020; color:#8fe6a0; font-weight:700; }
   table.dtable tbody tr:active td{ background:#17331d; }
@@ -949,7 +950,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v174";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v175";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
