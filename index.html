@@ -955,7 +955,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v180";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v181";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3277,12 +3277,10 @@ $("STANDID").addEventListener("change", ()=>{
   if($("STANDID").value===ADD_STAND){ openAddStand(); return; }
   if(editingIndex==null) setField($("PLOTNUM"), nextPlotFor($("STANDID").value));
 });
-addTree(); setNow(); renderGround([]); renderSaved(); updateTally(); netDot(); autoGPS();
+setNow(); renderGround([]); renderSaved(); updateTally(); netDot(); autoGPS();   // no auto first tree — the "＋ Add new tree" button starts the tally (matches the map-capture flow)
 setField($("PLOTNUM"), nextPlotFor($("STANDID").value));
-// On a fresh open, go to the map and zoom to what's loaded — the user taps "＋ New plot" when ready.
-try{ const hasDraft = STORE && STORE.getItem(DRAFTKEY);
-  if(!hasDraft) setTimeout(()=>{ try{ openMap(); }catch(e){} }, 400);
-}catch(e){}
+// On a fresh open, go straight to the map (before first paint, so the form doesn't flash) — the user taps "＋ New plot" when ready.
+try{ requestAnimationFrame(()=>{ try{ openMap(); }catch(e){ setTimeout(()=>{ try{ openMap(); }catch(e2){} }, 200); } }); }catch(e){ setTimeout(()=>{ try{ openMap(); }catch(e2){} }, 200); }
 // Opening a category slides it up so its header sits just under the top bar.
 document.querySelectorAll("details.sec").forEach(sec=>{
   sec.addEventListener("toggle", ()=>{ if(sec.open) setTimeout(()=>scrollRowIntoView(sec),0); });
