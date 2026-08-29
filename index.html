@@ -110,8 +110,8 @@
   .dtwrap{ overflow:auto; max-width:100%; border:1px solid #24402a; border-radius:8px; }
   table.dtable{ border-collapse:separate; border-spacing:0; font-family:var(--mono); font-size:12px; white-space:nowrap; }
   table.dtable.wrap{ white-space:normal; table-layout:auto; width:auto; }
-  table.dtable.wrap th, table.dtable.wrap td{ min-width:56px; max-width:150px; overflow-wrap:break-word; vertical-align:top; line-height:1.3; padding:6px 8px; }
-  table.dtable.wrap td:nth-child(5), table.dtable.wrap td:nth-child(6){ max-width:120px; }   /* composition columns wrap wider */
+  table.dtable.wrap th, table.dtable.wrap td{ min-width:56px; max-width:220px; overflow-wrap:break-word; vertical-align:top; line-height:1.3; padding:6px 8px; }
+  table.dtable.wrap td:nth-child(5), table.dtable.wrap td:nth-child(6){ min-width:150px; }   /* Comp / Sap Comp — room to read the species string */
   table.dtable th, table.dtable td{ padding:7px 10px; border-bottom:1px solid #1c3320; border-right:1px solid #16281a; text-align:left; color:#dcefe0; background:#0f1e0d; }
   table.dtable thead th{ position:sticky; top:0; z-index:3; background:#123020; color:#8fe6a0; font-weight:700; }
   table.dtable tbody tr:active td{ background:#17331d; }
@@ -950,7 +950,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v175";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v178";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1881,6 +1881,7 @@ function openFullAnalysis(set){
        <button class="btn ghost" type="button" onclick="openFullAnalysis('main')" ${_analysisSet==="main"?'style="border-color:#2f7a44;color:#8fe6a0"':""}>My plots</button>
        <button class="btn ghost" type="button" onclick="openFullAnalysis('audit')" ${_analysisSet==="audit"?'style="border-color:#2f7a44;color:#8fe6a0"':""}>Audit plots</button>
        <button class="btn ghost" type="button" onclick="openAnalysisPage()">↗ Web page</button>
+       <button class="btn ghost" type="button" onclick="emailSummaryPdf()">📄 PDF</button>
      </div><div id="fullAnBody" style="color:#a9c9b0">Loading…</div>`);
   fetchJson_("summarydata&set="+encodeURIComponent(_analysisSet), (r,err)=>{
     const el=$("fullAnBody"); if(!el) return;
@@ -1900,6 +1901,17 @@ function openFullAnalysis(set){
 function openAnalysisPage(){
   const url=SCRIPT_URL+(SCRIPT_URL.includes("?")?"&":"?")+"action=summaryhtml&set="+encodeURIComponent(_analysisSet||"main");
   window.open(url,"_blank");
+}
+// Build a landscape, fit-to-width PDF of the summary tabs on the server and email it (printable / shareable).
+function emailSummaryPdf(){
+  if(!connected){ toast("Connect to a Sheet first",true); return; }
+  if(isOffline()){ toast("Need internet to build the PDF",true); return; }
+  toast("Building PDF and emailing… (may take ~15s)");
+  fetchJson_("summarypdf&set="+encodeURIComponent(_analysisSet||"main"), (r,err)=>{
+    if(r&&r.ok){ toast(`✓ Summary PDF emailed to ${r.to} · ${r.count} table${r.count>1?"s":""}`); }
+    else if((""+err).indexOf("timeout")>=0){ toast("Still building — the PDF email should arrive shortly"); }
+    else { toast("PDF failed: "+((r&&r.error)||err||"unknown"),true); }
+  });
 }
 function refreshAuditState_(){ if(!connected) return; jsonpAction_("auditstate", r=>{ if(r&&r.ok){ _auditIncluded=!!r.included; const b=$("includeAuditBtn"); if(b) b.textContent=_auditIncluded?"🔀 Imported in main: ON (tap for separate)":"🔀 Imported in main: OFF (tap to include)"; } }); }
 // Small JSONP helper for GET actions that return a result.
@@ -2046,22 +2058,43 @@ function renderSaved(){
 function editAudit(i){ const p=auditPlots[i]; if(!p) return; loadPlot(p); editingAudit=i; editingIndex=null; setEditMode(true,true); window.scrollTo({top:0,behavior:"smooth"}); }
 function delAudit(i){ const p=auditPlots[i]; if(!p) return; if(!confirm(`Remove imported plot ${p.STANDID||"—"} / ${p.PLOTNUM||"—"} from this device?`)) return; auditPlots.splice(i,1); persistAudit(); renderSaved(); if(fmap) renderMapPins(); }
 let lastDeleted=null;
+let pendingDeletes=[];
+try{ if(STORE) pendingDeletes=JSON.parse(STORE.getItem("fi_penddel")||"[]")||[]; }catch(e){}
+function persistDeletes_(){ try{ if(STORE) STORE.setItem("fi_penddel",JSON.stringify(pendingDeletes)); }catch(e){} }
+function queueDelete_(p){ pendingDeletes.push({id:String(p._id||""),key:[p.STANDID||"",p.PLOTNUM||"",p.DATE||""].join("|"),by:cruiserEmail||cruiser||""}); persistDeletes_(); flushDeletes_(); }
+// Remove queued (submitted) plots from FRIPLOTS — the backend copies each to the DELETED_PLOTS tab first.
+function flushDeletes_(){
+  if(!connected || isOffline() || !pendingDeletes.length) return;
+  const batch=pendingDeletes.slice();
+  fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
+    body:JSON.stringify({_action:"deleteplots",ids:batch.map(d=>d.id).filter(Boolean),keys:batch.map(d=>d.key).filter(Boolean),by:(batch[0]&&batch[0].by)||""})})
+    .then(()=>{ pendingDeletes=[]; persistDeletes_(); }).catch(()=>{});
+}
 function delPlot(i){
   const p=saved[i]; if(!p) return;
   const lbl=`${p.STANDID||"—"} / plot ${p.PLOTNUM||"—"}`;
   const note=p._sent
-    ? "It was already submitted, so a copy stays in the Google Sheet (Restore can bring it back)."
+    ? "It was submitted, so it will be removed from the Google Sheet and kept in the Deleted Plots tab (Undo brings it back)."
     : "It has NOT been submitted yet — deleting removes it from this phone.";
   if(!confirm(`Delete ${lbl}?\n\n${note}\n\nYou can tap Undo right afterwards.`)) return;
-  lastDeleted={plot:p};
+  lastDeleted={plot:p, wasSent:!!p._sent};
   saved.splice(i,1); persist(); renderSaved(); netDot();
   if(fmap) renderMapPins();          // drop the pin too, so no orphaned marker is left on the map
+  if(p._sent){ queueDelete_(p); }    // remove the submitted copy from the Sheet (backed up server-side)
   toast(`Deleted ${lbl}`);
 }
 function undoDelete(){
   if(!lastDeleted){ toast("Nothing to undo",true); return; }
-  saved.push(lastDeleted.plot); lastDeleted=null; persist(); renderSaved(); netDot(); if(fmap) renderMapPins(); toast("Plot restored");
+  const p=lastDeleted.plot;
+  if(lastDeleted.wasSent){                       // it was (or is being) removed from the Sheet — put it back
+    pendingDeletes=pendingDeletes.filter(d=>d.id!==String(p._id)); persistDeletes_();
+    p._sent=false;                               // re-submit so the Sheet row is recreated
+  }
+  saved.push(p); lastDeleted=null; persist(); renderSaved(); netDot(); if(fmap) renderMapPins();
+  if(p._sent===false && connected && !isOffline()) flushQueue();
+  toast("Plot restored");
 }
+function undoDelete_OLD_REMOVED(){}
 function netDot(){ const q=saved.filter(p=>!p._sent).length; const d=$("netDot"); d.className="dot "+((!connected||isOffline()||q)?"off":"on"); }
 
 /* ---------- offline queue: auto-send when signal returns ---------- */
@@ -2077,9 +2110,9 @@ function flushQueue(manual){
       .catch(()=>{});
   });
 }
-window.addEventListener("online", ()=>{ toast("Back online — sending queued plots"); netDot(); renderSaved(); flushQueue(); flushSpecies(); fetchSpecies(); flushTracts(); fetchTracts(); flushPhotos(); });
+window.addEventListener("online", ()=>{ toast("Back online — sending queued plots"); netDot(); renderSaved(); flushQueue(); flushSpecies(); fetchSpecies(); flushTracts(); fetchTracts(); flushPhotos(); flushDeletes_(); });
 window.addEventListener("offline", ()=>{ netDot(); renderSaved(); });
-setInterval(()=>{ if(saved.some(p=>!p._sent)) flushQueue(); }, 60000); // safety retry every 60s
+setInterval(()=>{ if(saved.some(p=>!p._sent)) flushQueue(); if(pendingDeletes.length) flushDeletes_(); }, 60000); // safety retry every 60s
 setInterval(()=>{ try{ flushPhotos(); }catch(e){} }, 90000);            // retry any unconfirmed photo uploads
 
 /* ---------- GPS ---------- */
@@ -3298,6 +3331,7 @@ flushQueue(); // push anything left queued from a previous offline session
 flushSpecies(); fetchSpecies(); seedShrubsToSheet_(); // sync the shared species list; seed shrubs once
 flushTracts(); fetchTracts(); // sync the shared tract list
 flushPhotos(); updateArchiveBadge(); // upload any photos queued before the app was last closed, and show the on-device count
+if(pendingDeletes.length) flushDeletes_();   // finish any Sheet deletions queued offline
 setTimeout(()=>{ try{ reconcilePhotos_(true); }catch(e){} }, 4000); // silently re-verify photos against Drive, re-upload any missing
 $("restoreInput").addEventListener("change", e=>{ const f=e.target.files[0]; e.target.value=""; if(f) importBackup(f); }); // restore from a backup file
 $("importPlotsInput").addEventListener("change", e=>{ const f=e.target.files[0]; e.target.value=""; if(f) importPlotsFile(f); }); // import past plots (audit set)
