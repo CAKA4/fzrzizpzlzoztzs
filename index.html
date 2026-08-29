@@ -696,7 +696,7 @@
   </div>
   <div id="fmap"></div>
   <div class="map-rail">
-    <button class="map-tool" id="toolPlace" type="button" onclick="togglePlace()" title="Place plot by tapping">📍</button>
+    <!-- tap-to-place button removed: use "＋ Create inventory plot" (crosshair/GPS) instead; tapping conflicted with selecting polygons -->
     <button class="map-tool" id="toolTrack" type="button" onclick="toggleTrack()" title="Record track log">⏺</button>
     <button class="map-tool" id="toolMeasure" type="button" onclick="toggleMeasure()" title="Measure distance / area">📐</button>
     <button class="map-tool" id="toolRoute" type="button" onclick="toggleRoute()" title="Draw cruise route">〰️</button>
@@ -955,7 +955,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v181";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v182";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3430,7 +3430,7 @@ async function openMap(){
   centerMap();
 }
 function closeMap(){ rememberMapView_(); $("mapView").style.display="none"; document.body.classList.remove("map-open"); stopMapGPS(); if(crewTimer){ clearInterval(crewTimer); crewTimer=null; } if(crewRoutesTimer){ clearInterval(crewRoutesTimer); crewRoutesTimer=null; } if(liveOn) stopLive();
-  if(typeof placeMode!=="undefined" && placeMode){ placeMode=false; if(placeMarker){ fmap.removeLayer(placeMarker); placeMarker=null; } $("toolPlace").classList.remove("on"); resetDropBar(); }
+  if(typeof placeMode!=="undefined" && placeMode){ placeMode=false; if(placeMarker){ fmap.removeLayer(placeMarker); placeMarker=null; } const tp=$("toolPlace"); if(tp) tp.classList.remove("on"); resetDropBar(); }
   if(typeof captureMode!=="undefined" && captureMode){ captureMode=false; const ch=$("mapCrosshair"); if(ch) ch.style.display="none"; resetDropBar(); }
   if(typeof selectMode!=="undefined" && selectMode){ selectMode=false; const b=$("toolSelect"); if(b) b.classList.remove("on"); clearSelDraw_(); selPts=[]; resetDropBar(); }
   if(typeof measureMode!=="undefined" && measureMode) clearMeasure();
@@ -4010,11 +4010,9 @@ function setLocation(lat,lon,src,alt){
   if(alt!=null&&!isNaN(alt)) $("Z").value=Number(alt).toFixed(1);
   $("gpsHint") && ($("gpsHint").textContent=`Set from map (${src}).`);
   polyHint_(lat,lon);
-  const stand=standAt(lon,lat);
-  if(stand){ addStand(stand); standSelect(); setSel($("STANDID"),stand); if(typeof editingIndex!=="undefined"&&editingIndex==null) setField($("PLOTNUM"), nextPlotFor(stand)); }
-  const age=ageAt_(lat,lon);
-  if(age!=null && $("AGE") && String($("AGE").value||"").trim()===""){ setField($("AGE"),String(age)); }
+  const stand=autoStandTract_(lat,lon);
   closeMap();
+  window.scrollTo({top:0,behavior:"smooth"});   // open the form at the top for data entry
   toast(stand?`Location set · Stand ID → ${stand}`:"Location set — choose Stand ID");
 }
 /* keep pins fresh after a submit */
@@ -4181,7 +4179,7 @@ function togglePlace(){
   if(placeMode && measureMode) toggleMeasure();
   if(placeMode && routeMode) toggleRoute();
   if(placeMode && polyMode) togglePoly();
-  $("toolPlace").classList.toggle("on",placeMode);
+  { const tp=$("toolPlace"); if(tp) tp.classList.toggle("on",placeMode); }
   fmap.getContainer().style.cursor = placeMode?"crosshair":"";
   if(placeMode) toast("Tap the map to place this plot");
   else { if(placeMarker){ fmap.removeLayer(placeMarker); placeMarker=null; } resetDropBar(); }
@@ -4197,17 +4195,14 @@ function placeAt(lat,lon){
 function fillPlace(lat,lon){
   $("X").value=lon.toFixed(6); $("Y").value=lat.toFixed(6); $("gpsHint")&&($("gpsHint").textContent="Placed by hand on the map.");
   polyHint_(lat,lon);
-  const stand=standOrPolyAt_(lat,lon);
-  if(stand){ addStand(stand); standSelect(); setSel($("STANDID"),stand); if(typeof editingIndex!=="undefined"&&editingIndex==null) setField($("PLOTNUM"),nextPlotFor(stand)); }
-  // Auto-fill AGE from the compartment polygon (only when the field is empty, so a typed age is kept).
-  const age=ageAt_(lat,lon);
-  if(age!=null && $("AGE") && String($("AGE").value||"").trim()===""){ setField($("AGE"),String(age)); }
+  const stand=autoStandTract_(lat,lon);
   $("mapStandVal").textContent=stand||"—"; $("mapStandPill").classList.toggle("in",!!stand);
 }
 function confirmPlace(){
   const stand=$("STANDID").value; placeMode=false;
   if(placeMarker){ fmap.removeLayer(placeMarker); placeMarker=null; }
-  $("toolPlace").classList.remove("on"); fmap.getContainer().style.cursor=""; resetDropBar(); closeMap();
+  $("toolPlace")&&$("toolPlace").classList.remove("on"); fmap.getContainer().style.cursor=""; resetDropBar(); closeMap();
+  window.scrollTo({top:0,behavior:"smooth"});
   toast(stand?`Location set · Stand ID → ${stand}`:"Location set — choose Stand ID");
 }
 function resetDropBar(){ $("mapDrop").innerHTML='<button class="dropbtn" type="button" onclick="startCapture()">＋ Create inventory plot</button>'; }
@@ -4316,7 +4311,7 @@ function startCapture(){
 function endCapture_(){ captureMode=false; $("mapCrosshair").style.display="none"; resetDropBar(); }
 function captureAtCrosshair(){
   const c=fmap.getCenter(); fillPlace(c.lat,c.lng);
-  endCapture_(); closeMap();   // closing the map returns to the form for data entry
+  endCapture_(); closeMap(); window.scrollTo({top:0,behavior:"smooth"});   // return to the top of the form for data entry
   toast("Location set — enter your plot data");
 }
 function captureAtGPS(){
@@ -4525,7 +4520,19 @@ function fmtArea_(m2){ return m2>=10000 ? (m2/10000).toFixed(3)+" ha" : Math.rou
 /* which drawn area polygon contains a point? returns the smallest (most specific) one, in hectares */
 function pointInRing_(lat,lon,pts){ let inside=false; for(let i=0,j=pts.length-1;i<pts.length;j=i++){ const yi=pts[i][0],xi=pts[i][1],yj=pts[j][0],xj=pts[j][1];
   if(((yi>lat)!==(yj>lat)) && (lon < (xj-xi)*(lat-yi)/(yj-yi)+xi)) inside=!inside; } return inside; }
-function pointInPolys_(lat,lon){ let best=null; polys.forEach(pg=>{ if(pg.pts.length>=3 && pointInRing_(lat,lon,pg.pts)){ const a=polyAreaOf_(pg.pts)/10000; if(!best||a<best.areaHa) best={name:pg.name,areaHa:a}; } }); return best; }
+function pointInPolys_(lat,lon){ let best=null; polys.forEach(pg=>{ if(pg.pts.length>=3 && pointInRing_(lat,lon,pg.pts)){ const a=polyAreaOf_(pg.pts)/10000; if(!best||a<best.areaHa) best={name:pg.name,tract:pg.tract||"",areaHa:a}; } }); return best; }
+// Tract for a point: a drawn compartment's tract wins, else the boundary tract field / manual tract.
+function tractOrPolyAt_(lat,lon){ const h=pointInPolys_(lat,lon); if(h && h.tract) return h.tract; return tractAt_(lat,lon); }
+// Fill Stand ID, Tract and Age on the form from whatever compartment (loaded boundary OR drawn polygon) the point falls in.
+function autoStandTract_(lat,lon){
+  const stand=standOrPolyAt_(lat,lon);
+  if(stand){ addStand(stand); standSelect(); setSel($("STANDID"),stand); if(typeof editingIndex!=="undefined"&&editingIndex==null) setField($("PLOTNUM"), nextPlotFor(stand)); }
+  const tr=tractOrPolyAt_(lat,lon);
+  if(tr){ addTract(tr); tractSelect(); setSel($("TRACT"),tr); }
+  const age=ageAt_(lat,lon);
+  if(age!=null && $("AGE") && String($("AGE").value||"").trim()===""){ setField($("AGE"),String(age)); }
+  return stand;
+}
 function polyHint_(lat,lon){ const h=pointInPolys_(lat,lon); if(h && $("gpsHint")) $("gpsHint").textContent += ` · in ${h.name} (${h.areaHa.toFixed(2)} ha)`; }
 /* authoritative shared boundary shapefile: the stand id + computed area of the BOUND feature a point falls in */
 function ringAreaUTM_(ring){ let a=0; const u=ring.map(c=>utm17n_(c[1],c[0])); for(let i=0;i<u.length;i++){ const j=(i+1)%u.length; a+=u[i].x*u[j].y-u[j].x*u[i].y; } return a/2; }
