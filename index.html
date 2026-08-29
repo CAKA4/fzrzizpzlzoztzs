@@ -639,6 +639,10 @@
         <div class="map-field" id="tractFieldRow" style="display:none">
           <label>Tract field (auto-fills plot TRACT)</label><select id="tractFieldSel" onchange="setTractField(this.value)"></select>
         </div>
+        <div class="map-field" id="manualTractRow" style="display:none">
+          <label>Tract name — used for compartments with no tract in the file (applies to all of them)</label>
+          <input id="manualTractInput" type="text" placeholder="e.g. Dainty" oninput="setManualTract(this.value)" style="width:100%;font-size:16px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">
+        </div>
         <div class="map-field" id="areaFieldRow" style="display:none">
           <label>Area field (official hectares — used if filled, else calculated)</label><select id="areaFieldSel" onchange="setAreaField(this.value)"></select>
         </div>
@@ -727,6 +731,7 @@
   </div>
   <div class="measure-bar" id="polyBar" style="display:none">
     <span id="polyText">Tap to outline an area</span>
+    <button type="button" id="polyTractBtn" onclick="changeDrawTract_()" title="Set the tract for the areas you draw">Tract: —</button>
     <button type="button" id="polySnapBtn" onclick="togglePolySnap()">Snap ✓</button>
     <button type="button" onclick="undoPolyPt()">Undo</button>
     <button type="button" onclick="savePoly()">Save</button>
@@ -950,7 +955,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v178";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v179";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3626,6 +3631,16 @@ function pickStandField(){
     if(!tractField){ tractField = keys.find(k=>/tract|property|prop_?name|propname|owner|ownership|parcel|woodlot|farm/i.test(k)) || ""; }
     tsel.value=tractField||"";
     $("tractFieldRow").style.display = keys.length ? "flex" : "none";
+    // Does the layer actually carry a non-blank tract anywhere? If not, surface the manual Tract name box.
+    let hasTractValues=false;
+    if(tractField){ hasTractValues = (BOUND.features||[]).some(f=>{ const v=f.properties?f.properties[tractField]:null; return v!=null && String(v).trim()!==""; }); }
+    const mtr=$("manualTractRow"), mti=$("manualTractInput");
+    if(mtr){ mtr.style.display="flex"; }
+    if(mti){ mti.value=manualTract||""; }
+    if(!hasTractValues){
+      $("tractFieldRow").style.display = keys.length ? "flex" : "none";
+      if(!manualTract) setTimeout(()=>toast("This layer has no tract — set a Tract name in Layers so areas group by tract",true), 400);
+    }
   }
   const arsel=$("areaFieldSel");
   if(arsel){
@@ -3653,7 +3668,9 @@ function togglePopupField(k,on){
 }
 function setStandField(k){ standField=k; cacheBoundaries(); renderBoundaries(); updateInStand(); scheduleAreaPush_(); }
 function setAgeField(k){ ageField=k||null; cacheBoundaries(); toast(ageField?`New plots will auto-fill AGE from “${ageField}”`:"Age auto-fill turned off"); }
-function setTractField(k){ tractField=k||null; cacheBoundaries(); toast(tractField?`Auto-assign will fill TRACT from “${tractField}”`:"Tract auto-fill turned off"); }
+function setTractField(k){ tractField=k||null; cacheBoundaries(); toast(tractField?`Auto-assign will fill TRACT from “${tractField}”`:"Tract auto-fill turned off"); scheduleAreaPush_(); }
+let manualTract = (function(){ try{ return (STORE&&STORE.getItem("fi_manualtract"))||""; }catch(e){ return ""; } })();
+function setManualTract(v){ manualTract=String(v||"").trim(); try{ if(STORE) STORE.setItem("fi_manualtract",manualTract); }catch(e){} scheduleAreaPush_(); }
 function setAreaField(k){ areaField=k||null; cacheBoundaries(); scheduleAreaPush_(); toast(areaField?`Using “${areaField}” as official area (ha) where filled`:"Areas will be calculated from shape"); }
 function cacheBoundaries(){
   try{ if(STORE){ STORE.setItem("fi_standfield",standField||""); STORE.setItem("fi_agefield",ageField||""); STORE.setItem("fi_tractfield",tractField||""); STORE.setItem("fi_areafield",areaField||""); STORE.setItem("fi_popupfields",JSON.stringify(popupFields)); STORE.removeItem("fi_boundaries"); STORE.removeItem("fi_boundfiles"); } }catch(e){}
@@ -3733,11 +3750,12 @@ function ageAt_(lat,lon){
   return null;
 }
 function tractAt_(lat,lon){
-  if(!BOUND||!tractField) return null;
-  for(const f of BOUND.features){ const polys=f.geometry.type==="Polygon"?[f.geometry.coordinates]:f.geometry.coordinates;
-    for(const rings of polys){ if(pointInRing(lon,lat,rings[0])){ const v=f.properties?f.properties[tractField]:null;
-      return (v==null||String(v).trim()==="")?null:String(v).trim(); } } }
-  return null;
+  if(BOUND&&tractField){
+    for(const f of BOUND.features){ const polys=f.geometry.type==="Polygon"?[f.geometry.coordinates]:f.geometry.coordinates;
+      for(const rings of polys){ if(pointInRing(lon,lat,rings[0])){ const v=f.properties?f.properties[tractField]:null;
+        if(!(v==null||String(v).trim()==="")) return String(v).trim(); } } }
+  }
+  return manualTract || null;   // fall back to the manually-set tract for layers with no tract field
 }
 function pointInRing(lon,lat,ring){ let inside=false;
   for(let i=0,j=ring.length-1;i<ring.length;j=i++){ const xi=ring[i][0],yi=ring[i][1],xj=ring[j][0],yj=ring[j][1];
@@ -4474,7 +4492,7 @@ function compartmentAreas_(){
   const map={}, tally={}; if(!BOUND||!BOUND.features||!standField) return {areas:map,srcs:{}};
   BOUND.features.forEach(f=>{ const pr=f.properties||{};
     const stand=String((pr[standField]!=null?pr[standField]:"")).trim(); if(!stand) return;
-    const tract=tractField?String((pr[tractField]!=null?pr[tractField]:"")).trim():"";
+    const tract=(tractField?String((pr[tractField]!=null?pr[tractField]:"")).trim():"") || manualTract || "";
     const nm = tract ? (tract+" · "+stand) : stand;    // match the summary's "Tract · Stand" key so different properties' same stand names don't collide
     let ha=NaN, official=false;
     if(areaField){ const raw=pr[areaField]; const v=parseFloat(raw); if(isFinite(v)&&v>0){ ha=v; official=true; } }
@@ -4758,10 +4776,15 @@ function syncMeasuringClass_(){
   const any=["measureBar","routeBar","polyBar"].some(id=>{ const el=$(id); return el && el.style.display!=="none"; });
   document.body.classList.toggle("measuring", any);
 }
+let _drawTract = (function(){ try{ return (STORE&&STORE.getItem("fi_drawtract"))||""; }catch(e){ return ""; } })();
+function setDrawTract_(v){ _drawTract=String(v||"").trim(); try{ if(STORE) STORE.setItem("fi_drawtract",_drawTract); }catch(e){} const b=$("polyTractBtn"); if(b) b.textContent="Tract: "+(_drawTract||"—"); }
+function changeDrawTract_(){ const t=prompt("Tract name for the areas you draw (applies to all of them; leave blank for none):", _drawTract||manualTract||""); if(t===null) return; setDrawTract_(t); toast(_drawTract?`Drawn areas will be tagged tract “${_drawTract}”`:"Drawn areas will have no tract"); }
 function togglePoly(){
   polyMode=!polyMode;
   if(polyMode){ if(placeMode) togglePlace(); if(measureMode) clearMeasure(); if(routeMode) toggleRoute();
+    if(!_drawTract){ const t=prompt("Tract name for the areas you're about to draw (applies to all of them; leave blank for none):", manualTract||""); if(t!==null) setDrawTract_(t); }
     $("toolPoly").classList.add("on"); fmap.getContainer().style.cursor="crosshair"; $("polyBar").style.display="flex"; syncMeasuringClass_(); drawPoly(); updatePoly();
+    { const b=$("polyTractBtn"); if(b) b.textContent="Tract: "+(_drawTract||"—"); }
     toast(polyPts.length?"Editing area — tap to add corners":"Tap the corners; Save to keep & name it"); }
   else { $("toolPoly").classList.remove("on"); fmap.getContainer().style.cursor=""; $("polyBar").style.display="none"; syncMeasuringClass_(); drawPoly(); }
 }
@@ -4894,8 +4917,8 @@ function savePoly(){ if(polyPts.length<3){ toast("Need 3+ points to save an area
   const traced=maybeTrace_();
   const sid=($("STANDID")&&$("STANDID").value && $("STANDID").value!==ADD_STAND) ? $("STANDID").value : "";
   const def= sid || ("P-"+(polys.length+1)); let name=prompt("Stand ID / name for this area:",def); if(name===null) return; name=(name||"").trim()||def;
-  polys.push({name:name, pts:polyPts.slice()}); polyPts=[]; polyPtsSnap=[]; persistPoly(); drawPoly(); updatePoly(); updateLayerStatus(); toast(`Saved ${name}${traced?" · closed on boundary":""}`); }
-function finishPoly(){ if(polyPts.length>=3){ const traced=maybeTrace_(); const def="P-"+(polys.length+1); polys.push({name:def, pts:polyPts.slice()}); polyPts=[]; polyPtsSnap=[]; persistPoly(); toast(`Saved ${def}${traced?" · closed on boundary":""}`); }
+  polys.push({name:name, tract:_drawTract||"", pts:polyPts.slice()}); polyPts=[]; polyPtsSnap=[]; persistPoly(); drawPoly(); updatePoly(); updateLayerStatus(); toast(`Saved ${name}${_drawTract?" · "+_drawTract:""}${traced?" · closed on boundary":""}`); }
+function finishPoly(){ if(polyPts.length>=3){ const traced=maybeTrace_(); const def="P-"+(polys.length+1); polys.push({name:def, tract:_drawTract||"", pts:polyPts.slice()}); polyPts=[]; polyPtsSnap=[]; persistPoly(); toast(`Saved ${def}${_drawTract?" · "+_drawTract:""}${traced?" · closed on boundary":""}`); }
   polyMode=false; $("toolPoly").classList.remove("on"); fmap.getContainer().style.cursor=""; $("polyBar").style.display="none"; syncMeasuringClass_(); drawPoly(); updateLayerStatus(); }
 function clearPoly(){
   if(polyPts.length){ polyPts=[]; polyPtsSnap=[]; persistPoly(); drawPoly(); updatePoly(); updateLayerStatus(); toast("Current outline cleared"); return; }
@@ -4908,7 +4931,7 @@ function renamePolyAt_(i){ if(i<0||i>=polys.length) return; const cur=polys[i].n
 function syncPolys(){
   if(!polys.length){ toast("Save at least one area first",true); return; }
   if(typeof connected!=="undefined" && !connected){ toast("Not connected — connect to sync areas",true); return; }
-  const payload={ _action:"polygons", owner:(cruiserEmail||""), polys:polys.map(p=>({ name:p.name, pts:p.pts, area_ha:+(polyAreaOf_(p.pts)/10000).toFixed(4) })) };
+  const payload={ _action:"polygons", owner:(cruiserEmail||""), polys:polys.map(p=>({ name:p.name, tract:p.tract||"", pts:p.pts, area_ha:+(polyAreaOf_(p.pts)/10000).toFixed(4) })) };
   fetch(SCRIPT_URL,{ method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain;charset=utf-8"}, body:JSON.stringify(payload) })
     .then(()=>toast(`Sent ${polys.length} area${polys.length==1?"":"s"} — plots & summary recalculating`))
     .catch(()=>toast("Sync failed — check signal",true));
