@@ -853,6 +853,8 @@
         <button type="button" class="seg-btn" onclick="setSumSource('both')">Both</button>
       </div>
     </div>
+    <select id="summaryCollector" onchange="setSumCollector(this.value)" style="width:100%;margin-bottom:8px"></select>
+    <select id="summaryTract" onchange="setSumTract(this.value)" style="width:100%;margin-bottom:8px"></select>
     <select id="summaryStand" onchange="renderSummary()" style="width:100%;margin-bottom:10px"></select>
     <div class="sumseg-wrap"><div class="sumseg-label">Live-tree metrics include</div>
       <div class="seg" id="sumDbhSeg">
@@ -956,7 +958,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v187";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v189";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3167,8 +3169,46 @@ function computeStand(plots, includeSmall){
   return {nplots:np,baHa,stemsHa,qmd,meanAge,meanHt,comp,vol:volHa,hab:habOut};
 }
 let summarySource="mine";   // "mine" | "audit" | "both"
-function sumPlots_(){ return summarySource==="audit"?auditPlots.slice() : summarySource==="both"?saved.concat(auditPlots) : saved.slice(); }
-function setSumSource(src){ summarySource=src; const seg=$("sumSrcSeg"); if(seg){ const map={mine:0,audit:1,both:2}; [...seg.children].forEach((b,i)=>b.classList.toggle("on", i===map[src])); } populateSummaryStands_(); renderSummary(); }
+let summaryCollector = "__all__";
+let summaryTract = "__all__";
+function sumCollectorOf_(p){ return String((p&&(p.CRUISER||p.CRUISER_EMAIL))||"").trim(); }
+function sumTractOf_(p){ return String((p&&p.TRACT)||"").trim(); }
+function sumSourcePool_(){ return summarySource==="audit"?auditPlots.slice() : summarySource==="both"?saved.concat(auditPlots) : saved.slice(); }
+function sumPlots_(){ let base=sumSourcePool_();
+  if(summaryCollector!=="__all__") base=base.filter(p=>sumCollectorOf_(p).toLowerCase()===summaryCollector.toLowerCase());
+  if(summaryTract!=="__all__") base=base.filter(p=>sumTractOf_(p).toLowerCase()===summaryTract.toLowerCase());
+  return base; }
+// Build the collector dropdown from whoever actually collected plots in the current source.
+function populateSummaryCollectors_(){
+  const sel=$("summaryCollector"); if(!sel) return;
+  const pool=sumSourcePool_();
+  const names=[...new Set(pool.map(sumCollectorOf_).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  const me=String(cruiser||"").trim();
+  if(names.length<=1){ sel.style.display="none"; summaryCollector="__all__"; return; }
+  sel.style.display="";
+  sel.innerHTML = `<option value="__all__">All collectors (${pool.length})</option>` +
+    names.map(n=>{ const c=pool.filter(p=>sumCollectorOf_(p).toLowerCase()===n.toLowerCase()).length;
+      const meTag=(me && n.toLowerCase()===me.toLowerCase())?" — me":"";
+      return `<option value="${esc(n)}">${esc(n)}${meTag} (${c})</option>`; }).join("");
+  if(![...sel.options].some(o=>o.value===summaryCollector)) summaryCollector="__all__";
+  sel.value=summaryCollector;
+}
+// Tract dropdown — reflects the collector-filtered pool; hides when there's only one tract.
+function populateSummaryTracts_(){
+  const sel=$("summaryTract"); if(!sel) return;
+  let pool=sumSourcePool_();
+  if(summaryCollector!=="__all__") pool=pool.filter(p=>sumCollectorOf_(p).toLowerCase()===summaryCollector.toLowerCase());
+  const tracts=[...new Set(pool.map(sumTractOf_).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  if(tracts.length<=1){ sel.style.display="none"; summaryTract="__all__"; return; }
+  sel.style.display="";
+  sel.innerHTML = `<option value="__all__">All tracts (${pool.length})</option>` +
+    tracts.map(t=>`<option value="${esc(t)}">${esc(t)} (${pool.filter(p=>sumTractOf_(p).toLowerCase()===t.toLowerCase()).length})</option>`).join("");
+  if(![...sel.options].some(o=>o.value===summaryTract)) summaryTract="__all__";
+  sel.value=summaryTract;
+}
+function setSumCollector(v){ summaryCollector=v; populateSummaryTracts_(); populateSummaryStands_(); renderSummary(); }
+function setSumTract(v){ summaryTract=v; populateSummaryStands_(); renderSummary(); }
+function setSumSource(src){ summarySource=src; const seg=$("sumSrcSeg"); if(seg){ const map={mine:0,audit:1,both:2}; [...seg.children].forEach((b,i)=>b.classList.toggle("on", i===map[src])); } populateSummaryCollectors_(); populateSummaryTracts_(); populateSummaryStands_(); renderSummary(); }
 function populateSummaryStands_(){
   const base=sumPlots_();
   const stands=[...new Set(base.map(p=>p.STANDID).filter(Boolean))].sort();
@@ -3182,6 +3222,8 @@ function openSummary(){
   // sensible default: if you only have audit plots loaded, start there
   if(!saved.length && auditPlots.length) summarySource="audit";
   const seg=$("sumSrcSeg"); if(seg){ const map={mine:0,audit:1,both:2}; [...seg.children].forEach((b,i)=>b.classList.toggle("on", i===map[summarySource])); }
+  populateSummaryCollectors_();
+  populateSummaryTracts_();
   populateSummaryStands_();
   $("standSummary").style.display="flex"; renderSummary();
 }
