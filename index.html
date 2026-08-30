@@ -821,6 +821,7 @@
       <details class="mgroup"><summary>🗂 Plots &amp; stands</summary>
         <button type="button" onclick="closeMore();autoAssignStands()">▧ Auto-assign stand · age · tract from boundaries</button>
         <button type="button" onclick="closeMore();openTractAssign()">🏷 Assign tract / property to plots</button>
+        <button type="button" onclick="closeMore();openDeletedPlots()">↩ Restore deleted plots</button>
       </details>
       <details class="mgroup" id="auditGroup"><summary>🔍 Imported</summary>
         <button type="button" id="pushAuditBtn" onclick="closeMore();pushAuditToSheet()" style="display:none">📤 Push imported plots to the Sheet</button>
@@ -916,8 +917,18 @@
     <div><label class="n">Property / tract</label><select id="reportTractSel"></select></div>
     <div class="modal-actions">
       <button class="btn ghost" type="button" onclick="closeReportModal()">Cancel</button>
-      <button class="btn submit" type="button" onclick="runReport()">Analyze &amp; email</button>
+      <button class="btn ghost" type="button" onclick="runReportPdf()">📄 PDF</button>
+      <button class="btn submit" type="button" onclick="runReport()">📊 Excel</button>
     </div>
+  </div>
+</div>
+
+<div class="modal" id="deletedPlotsModal" style="display:none" onclick="if(event.target===this)closeDeletedPlots()">
+  <div class="modal-card">
+    <div class="modal-title">Deleted plots</div>
+    <div class="hint" style="margin-bottom:8px">Plots removed from the Sheet, kept as a backup. Tap <b>Restore</b> to put one back into FRIPLOTS.</div>
+    <div id="deletedPlotsList" style="max-height:52vh;overflow:auto;-webkit-overflow-scrolling:touch"></div>
+    <div class="modal-actions"><button class="btn ghost" type="button" onclick="closeDeletedPlots()">Close</button></div>
   </div>
 </div>
 
@@ -959,7 +970,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v191";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v193";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1914,12 +1925,14 @@ function openAnalysisPage(){
   window.open(url,"_blank");
 }
 // Build a landscape, fit-to-width PDF of the summary tabs on the server and email it (printable / shareable).
-function emailSummaryPdf(){
+function emailSummaryPdf(tract){
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   if(isOffline()){ toast("Need internet to build the PDF",true); return; }
-  toast("Building PDF and emailing… (may take ~15s)");
-  fetchJson_("summarypdf&set="+encodeURIComponent(_analysisSet||"main"), (r,err)=>{
-    if(r&&r.ok){ toast(`✓ Summary PDF emailed to ${r.to} · ${r.count} table${r.count>1?"s":""}`); }
+  const t=String(tract||"").trim();
+  const to=String(cruiserEmail||"").trim();
+  toast(`Building ${t?`“${t}” `:""}PDF and emailing… (may take ~15s)`);
+  fetchJson_("summarypdf&set="+encodeURIComponent(_analysisSet||"main")+(t?"&tract="+encodeURIComponent(t):"")+(to?"&to="+encodeURIComponent(to):""), (r,err)=>{
+    if(r&&r.ok){ toast(`✓ Summary PDF emailed to ${r.to}${r.tract?` — ${r.tract}`:""} · ${r.count} table${r.count>1?"s":""}`); }
     else if((""+err).indexOf("timeout")>=0){ toast("Still building — the PDF email should arrive shortly"); }
     else { toast("PDF failed: "+((r&&r.error)||err||"unknown"),true); }
   });
@@ -2997,28 +3010,66 @@ function reattributePlots(){
   else toast(`Re-attributed ${changed} plot${changed>1?"s":""} on device — will update the Sheet on next send`,true);
 }
 // Choose which property to analyse, defaulting to the one on the form.
+// ---- Deleted plots: list from the Sheet's backup tab and restore individually ----
+function openDeletedPlots(){
+  if(!connected){ toast("Connect to a Sheet first",true); return; }
+  if(isOffline()){ toast("Need internet to load deleted plots",true); return; }
+  $("deletedPlotsList").innerHTML="<div class='hint'>Loading…</div>";
+  $("deletedPlotsModal").style.display="flex";
+  fetchJson_("deletedplots",(r,err)=>{
+    if(!(r&&r.ok)){ $("deletedPlotsList").innerHTML="<div class='hint'>Couldn't load: "+esc((r&&r.error)||err||"error")+"</div>"; return; }
+    renderDeletedPlots(r.plots||[]);
+  });
+}
+function closeDeletedPlots(){ $("deletedPlotsModal").style.display="none"; }
+function renderDeletedPlots(list){
+  const box=$("deletedPlotsList");
+  if(!list.length){ box.innerHTML="<div class='hint'>No deleted plots — nothing to restore.</div>"; return; }
+  box.innerHTML=list.map(p=>{
+    const lbl=`${esc(p.stand||"—")} / plot ${esc(p.plot||"—")}`;
+    const meta=[p.tract?esc(p.tract):"", p.by?("by "+esc(p.by)):"", p.at?esc(p.at):""].filter(Boolean).join(" · ");
+    const k=String(p.key||"").replace(/"/g,"&quot;");
+    return `<div class="delrow" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 4px;border-bottom:1px solid #1c3320">
+      <div style="min-width:0"><div style="font-weight:600">${lbl}</div><div class="hint" style="font-size:11px">${meta||"&nbsp;"}</div></div>
+      <button class="btn ghost" type="button" style="flex:none" data-key="${k}" onclick="restoreDeletedPlot(this)">↩ Restore</button>
+    </div>`;
+  }).join("");
+}
+function restoreDeletedPlot(btn){
+  const key=btn&&btn.getAttribute("data-key"); if(!key) return;
+  btn.disabled=true; btn.textContent="Restoring…";
+  fetchJson_("restoreplots&keys="+encodeURIComponent(key),(r,err)=>{
+    if(r&&r.ok&&r.restored){ toast("✓ Restored to the Sheet"); const row=btn.closest(".delrow"); if(row) row.remove();
+      if(!$("deletedPlotsList").querySelector(".delrow")) $("deletedPlotsList").innerHTML="<div class='hint'>No deleted plots — nothing to restore.</div>";
+      try{ restoreFromSheet(); }catch(e){}   // pull the restored plot back onto the device/map
+    }
+    else if(r&&r.ok){ toast("That plot is already in the Sheet",true); btn.disabled=false; btn.textContent="↩ Restore"; const row=btn.closest(".delrow"); if(row) row.remove(); }
+    else { toast("Restore failed: "+esc((r&&r.error)||err||"error"),true); btn.disabled=false; btn.textContent="↩ Restore"; }
+  });
+}
 function openReportModal(){
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   if(!cruiserEmail){ toast("Add your email in “Entered by” first — that's where the report goes",true); openCruiser(); return; }
   if(isOffline()){ toast("Need internet to build and email the report",true); return; }
   const sel=$("reportTractSel"), cur=$("TRACT").value, curT=(cur&&cur!==ADD_TRACT)?cur:"";
-  const list=[]; [curT,...tracts].forEach(t=>{ if(t && !list.some(x=>x.toLowerCase()===t.toLowerCase())) list.push(t); });
-  sel.innerHTML=`<option value="">All properties</option>`+list.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join("");
-  if(curT) setSel(sel,curT);
+  // Only list tracts that still have plots in the Sheet — filled by fetchTractList_ below. (A tract whose
+  // plots were all deleted drops off the list until plots exist for it again.)
+  sel.innerHTML=`<option value="">All properties</option>`;
   $("reportModal").style.display="flex";
-  fetchTractList_();   // top up with any properties recorded by other cruisers
+  fetchTractList_(curT);   // preselect the current tract only if it still has plots
 }
 function closeReportModal(){ $("reportModal").style.display="none"; }
-function fetchTractList_(){
+function fetchTractList_(preselect){
   const cb="__tl"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
   const cleanup=()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
-  window[cb]=resp=>{ try{ const sel=$("reportTractSel"), keep=sel.value;
+  window[cb]=resp=>{ try{ const sel=$("reportTractSel"), keep=preselect||sel.value;
       ((resp&&resp.tracts)||[]).forEach(t=>{ if(t && ![...sel.options].some(o=>o.value.toLowerCase()===String(t).toLowerCase()))
         sel.insertAdjacentHTML("beforeend",`<option value="${esc(t)}">${esc(t)}</option>`); });
-      if(keep) setSel(sel,keep); }catch(e){} cleanup(); };
+      if(keep && [...sel.options].some(o=>o.value.toLowerCase()===String(keep).toLowerCase())) setSel(sel,keep); }catch(e){} cleanup(); };
   sc.onerror=cleanup; sc.src=SCRIPT_URL+sep+"action=tractlist&callback="+cb; document.body.appendChild(sc);
 }
 function runReport(){ const t=$("reportTractSel").value; closeReportModal(); emailReport(t); }
+function runReportPdf(){ const t=$("reportTractSel").value; closeReportModal(); emailSummaryPdf(t); }
 // Email the workbook (data + all summary tabs) to the person's own address. A tract analyses that property alone.
 function emailReport(tract){
   if(!connected){ toast("Connect to a Sheet first",true); return; }
