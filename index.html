@@ -68,6 +68,7 @@
   .map-top{ position:absolute; top:0; left:0; right:0; min-height:52px; z-index:5200;
     background:#0f1e0d; border-bottom:1px solid var(--line2,#33623a);
     display:flex; align-items:center; gap:6px; padding:6px 10px; padding-top:calc(6px + env(safe-area-inset-top)); }
+  .map-brand{ display:flex; align-items:center; gap:5px; font-weight:700; font-size:14px; text-transform:uppercase; letter-spacing:0; color:#eaf3e8; white-space:nowrap; flex:none; }
   .map-back{ background:#2b6ea3; border:1px solid #4a90c0; color:#fff; font:inherit; font-size:13px; font-weight:700;
     padding:8px 14px; border-radius:8px; cursor:pointer; flex:none; box-shadow:0 2px 8px rgba(0,0,0,.4); }
   .map-standpill{ font-family:var(--mono); text-align:center; flex:1 1 auto; min-width:0; overflow:hidden; }
@@ -384,7 +385,7 @@
 <body>
 <div class="appbar">
   <div class="appbar-top">
-    <h1>🌲 Forest Inventory</h1>
+    <h1>🌲 FRI</h1>
     <div class="appbar-btns">
       <button class="mapbtn mapgo" type="button" onclick="openMap()" title="Open the map">🗺</button>
       <button class="mapbtn" type="button" onclick="showFormHelp()" title="How to use the form">?</button>
@@ -605,9 +606,9 @@
 
 <div id="mapView">
   <div class="map-top">
+    <span class="map-brand">🌲 FRI</span>
     <button class="map-back" type="button" onclick="closeMap()">‹ Form</button>
     <div class="map-standpill" id="mapStandPill"><span class="k">In stand</span><b id="mapStandVal">—</b></div>
-    <button class="map-load" type="button" onclick="showMapHelp()" title="How to use this map" style="margin-left:8px;min-width:0;padding:0 12px">?</button>
     <button class="map-load accent" type="button" onclick="toggleLayersMenu()">＋ Layers</button>
     <button class="map-load tools" type="button" onclick="openMore()" title="Tools & menu">⋯ Tools</button>
   </div>
@@ -958,7 +959,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v189";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v190";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
