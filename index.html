@@ -115,6 +115,7 @@
   table.dtable.wrap{ white-space:normal; table-layout:auto; width:auto; }
   table.dtable.wrap th, table.dtable.wrap td{ min-width:56px; max-width:220px; overflow-wrap:break-word; vertical-align:top; line-height:1.3; padding:6px 8px; }
   table.dtable.wrap td:nth-child(5), table.dtable.wrap td:nth-child(6){ min-width:150px; }   /* Comp / Sap Comp — room to read the species string */
+  table.dtable.wrap td.dtnote{ max-width:none; min-width:0; white-space:normal; text-align:left; color:#8aa890; font-size:11px; line-height:1.5; padding:8px 10px; }
   table.dtable th, table.dtable td{ padding:7px 10px; border-bottom:1px solid #1c3320; border-right:1px solid #16281a; text-align:left; color:#dcefe0; background:#0f1e0d; }
   table.dtable thead th{ position:sticky; top:0; z-index:3; background:#123020; color:#8fe6a0; font-weight:700; }
   table.dtable tbody tr:active td{ background:#17331d; }
@@ -970,7 +971,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v193";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v194";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1898,10 +1899,10 @@ let _analysisSet="main";
 function openFullAnalysis(set){
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   _analysisSet=set||"main";
-  showDataSheet_("Full analysis — "+(_analysisSet==="audit"?"Audit plots":"My plots"),
+  showDataSheet_("Full analysis — "+(_analysisSet==="audit"?"Imported plots":"My plots"),
     `<div style="display:flex;gap:8px;margin-bottom:10px">
        <button class="btn ghost" type="button" onclick="openFullAnalysis('main')" ${_analysisSet==="main"?'style="border-color:#2f7a44;color:#8fe6a0"':""}>My plots</button>
-       <button class="btn ghost" type="button" onclick="openFullAnalysis('audit')" ${_analysisSet==="audit"?'style="border-color:#2f7a44;color:#8fe6a0"':""}>Audit plots</button>
+       <button class="btn ghost" type="button" onclick="openFullAnalysis('audit')" ${_analysisSet==="audit"?'style="border-color:#2f7a44;color:#8fe6a0"':""}>Imported plots</button>
        <button class="btn ghost" type="button" onclick="openAnalysisPage()">↗ Web page</button>
        <button class="btn ghost" type="button" onclick="emailSummaryPdf()">📄 PDF</button>
      </div><div id="fullAnBody" style="color:#a9c9b0">Loading…</div>`);
@@ -1913,7 +1914,14 @@ function openFullAnalysis(set){
       const rows=s.rows||[]; if(!rows.length) return "";
       const head=rows[0]||[], bodyRows=rows.slice(1);
       const thead="<tr>"+head.map(c=>`<th>${esc(c)}</th>`).join("")+"</tr>";
-      const tb=bodyRows.map(r2=>"<tr>"+r2.map(c=>`<td>${esc(c)}</td>`).join("")+"</tr>").join("");
+      const tb=bodyRows.map(r2=>{
+        // A note/footnote row (only one cell filled, and it's long) spans the full width instead of
+        // being squeezed into one narrow column.
+        const idx=r2.findIndex(c=>String(c).trim()!==""), nonEmpty=r2.filter(c=>String(c).trim()!=="").length;
+        if(nonEmpty===1 && idx>=0 && String(r2[idx]).length>60)
+          return `<tr><td colspan="${head.length||1}" class="dtnote">${esc(r2[idx])}</td></tr>`;
+        return "<tr>"+r2.map(c=>`<td>${esc(c)}</td>`).join("")+"</tr>";
+      }).join("");
       return `<div style="font:700 13px system-ui;color:#8fe6a0;margin:14px 0 5px">${esc(s.name)}</div>`+
         `<div class="dtwrap"><table class="dtable wrap"><thead>${thead}</thead><tbody>${tb}</tbody></table></div>`;
     }).join("");
