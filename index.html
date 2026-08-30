@@ -39,7 +39,7 @@
     background:#12201a; border-bottom:1px solid var(--line);
     color:var(--text); padding:max(12px,env(safe-area-inset-top)) 16px 12px;
     box-shadow:0 2px 12px rgba(0,0,0,.4); }
-  .appbar h1{ margin:0; font-size:15px; letter-spacing:0; font-weight:700; text-transform:uppercase;
+  .appbar h1{ margin:0; font-size:14px; letter-spacing:0; font-weight:700; text-transform:uppercase;
     display:flex; align-items:center; gap:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; flex:1 1 auto; }
   .appbar-top{ display:flex; align-items:center; gap:8px; }
   .appbar-btns{ display:flex; align-items:center; gap:6px; flex:none; }
@@ -58,6 +58,7 @@
   .mapbtn{ float:right; margin-right:8px; background:#1d2c23; border:1px solid var(--blaze,#c8952a); color:#e8b84b;
     font-size:12px; padding:4px 11px; border-radius:999px; font-family:var(--mono); cursor:pointer; }
   .mapbtn.toolsbtn{ background:#e8b84b; border-color:#f0c860; color:#1a1000; font-weight:700; padding:5px 14px; box-shadow:0 1px 5px rgba(0,0,0,.35); }
+  .mapbtn.mapgo{ background:linear-gradient(180deg,#3a86c4,#2b6ea3); border:1px solid #57a0d6; color:#fff; font-weight:700; padding:5px 13px; box-shadow:0 1px 6px rgba(0,0,0,.4); }
   /* ----- map overlay ----- */
   #mapView{ display:none; position:fixed; top:0; left:0; right:0; bottom:0; width:100vw; height:100vh; height:100dvh; z-index:5000; background:#0a140a; }
   body.map-open{ overflow:hidden; overscroll-behavior:none; }
@@ -385,10 +386,9 @@
   <div class="appbar-top">
     <h1>🌲 Forest Inventory</h1>
     <div class="appbar-btns">
-      <button class="mapbtn" type="button" onclick="openMap()" title="Map">🗺</button>
-      <button class="mapbtn" type="button" onclick="startCapture()" title="Capture a plot location">🎯</button>
+      <button class="mapbtn mapgo" type="button" onclick="openMap()" title="Open the map">🗺</button>
       <button class="mapbtn" type="button" onclick="showFormHelp()" title="How to use the form">?</button>
-      <span class="chip" id="savedChip">0 saved</span>
+      <span class="chip" id="savedChip" style="flex:none">0 saved</span>
     </div>
   </div>
   <div class="buildstamp" id="buildStamp" role="button" tabindex="0" title="Tap to update to the latest version" onclick="forceUpdate()"></div>
@@ -956,7 +956,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v186";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v187";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
