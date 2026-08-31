@@ -809,15 +809,14 @@
     <div class="more-list">
       <details class="mgroup"><summary>📊 Analysis</summary>
         <button type="button" onclick="closeMore();openSummary()">📊 Stand summary (on device)</button>
-        <button type="button" onclick="closeMore();openFullAnalysis('main')">📈 Full analysis — all tabs</button>
+        <button type="button" onclick="closeMore();openFullAnalysis('main')">📈 Full analysis — all tabs (view)</button>
         <button type="button" onclick="closeMore();openDataTable()">▦ View plot data table</button>
-        <button type="button" onclick="closeMore();buildMySummary()">🧾 Build my summary in the Sheet</button>
-        <button type="button" onclick="closeMore();buildAllSummary()">🗂 Build summary — all plots</button>
+        <button type="button" onclick="closeMore();buildAllSummary()">🗂 Build Sheet summary — all plots</button>
       </details>
       <details class="mgroup"><summary>📤 Export &amp; share</summary>
+        <button type="button" onclick="closeMore();openReportModal()">📧 Email analysis report — Excel / PDF (by property)</button>
         <button type="button" onclick="closeMore();exportPlotsAnalysisShp('main')">📍 Plots + analysis → shapefile (ArcGIS)</button>
         <button type="button" onclick="closeMore();exportCompartmentsAnalysisShp('main')">⬠ Compartments + analysis → shapefile</button>
-        <button type="button" onclick="closeMore();openReportModal()">📧 Analyze &amp; email report (Excel)</button>
       </details>
       <details class="mgroup"><summary>🗂 Plots &amp; stands</summary>
         <button type="button" onclick="closeMore();autoAssignStands()">▧ Auto-assign stand · age · tract from boundaries</button>
@@ -835,8 +834,7 @@
         <button type="button" id="clearAuditBtn" onclick="closeMore();clearAuditPlots()" style="display:none">🗑 Clear imported plots</button>
       </details>
       <details class="mgroup"><summary>💾 Data &amp; backup</summary>
-        <button type="button" id="pushAuditBtnMore" onclick="closeMore();pushAuditToSheet()" style="display:none">📤 Push imported plots to the Sheet</button>
-        <button type="button" onclick="closeMore();openCruiser()">👤 Data-entry person</button>
+        <button type="button" onclick="closeMore();openCruiser()">👤 Data-entry person (your name / email)</button>
         <button type="button" onclick="closeMore();exportBackup()">⬆ Back up all data</button>
         <button type="button" onclick="closeMore();document.getElementById('restoreInput').click()">⬇ Restore from backup</button>
         <button type="button" onclick="closeMore();clearAllData()" style="color:#e9a89f">🗑 Start new project (erase all data)</button>
@@ -971,7 +969,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v194";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v197";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1896,27 +1894,47 @@ function downloadSheet(){
 // Full analysis, in-app: fetch every summary tab as JSON and render scrollable tables. Works for
 // everyone (runs as owner) and works offline once fetched.
 let _analysisSet="main";
+let _anCruiser="__all__";
 function openFullAnalysis(set){
   if(!connected){ toast("Connect to a Sheet first",true); return; }
-  _analysisSet=set||"main";
-  showDataSheet_("Full analysis — "+(_analysisSet==="audit"?"Imported plots":"My plots"),
-    `<div style="display:flex;gap:8px;margin-bottom:10px">
-       <button class="btn ghost" type="button" onclick="openFullAnalysis('main')" ${_analysisSet==="main"?'style="border-color:#2f7a44;color:#8fe6a0"':""}>My plots</button>
+  _analysisSet=set||"main"; _anCruiser="__all__";
+  showDataSheet_("Full analysis — "+(_analysisSet==="audit"?"Imported plots":"Field plots"),
+    `<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+       <button class="btn ghost" type="button" onclick="openFullAnalysis('main')" ${_analysisSet==="main"?'style="border-color:#2f7a44;color:#8fe6a0"':""}>Field plots</button>
        <button class="btn ghost" type="button" onclick="openFullAnalysis('audit')" ${_analysisSet==="audit"?'style="border-color:#2f7a44;color:#8fe6a0"':""}>Imported plots</button>
        <button class="btn ghost" type="button" onclick="openAnalysisPage()">↗ Web page</button>
        <button class="btn ghost" type="button" onclick="emailSummaryPdf()">📄 PDF</button>
-     </div><div id="fullAnBody" style="color:#a9c9b0">Loading…</div>`);
-  fetchJson_("summarydata&set="+encodeURIComponent(_analysisSet), (r,err)=>{
-    const el=$("fullAnBody"); if(!el) return;
-    if(err){ el.innerHTML=`<div style="padding:8px;color:#e9a89f">Couldn't load analysis (${esc(err)}).<br>If you just changed the code, redeploy a New version.</div>`; return; }
-    if(!r||!r.ok||!r.sheets||!r.sheets.length){ el.innerHTML=`<div style="padding:8px">No ${_analysisSet==="audit"?"imported ":""}analysis yet. Build it first (Rebuild summary in FRI Tools), then reopen.</div>`; return; }
-    el.innerHTML = r.sheets.map(s=>{
+     </div>
+     <select id="anCruiserSel" onchange="setAnCruiser(this.value)" style="width:100%;margin-bottom:8px;display:none"></select>
+     <div id="fullAnBody" style="color:#a9c9b0">Loading…</div>`);
+  populateAnCruisers_();
+  loadFullAnalysis(false);
+}
+// Collector picker for the Full analysis (main/field set only) — from the collectors present on the device.
+function populateAnCruisers_(){
+  const sel=$("anCruiserSel"); if(!sel) return;
+  const pool=_analysisSet==="audit"?auditPlots:saved;
+  const names=[...new Set(pool.map(sumCollectorOf_).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  const me=String(cruiser||"").trim();
+  if(_analysisSet==="audit" || names.length<=1){ sel.style.display="none"; _anCruiser="__all__"; return; }
+  sel.style.display="";
+  sel.innerHTML=`<option value="__all__">All collectors (${pool.length})</option>`+
+    names.map(n=>{ const c=pool.filter(p=>sumCollectorOf_(p).toLowerCase()===n.toLowerCase()).length; const meTag=(me&&n.toLowerCase()===me.toLowerCase())?" — me":""; return `<option value="${esc(n)}">${esc(n)}${meTag} (${c})</option>`; }).join("");
+  sel.value=_anCruiser;
+}
+function setAnCruiser(v){ _anCruiser=v; loadFullAnalysis(true); }
+function loadFullAnalysis(useCruiser){
+  const el=$("fullAnBody"); if(el) el.innerHTML=useCruiser?"Rebuilding for the selected collector… (a few seconds)":"Loading…";
+  const cr = useCruiser ? ("&cruiser="+encodeURIComponent(_anCruiser)) : "";
+  fetchJson_("summarydata&set="+encodeURIComponent(_analysisSet)+cr, (r,err)=>{
+    const el2=$("fullAnBody"); if(!el2) return;
+    if(err){ el2.innerHTML=`<div style="padding:8px;color:#e9a89f">Couldn't load analysis (${esc(err)}).<br>If you just changed the code, redeploy a New version.</div>`; return; }
+    if(!r||!r.ok||!r.sheets||!r.sheets.length){ el2.innerHTML=`<div style="padding:8px">No ${_analysisSet==="audit"?"imported ":""}analysis${(useCruiser&&_anCruiser!=="__all__")?` for ${esc(_anCruiser)}`:""} yet.${(useCruiser&&_anCruiser!=="__all__")?"":" Build it first (Rebuild summary in FRI Tools), then reopen."}</div>`; return; }
+    el2.innerHTML = r.sheets.map(s=>{
       const rows=s.rows||[]; if(!rows.length) return "";
       const head=rows[0]||[], bodyRows=rows.slice(1);
       const thead="<tr>"+head.map(c=>`<th>${esc(c)}</th>`).join("")+"</tr>";
       const tb=bodyRows.map(r2=>{
-        // A note/footnote row (only one cell filled, and it's long) spans the full width instead of
-        // being squeezed into one narrow column.
         const idx=r2.findIndex(c=>String(c).trim()!==""), nonEmpty=r2.filter(c=>String(c).trim()!=="").length;
         if(nonEmpty===1 && idx>=0 && String(r2[idx]).length>60)
           return `<tr><td colspan="${head.length||1}" class="dtnote">${esc(r2[idx])}</td></tr>`;
