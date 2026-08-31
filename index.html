@@ -922,6 +922,17 @@
   </div>
 </div>
 
+<div class="modal" id="plotCardModal" style="display:none" onclick="if(event.target===this)closePlotCard()">
+  <div class="modal-card" style="max-width:440px">
+    <div class="modal-title" style="display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--card);padding:6px 0 10px;margin:0 0 6px;z-index:2">
+      <span id="plotCardTitle">Plot</span>
+      <button type="button" onclick="closePlotCard()" style="background:#16271a;border:1px solid #33623a;border-radius:8px;color:#cdebcf;width:36px;height:36px;font-size:18px;line-height:1;cursor:pointer;flex:none" aria-label="Close">✕</button>
+    </div>
+    <div id="plotCardBody" style="max-height:60vh;overflow:auto;-webkit-overflow-scrolling:touch"></div>
+    <div class="modal-actions" id="plotCardActions"></div>
+  </div>
+</div>
+
 <div class="modal" id="deletedPlotsModal" style="display:none" onclick="if(event.target===this)closeDeletedPlots()">
   <div class="modal-card">
     <div class="modal-title">Deleted plots</div>
@@ -969,7 +980,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v197";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-06-28 · v198";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3963,7 +3974,7 @@ function renderMapPins(){ if(!fpins) return; fpins.clearLayers(); if(fauditpins)
               :"border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6)");
     const icon=L.divIcon({className:"",html:`<div style="${base};background:#e8b84b;${ring};display:flex;align-items:center;justify-content:center;font:700 10px/1 'Courier New',monospace;color:#1a2e18;white-space:nowrap">${lbl}</div>`,iconSize:null,iconAnchor:[12,12]});
     L.marker([lat,lon],{icon}).addTo(fpins)
-      .bindPopup(plotPopupHtml_(p,i));
+      .on("click",()=>plotCard(i,false));
   });
   // Imported reference plots. Blue = not yet visited; GREEN with a ✓ = edited/completed in the field,
   // so the whole crew can see progress at a glance. Amber = possible duplicate of an existing plot.
@@ -3980,7 +3991,7 @@ function renderMapPins(){ if(!fpins) return; fpins.clearLayers(); if(fauditpins)
     const icon=L.divIcon({className:"",html:`<div style="position:relative;min-width:22px;height:22px;padding:0 5px;border-radius:11px;background:${col};${ring};display:flex;align-items:center;justify-content:center;font:700 9px/1 'Courier New',monospace;color:${done?"#04220f":"#0a1a28"};white-space:nowrap">${esc(lbl)}${check}</div>`,iconSize:null,iconAnchor:[11,11]});
     const doneLine = done ? `<br><span style="color:#1f8f4a">✓ completed${p._doneBy?` · ${esc(p._doneBy)}`:""}${p._doneAt?` · ${esc(String(p._doneAt).slice(0,16))}`:""}</span>` : "";
     L.marker([lat,lon],{icon}).addTo(fauditpins||fpins)
-      .bindPopup(`<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b> <span style="color:#2b6ea3">${done?"done":"imported"}</span>${p._dup?' <span style="color:#b6791b">· dup?</span>':""}<br>${(p.DATE||"").slice(0,16)}${doneLine}<br><a href="javascript:void(0)" onclick="editAuditFromMap(${i})">🔍 Review / edit ›</a> · <a href="javascript:void(0)" onclick="deleteAuditFromMap(${i})" style="color:#c0392b">🗑 Delete</a></div>`);
+      .on("click",()=>plotCard(i,true));
   });
   // Show the imported / done legend entries only when there are imported plots to explain.
   try{ const li=$("legImported"), ld=$("legDone"), lt=$("legTodo");
@@ -4032,6 +4043,84 @@ function openAuditLabelPicker(){
 }
 function setAuditLabel(k){ auditLabelField=k; try{ STORE&&STORE.setItem("fi_auditlabel",k); }catch(e){} closeInfoSheet_(); if(fmap) renderMapPins(); toast(`Audit plots labelled by ${k}`); }
 function plotPopupHtml_(p,i){ return `<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b><br>${(p.DATE||"").slice(0,16)}<br><a href="javascript:void(0)" onclick="editFromMap(${i})">✎ Edit this plot ›</a> &nbsp; <a href="javascript:void(0)" style="color:#b23b32" onclick="delFromMap(${i})">Delete ✕</a></div>`; }
+
+// ---- Plot data card: a readable, grouped view of everything in a plot, opened by tapping its pin ----
+let _plotCardIdx=null, _plotCardAudit=false;
+const PLOTCARD_SITE_={TEXTURE:"Texture",MOISTURE:"Moisture",DEPTH:"Depth",TOPOGRAPHY:"Topography",ROCKINESS:"Rockiness",FLAG:"Flag",STBNDRY:"Stand boundary",ACCESS:"Access",HARVEST:"Harvest",RENEWAL:"Renewal",TENDING:"Tending",STICNEST:"Stick nest",CC:"Crown closure %"};
+const PLOTCARD_SAMPLE_={HTSPP:"Species",HTDBH:"DBH cm",HT:"Height m",AGECORED:"Age (cored) yr",CAI:"CAI"};
+const PLOTCARD_SAR_={SAROSPEC:"Species at risk",DSV:"Dog-strangling vine",EUROBUCK:"European buckthorn",GARLMUST:"Garlic mustard",MANIMAPL:"Manitoba/Norway maple",POISIVY:"Poison ivy",INVASP:"Other invasive",INVAQUAN:"Other invasive amount"};
+const PLOTCARD_PEST_={PESTS:"Pests",PESTQUAN:"Pest severity",DISEASE:"Disease",DISEQUAN:"Disease severity",RPD:"Red pine decline"};
+function pcVal_(v){ return (v==null)?"":String(v).trim(); }
+function pcHas_(v){ const s=pcVal_(v); return s!=="" && s.toLowerCase()!=="none" && s!=="—"; }
+function pcRow_(label,val){ return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0"><span style="color:#7a9a76">${esc(label)}</span><span style="color:#e8f0e6;text-align:right;font-weight:600">${esc(val)}</span></div>`; }
+function pcSection_(title,inner){ if(!inner) return ""; return `<div style="margin-top:12px"><div style="font:700 12px system-ui;letter-spacing:.04em;text-transform:uppercase;color:#8fe6a0;border-bottom:1px solid #274b30;padding-bottom:4px;margin-bottom:5px">${esc(title)}</div>${inner}</div>`; }
+function plotCardHtml_(p){
+  const ST=["SNG","CWD","CAV","SNAG","CAVITY"];
+  // Header
+  let head=pcRow_("Tract / property", pcVal_(p.TRACT)||"—");
+  head+=pcRow_("Date", (pcVal_(p.DATE)||"").replace("T"," ").slice(0,16)||"—");
+  if(pcHas_(p.CRUISER)||pcHas_(p.CRUISER_EMAIL)) head+=pcRow_("Collector", pcVal_(p.CRUISER)||pcVal_(p.CRUISER_EMAIL));
+  const lat=parseFloat(p.Y), lon=parseFloat(p.X);
+  if(isFinite(lat)&&isFinite(lon)) head+=pcRow_("GPS", `${lat.toFixed(5)}, ${lon.toFixed(5)}`+(pcHas_(p.Z)?` · ${pcVal_(p.Z)} m`:""));
+  // Trees
+  let live=0, trees="";
+  for(let i=1;i<=28;i++){ const sp=pcVal_(p[`T${i}SP`]), dbh=pcVal_(p[`T${i}S`]); if(!sp&&!dbh) continue;
+    const isLive=sp && ST.indexOf(sp.toUpperCase())<0; if(isLive) live++;
+    const q=pcVal_(p[`T${i}Q`]), cl=pcVal_(p[`T${i}QL`]), lg=pcVal_(p[`T${i}LOGS`]);
+    const extra=[q,cl,lg?(lg+" logs"):""].filter(Boolean).join(" · ");
+    trees+=`<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px solid #14251a"><span style="color:#e8f0e6"><b>${esc(sp||"—")}</b>${dbh?` ${esc(dbh)} cm`:""}</span><span style="color:#9bbfa2;font-size:12px;text-align:right">${esc(extra)}</span></div>`; }
+  // Regeneration
+  let regen="";
+  for(let i=1;i<=5;i++){ const sp=pcVal_(p[`ADRGNSP${i}`]), n=pcVal_(p[`ADRGNN${i}`]); if(sp||n) regen+=pcRow_(`Advance · ${sp||"—"}`, n?`${n} stems`:"—"); }
+  for(let i=1;i<=5;i++){ const sp=pcVal_(p[`EARGNSP${i}`]), n=pcVal_(p[`EARGNN${i}`]); if(sp||n) regen+=pcRow_(`Early · ${sp||"—"}`, n?`${n} stems`:"—"); }
+  // Shrubs + ground
+  let ground="";
+  for(let i=1;i<=5;i++){ const sp=pcVal_(p[`SHRUBSP${i}`]), n=pcVal_(p[`SHRUBN${i}`]); if(sp||n) ground+=pcRow_(`Shrub · ${sp||"—"}`, n?`${n}`:"—"); }
+  ["HERBS","MOSS","GRASSEDG"].forEach(k=>{ if(pcHas_(p[k])) ground+=pcRow_({HERBS:"Herbs",MOSS:"Moss",GRASSEDG:"Grass / edge"}[k], pcVal_(p[k])); });
+  if(pcHas_(p.GRNDSPEC)) ground+=pcRow_("Ground species", pcVal_(p.GRNDSPEC));
+  // Sample tree
+  let sample=""; Object.keys(PLOTCARD_SAMPLE_).forEach(k=>{ if(pcHas_(p[k])) sample+=pcRow_(PLOTCARD_SAMPLE_[k], pcVal_(p[k])); });
+  // SAR & invasives (only observed)
+  let sar=""; Object.keys(PLOTCARD_SAR_).forEach(k=>{ if(pcHas_(p[k])) sar+=pcRow_(PLOTCARD_SAR_[k], pcVal_(p[k])); });
+  // Pest / disease (only observed)
+  let pest=""; Object.keys(PLOTCARD_PEST_).forEach(k=>{ if(pcHas_(p[k])) pest+=pcRow_(PLOTCARD_PEST_[k], pcVal_(p[k])); });
+  // Site & management
+  let site=""; Object.keys(PLOTCARD_SITE_).forEach(k=>{ if(pcHas_(p[k])) site+=pcRow_(PLOTCARD_SITE_[k], pcVal_(p[k])); });
+  // Photo & comment
+  let pc=""; const np=Array.isArray(p._photos)?p._photos.length:(pcHas_(p.PHOTONUM)?pcVal_(p.PHOTONUM):"");
+  if(pcHas_(p.PHOTONUM)) pc+=pcRow_("Photo #", pcVal_(p.PHOTONUM));
+  if(pcHas_(p.COMMENT)) pc+=`<div style="padding:4px 0;color:#e8f0e6">${esc(pcVal_(p.COMMENT))}</div>`;
+
+  return `<div style="font-size:14px">
+    <div style="background:#14251a;border:1px solid #274b30;border-radius:10px;padding:10px;margin-bottom:6px">
+      <div style="font:700 16px system-ui;color:#eaf3e8">${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</div>
+      <div style="margin-top:4px;font-size:13px">${head}</div>
+      <div style="margin-top:6px;color:#8fe6a0;font-weight:700">Live stems (BAF 2.0): ${live}</div>
+    </div>
+    ${pcSection_(`Trees (${live} live)`, trees||`<div style="color:#7a9a76;padding:3px 0">No trees tallied.</div>`)}
+    ${pcSection_("Regeneration", regen)}
+    ${pcSection_("Shrubs & ground", ground)}
+    ${pcSection_("Sample / site tree", sample)}
+    ${pcSection_("SAR & invasives observed", sar)}
+    ${pcSection_("Pest / disease", pest)}
+    ${pcSection_("Site, soil & management", site)}
+    ${pcSection_("Photo & comment", pc)}
+  </div>`;
+}
+function plotCard(i,isAudit){
+  const p=isAudit?auditPlots[i]:saved[i]; if(!p) return;
+  try{ fmap&&fmap.closePopup(); }catch(e){}
+  _plotCardIdx=i; _plotCardAudit=!!isAudit;
+  $("plotCardTitle").textContent=(isAudit?"Imported plot":"Plot")+" · "+(p.STANDID||"—")+" / "+(p.PLOTNUM||"?");
+  $("plotCardBody").innerHTML=plotCardHtml_(p);
+  $("plotCardActions").innerHTML = isAudit
+    ? `<button class="btn ghost" type="button" onclick="closePlotCard()">Close</button><button class="btn submit" type="button" onclick="plotCardEdit()">🔍 Review / edit</button>`
+    : `<button class="btn ghost" type="button" onclick="closePlotCard()">Close</button><button class="btn ghost" type="button" style="color:#e9a89f" onclick="plotCardDelete()">🗑 Delete</button><button class="btn submit" type="button" onclick="plotCardEdit()">✎ Edit</button>`;
+  $("plotCardModal").style.display="flex";
+}
+function closePlotCard(){ $("plotCardModal").style.display="none"; }
+function plotCardEdit(){ const i=_plotCardIdx, a=_plotCardAudit; closePlotCard(); if(a) editAuditFromMap(i); else editFromMap(i); }
+function plotCardDelete(){ const i=_plotCardIdx; closePlotCard(); delFromMap(i); }
 function editFromMap(i){ closeMap(); editPlot(i); }
 // A scrollable table of all plot data for quick review. Key columns are pinned on the left; each row
 // can zoom to that plot on the map. Covers your saved plots and imported audit plots.
