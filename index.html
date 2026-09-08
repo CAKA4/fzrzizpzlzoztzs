@@ -184,6 +184,14 @@
   .dropbtn{ width:100%; padding:15px; border-radius:10px; border:1px solid #f0c860; background:#f2a83d; color:#1a1000;
     font:inherit; font-size:15px; font-weight:800; letter-spacing:.03em; cursor:pointer; box-shadow:0 4px 18px rgba(0,0,0,.55), 0 0 0 2px rgba(242,168,61,.25); }
   .standlabel{ font-family:var(--mono); font-size:11px; font-weight:700; color:#fff; text-shadow:0 1px 3px #000,0 0 6px #000; white-space:nowrap; }
+  /* Saved-plot pins carry two label states. "full" is every ticked field, one per line; "min" is the
+     bare plot number, used when zoomed out or when a full label would land on one already drawn. */
+  .pdot{ background:#e8b84b; display:flex; align-items:center; justify-content:center; box-sizing:border-box;
+         font:700 10px/1.3 'Courier New',monospace; color:#1a2e18; }
+  .pdot .lf{ display:none; } .pdot .lm{ display:block; }
+  .pdot.full .lf{ display:block; } .pdot.full .lm{ display:none; }
+  .pdot.min{ width:24px; height:24px; border-radius:50%; padding:0; white-space:nowrap; }
+  .pdot.full{ min-width:24px; border-radius:9px; padding:3px 6px; white-space:normal; text-align:center; }
   .ptlabel{ font-family:var(--mono); font-size:10px; font-weight:600; color:#ffe0b2; text-shadow:0 1px 3px #000,0 0 5px #000; white-space:nowrap; text-align:left; }
   .layer-status{ font-size:11.5px; color:#cdebcf; background:#0b1709; border:1px solid #284a2c; border-radius:8px; padding:7px 9px; display:flex; flex-direction:column; gap:3px; }
   .layer-status .ls-hd{ font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:#7a9a76; padding-bottom:1px; }
@@ -981,7 +989,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v206";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v209";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2770,23 +2778,29 @@ const MY_LABEL_TAG={num:"Plot",ft:"FT",dom:"Dom",comp:"Comp",sapComp:"Sap",ba:"B
   advComp:"Adv",advSph:"AdvSPH",earlyComp:"Early",earlySph:"EarSPH",regenClass:"Regen",
   vol:"Vol",cords:"Cds",plonVol:"Plon",stk:"Stk",volRatio:"VR",yieldGap:"YG",
   cavity:"Cav",cwd:"CWD",snags:"Sng"};
-// Text inside a saved plot's dot: each selected field as "tag value", joined with " · ". Number-only
-// or missing analysis falls back to the plot number. Whole fields are dropped to fit, never mid-value.
+// Composition strings run long ("Bd8 Pt1 Bt1 Ce2 By2 Ab2"). Trimmed to the leading species so a
+// label stays readable — the plot card shows the full list.
+function shortComp_(v,keep){
+  const parts=String(v).trim().split(/\s+/);
+  return parts.length<=keep ? String(v) : parts.slice(0,keep).join(" ")+"…";
+}
+const MY_LABEL_TRIM={comp:4,sapComp:4,advComp:3,earlyComp:3,ft:3,dom:3};
+/* Text inside a saved plot's dot: every ticked field as "tag value", one per line. Every field the
+   crew ticked is shown — long values are shortened rather than whole fields being dropped, so a
+   ticked box always produces something on the dot. */
 function myDotLabel_(p){
   const fields=(myLabelFields&&myLabelFields.length)?myLabelFields:["num"];
   if(fields.length===1 && fields[0]==="num") return esc(p.PLOTNUM||"?");
   const a=analysisFor_(p);
   const parts=[];
   fields.forEach(k=>{
-    const v = k==="num" ? String(p.PLOTNUM||"?") : valForField_(a,k);
+    let v = k==="num" ? String(p.PLOTNUM||"?") : valForField_(a,k);
     if(v==="") return;
-    const tag=MY_LABEL_TAG[k]; parts.push(tag?tag+" "+v:v);
+    if(MY_LABEL_TRIM[k]) v=shortComp_(v,MY_LABEL_TRIM[k]);
+    const tag=MY_LABEL_TAG[k]; parts.push(esc(tag?tag+" "+v:v));
   });
   if(!parts.length) return esc(p.PLOTNUM||"?");
-  const cap=fields.some(k=>k==="baCls"||k==="stCls")?52:34;
-  const keep=[]; let len=0;
-  for(const t of parts){ const add=keep.length?t.length+3:t.length; if(keep.length && len+add>cap) break; keep.push(t); len+=add; }
-  return esc(keep.join(" · "));
+  return parts.join("<br>");
 }
 // Every field the Compartment Summary reports, in the same order, minus the stand-only
 // columns (Plots, Area ha, Total Stems / m³ / Cords) which have no meaning for one plot.
@@ -3739,7 +3753,8 @@ function initMap(){
   try{ ["measureBar","routeBar","polyBar","mapDrop","layersMenu"].forEach(id=>{ const el=$(id); if(el){ L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); } });
     const sc=document.querySelector(".layers-scroll"); if(sc){ L.DomEvent.disableClickPropagation(sc); L.DomEvent.disableScrollPropagation(sc); }
     const rail=document.querySelector(".map-rail"); if(rail) L.DomEvent.disableClickPropagation(rail); }catch(e){}
-  fmap.on("moveend zoomend",()=>{ try{ renderLabels(); renderRefLabels(); }catch(e){} });
+  fmap.on("moveend zoomend",()=>{ try{ renderLabels(); renderRefLabels(); }catch(e){}
+    try{ schedulePinRender_(); }catch(e){} });   // rebuild the on-screen pin subset for the new view
   $("boundInput").addEventListener("change",e=>{ const f=e.target.files[0]; e.target.value=""; if(f) loadBoundaries(f); });
   $("pointsInput").addEventListener("change",e=>{ const f=e.target.files[0]; e.target.value=""; if(f) importRefFile(f); });
   $("pdfInput").addEventListener("change",e=>{ const f=e.target.files[0]; e.target.value=""; if(f) loadPdfOverlay(f); });
@@ -4120,25 +4135,80 @@ function plotNeedsWork_(p, isAudit){
   const hasRegen=[1,2,3,4,5].some(i=> String(p["ADRGNSP"+i]||"").trim() || String(p["EARGNSP"+i]||"").trim());
   return !hasRegen;                                           // to-do only when there's no overstory AND no regen
 }
-function renderMapPins(){ if(!fpins) return; fpins.clearLayers(); if(fauditpins) fauditpins.clearLayers();
+/* Label decluttering.
+   Overlap is a function of distance on screen, not on the ground, so the first defence is zoom:
+   below LABEL_ZOOM_MIN every pin shows the plot number only. Above it, full labels are laid out
+   nearest-to-centre first — the plot you're walking to is the one worth naming — and any label that
+   would land on one already drawn falls back to its number. The dot itself is never hidden and a
+   tap still opens the full card, so decluttering only ever costs text on screen. */
+const LABEL_ZOOM_MIN=16;
+const LABEL_MAX_PINS=500;   // past this, laying out every rect costs more than the labels are worth
+let _pinEls=[];
+function pinMode_(el,mode){ if(!el) return; el.classList.toggle("full",mode==="full"); el.classList.toggle("min",mode!=="full"); }
+function rectOf_(el){ const r=el.getBoundingClientRect(); return {l:r.left-2,t:r.top-2,r:r.right+2,b:r.bottom+2}; }
+function hits_(a,b){ return !(a.r<b.l||a.l>b.r||a.b<b.t||a.t>b.b); }
+function declutterLabels_(){
+  if(!fmap||!_pinEls.length) return;
+  const live=_pinEls.filter(o=>o.mk&&o.mk._icon&&o.mk._icon.firstChild);
+  live.forEach(o=>{ o.el=o.mk._icon.firstChild; });
+  const numOnly=!(myLabelFields&&myLabelFields.length) || (myLabelFields.length===1&&myLabelFields[0]==="num");
+  const allowFull = !numOnly && fmap.getZoom()>=LABEL_ZOOM_MIN && live.length<=LABEL_MAX_PINS;
+  if(!allowFull){ live.forEach(o=>pinMode_(o.el,"min")); return; }
+  const c=fmap.getCenter();
+  const order=live.slice().sort((a,b)=>fmap.distance(c,[a.lat,a.lon])-fmap.distance(c,[b.lat,b.lon]));
+  // imported pins are drawn too — treat them as fixed obstacles rather than covering them
+  const placed=[];
+  if(fauditpins) fauditpins.eachLayer(l=>{ if(l._icon) placed.push(rectOf_(l._icon)); });
+  order.forEach(o=>{
+    pinMode_(o.el,"full");
+    let box=rectOf_(o.el);
+    if(placed.some(q=>hits_(box,q))){ pinMode_(o.el,"min"); box=rectOf_(o.el); }
+    placed.push(box);
+  });
+}
+/* Drawing 3,000 plots as HTML markers will choke a phone, so the map works in two gears.
+   Zoomed out, every plot is a plain circle drawn on a single shared canvas — thousands cost the
+   browser almost nothing, and no label HTML is built at all. Zoomed in past LABEL_ZOOM_MIN, only
+   the plots inside the current view (plus a margin, so panning doesn't flicker) become real markers
+   with labels and decluttering. A 3,000-plot project therefore never has more than a screenful of
+   HTML alive at once. The view is re-rendered on pan and zoom to keep that subset current. */
+/* Pan and zoom fire in bursts; coalesce them so a flick across the map rebuilds the pins once. */
+let _pinRenderTimer=null;
+function schedulePinRender_(){
+  if(_pinRenderTimer) clearTimeout(_pinRenderTimer);
+  _pinRenderTimer=setTimeout(()=>{ _pinRenderTimer=null; try{ renderMapPins(); }catch(e){} },90);
+}
+let _pinCanvas=null;
+function pinCanvas_(){ if(!_pinCanvas) _pinCanvas=L.canvas({padding:0.5}); return _pinCanvas; }
+function canvasDot_(lat,lon,layer,fill,stroke,onClick){
+  L.circleMarker([lat,lon],{renderer:pinCanvas_(),radius:5,weight:2,color:stroke,fillColor:fill,fillOpacity:1})
+    .addTo(layer).on("click",onClick);
+}
+function renderMapPins(){ if(!fpins) return; fpins.clearLayers(); if(fauditpins) fauditpins.clearLayers(); _pinEls=[];
+  const z = fmap ? fmap.getZoom() : 0;
+  const detail = z >= LABEL_ZOOM_MIN;                      // labels and full markers only up close
+  const view = (detail && fmap) ? fmap.getBounds().pad(0.25) : null;
   saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)) return;
-    const lbl=myDotLabel_(p); const nonNum=!(myLabelFields.length===1&&myLabelFields[0]==="num"); const wide=(nonNum&&lbl.length>2);
     const hit=_findHit_(p); const needs=plotNeedsWork_(p,false);
-    const base=wide?"min-width:24px;height:22px;padding:0 5px;border-radius:11px":"width:24px;height:24px;border-radius:50%";
+    if(!detail){ canvasDot_(lat,lon,fpins,"#e8b84b",hit?"#ff36c0":(needs?"#ff8c1a":"#ffffff"),()=>plotCard(i,false)); return; }
+    if(view && !view.contains([lat,lon])) return;          // off screen — don't build it
+    const lbl=myDotLabel_(p);   // both label states are built now; declutterLabels_ picks which shows
     const ring=hit?"border:3px solid #ff36c0;box-shadow:0 0 0 3px rgba(255,54,192,.45),0 2px 6px rgba(0,0,0,.6)"
               :(needs?"border:3px dashed #ff8c1a;box-shadow:0 0 0 3px rgba(255,140,26,.4),0 2px 6px rgba(0,0,0,.6)"
               :"border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6)");
-    const icon=L.divIcon({className:"",html:`<div style="${base};background:#e8b84b;${ring};display:flex;align-items:center;justify-content:center;font:700 10px/1 'Courier New',monospace;color:#1a2e18;white-space:nowrap">${lbl}</div>`,iconSize:null,iconAnchor:[12,12]});
-    L.marker([lat,lon],{icon}).addTo(fpins)
-      .on("click",()=>plotCard(i,false));
+    const icon=L.divIcon({className:"",html:`<div class="pdot min" style="${ring}"><span class="lf">${lbl}</span><span class="lm">${esc(p.PLOTNUM||"?")}</span></div>`,iconSize:null,iconAnchor:[12,12]});
+    const mk=L.marker([lat,lon],{icon}).addTo(fpins).on("click",()=>plotCard(i,false));
+    _pinEls.push({mk:mk,lat:lat,lon:lon});
   });
   // Imported reference plots. Blue = not yet visited; GREEN with a ✓ = edited/completed in the field,
   // so the whole crew can see progress at a glance. Amber = possible duplicate of an existing plot.
   auditPlots.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)) return;
     const done=!!p._done;
     const col = done ? "#37c26b" : (p._dup ? "#e8b84b" : "#4aa3e0");
-    const lbl = auditDotLabel_(p);
     const hit=_findHit_(p); const needs=plotNeedsWork_(p,true);
+    if(!detail){ canvasDot_(lat,lon,fauditpins||fpins,col,hit?"#ff36c0":(needs?"#ff8c1a":(done?"#eafff0":"#ffffff")),()=>plotCard(i,true)); return; }
+    if(view && !view.contains([lat,lon])) return;
+    const lbl = auditDotLabel_(p);
     const ring = hit ? "border:3px solid #ff36c0;box-shadow:0 0 0 3px rgba(255,54,192,.45),0 2px 7px rgba(0,0,0,.6)"
                      : (needs ? "border:3px dashed #ff8c1a;box-shadow:0 0 0 3px rgba(255,140,26,.4),0 2px 7px rgba(0,0,0,.6)"
                       : (done ? "border:2px solid #eafff0;box-shadow:0 0 0 2px #1f8f4a,0 2px 7px rgba(0,0,0,.6)"
@@ -4157,6 +4227,8 @@ function renderMapPins(){ if(!fpins) return; fpins.clearLayers(); if(fauditpins)
     if(ld) ld.style.display=hasDone?"":"none";
     if(lt) lt.style.display=hasTodo?"":"none";
   }catch(e){}
+  // markers are in the DOM by the next frame, so measure then
+  requestAnimationFrame(()=>{ try{ declutterLabels_(); }catch(e){} });
 }
 function editAuditFromMap(i){ closeMap(); editAudit(i); }
 // Delete an imported plot straight from the map: remove it from the device and (if it's in the Sheet)
