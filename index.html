@@ -497,6 +497,7 @@
         <div><label>Moss <span class="code">MOSS</span></label><select id="MOSS"></select></div>
         <div><label>Grass / edge <span class="code">GRASSEDG</span></label><select id="GRASSEDG"></select></div>
       </div>
+      <button class="addbtn" type="button" id="coverNoneBtn" onclick="coverNone()">None present — set herbs, moss and grass to 0</button>
       <div class="grouphd">Ground species <span class="code">GRNDSPEC</span> <span class="pill" id="grndCount">0</span></div>
       <div class="chips" id="grndChips"></div>
       <div class="row-inline" style="margin-top:9px">
@@ -980,7 +981,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v202";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v203";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1072,13 +1073,16 @@ function pinHabitat_(list){
   const top=[]; HABITAT_TOP.forEach(c=>{ const h=list.find(o=>o.code===c); if(h) top.push(h); });
   return top.concat(list.filter(o=>HABITAT_TOP.indexOf(o.code)<0));
 }
-function sppSelect(s){
-  const opts = SPECIES.filter(([c])=>c!=="").map(([c,l])=>({code:c,name:l.slice(c.length+1)}))
+function sppSelect(s,cfg){
+  const noHab = !!(cfg&&cfg.noHabitat);
+  if(s) s.dataset.noHab = noHab?"1":"";   // the searchable picker reads this back
+  const opts = SPECIES.filter(([c])=>c!=="" && !(noHab && HABITAT_TOP.indexOf(c)>=0))
+    .map(([c,l])=>({code:c,name:l.slice(c.length+1)}))
     .concat(customTree.map(o=>({code:o.code,name:o.name})));
   const byCode=(a,b)=>a.code.toLowerCase().localeCompare(b.code.toLowerCase());
   const used = opts.filter(o=>(speciesUse[o.code]||0)>0).sort((a,b)=>(speciesUse[b.code]-speciesUse[a.code])||byCode(a,b));
   const rest = opts.filter(o=>!(speciesUse[o.code]||0)).sort(byCode);
-  const ordered = pinHabitat_(used.concat(rest));   // habitat codes first, then most-used species, then alphabetical
+  const ordered = noHab ? used.concat(rest) : pinHabitat_(used.concat(rest));   // habitat codes first, then most-used, then alphabetical
   s.innerHTML = `<option value="">—</option>` +
     ordered.map(o=>`<option value="${esc(o.code)}">${esc(o.code)} — ${esc(o.name)}</option>`).join("") +
     `<option value="${ADD_SENTINEL}">＋ Add species…</option>`;
@@ -1094,10 +1098,11 @@ function sppPickerOpen_(ev){
       .sort((a,b)=>a.toLowerCase().localeCompare(b.toLowerCase()))   // added shrubs file in alphabetically, not at the bottom
       .map(n=>({code:"",name:n,val:n}));
   } else {
-    const opts=SPECIES.filter(([c])=>c!=="").map(([c,l])=>({code:c,name:l.slice(c.length+1)})).concat(customTree.map(o=>({code:o.code,name:o.name})));
+    const noHab = el.dataset.noHab==="1";
+    const opts=SPECIES.filter(([c])=>c!=="" && !(noHab && HABITAT_TOP.indexOf(c)>=0)).map(([c,l])=>({code:c,name:l.slice(c.length+1)})).concat(customTree.map(o=>({code:o.code,name:o.name})));
     const used=opts.filter(o=>(speciesUse[o.code]||0)>0).sort((a,b)=>(speciesUse[b.code]-speciesUse[a.code]));
     const rest=opts.filter(o=>!(speciesUse[o.code]||0)).sort((a,b)=>a.code.toLowerCase().localeCompare(b.code.toLowerCase()));
-    _sppItems=pinHabitat_(used.concat(rest)).map(o=>({code:o.code,name:o.name,val:o.code}));
+    _sppItems=(noHab?used.concat(rest):pinHabitat_(used.concat(rest))).map(o=>({code:o.code,name:o.name,val:o.code}));
   }
   $("sppPickerTitle").textContent=_sppShrub?"Choose a shrub":"Choose a species";
   $("sppPickerSearch").value=""; $("sppPicker").style.display="flex"; renderSppPicker_(_sppItems);
@@ -1221,10 +1226,20 @@ function addableAdd(id,name){ const a=ADDABLE[id]; if(!a) return; name=String(na
       if(!pendingSpecies.some(p=>p.t===t&&p.n.toLowerCase()===name.toLowerCase())) pendingSpecies.push({t,n:name});
       persistCustom(); flushSpecies(); }
   } }
+/* Lists that read as plain species names are easier to scan alphabetically, so added entries
+   file into place instead of landing at the bottom. "None" and "Other" keep their usual spots. */
+const ADDABLE_SORTED=new Set(["SAROSPEC"]);
+function addableOptions_(id){
+  const a=ADDABLE[id], base=(a.base||[]).filter(Boolean);
+  if(!ADDABLE_SORTED.has(id)) return base.concat(a.list);
+  const pinTop=base.filter(v=>v==="None"), pinEnd=base.filter(v=>v==="Other");
+  const mid=base.filter(v=>v!=="None"&&v!=="Other").concat(a.list)
+    .sort((x,y)=>String(x).toLowerCase().localeCompare(String(y).toLowerCase()));
+  return pinTop.concat(mid,pinEnd);
+}
 function addableBuild(id){ const a=ADDABLE[id], el=$(id); if(!a||!el) return; const cur=el.value;
   el.innerHTML = `<option value="">—</option>` +
-    (a.base||[]).filter(Boolean).map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join("") +
-    a.list.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join("") +
+    addableOptions_(id).map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join("") +
     `<option value="${a.sentinel}">＋ Add ${esc(a.noun)}…</option>`;
   if(cur && cur!==a.sentinel) setSel(el,cur); }
 function addableBuildAll(){ for(const id in ADDABLE) addableBuild(id); }
@@ -1348,6 +1363,12 @@ function renderGround(selected){
   all.sort((a,b)=>a.toLowerCase().localeCompare(b.toLowerCase()));   // added plants file in alphabetically on this and every later plot
   $("grndChips").innerHTML = all.map(n=>`<button type="button" class="chip-tog${sel.has(n)?" on":""}" data-name="${esc(n)}" onclick="toggleGround(this)">${esc(n)}</button>`).join("");
   updateGroundCount();
+}
+// One tap records a measured zero across the cover trio. Left blank they stay "not recorded".
+function coverNone(){
+  ["HERBS","MOSS","GRASSEDG"].forEach(id=>{ const el=$(id); if(!el) return;
+    if([...el.options].some(o=>o.value==="0")){ el.value="0"; el.classList.remove("needs-entry"); el.dispatchEvent(new Event("change",{bubbles:true})); } });
+  toast("Ground cover set to 0 %");
 }
 function toggleGround(btn){ btn.classList.toggle("on"); updateGroundCount(); }
 function getGround(){ return [...$("grndChips").querySelectorAll(".chip-tog.on")].map(b=>b.getAttribute("data-name")); }
@@ -1511,7 +1532,8 @@ function addPair(kind,v,scroll){
     `<div><label class="n">${qtyLbl}</label><select class="p_n"></select></div>`+
     `<button class="del" type="button" aria-label="Remove">×</button>`;
   c.appendChild(div);
-  const spEl=div.querySelector(".p_sp"); if(isShrub) shrubSelect(spEl); else sppSelect(spEl);
+  // Regen counts living seedlings/saplings, so snags, cavity trees and CWD are left out of its list.
+  const spEl=div.querySelector(".p_sp"); if(isShrub) shrubSelect(spEl); else sppSelect(spEl,{noHabitat:true});
   const nEl=div.querySelector(".p_n");
   opts(nEl,DOM.COUNT);
   if(v){ setSel(spEl,v.sp); setSel(nEl,v.n); }
@@ -3611,7 +3633,9 @@ function closeMap(){ rememberMapView_(); $("mapView").style.display="none"; docu
   if(fmap) fmap.getContainer().style.cursor=""; closeLayersMenu(); }
 function initMap(){
   fmap=L.map("fmap",{zoomControl:false,attributionControl:false,preferCanvas:true}).setView([44.13,-79.49],14);
-  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:22,maxNativeZoom:19}).addTo(fmap);
+  // crossOrigin lets the service worker store real (non-opaque) tiles, so imagery seen in signal
+  // is still there offline. See TILE_CACHE in sw.js.
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:22,maxNativeZoom:19,crossOrigin:true}).addTo(fmap);
   L.control.zoom({position:"bottomright"}).addTo(fmap);
   fpins=L.layerGroup().addTo(fmap); fauditpins=L.layerGroup().addTo(fmap); fboundLayer=L.layerGroup().addTo(fmap); flabelLayer=L.layerGroup().addTo(fmap); refLayer=L.layerGroup().addTo(fmap); freflabelLayer=L.layerGroup().addTo(fmap); crewLayer=L.layerGroup().addTo(fmap); liveLayer=L.layerGroup().addTo(fmap); crewRouteLayer=L.layerGroup().addTo(fmap); photoLayer=L.layerGroup().addTo(fmap);
   applyLayerVis_();
