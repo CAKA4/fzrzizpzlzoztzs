@@ -981,7 +981,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v203";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v206";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1041,7 +1041,8 @@ function friHeader(){
     "EARGNSP1","EARGNN1","EARGNSP2","EARGNN2","EARGNSP3","EARGNN3","EARGNSP4","EARGNN4","EARGNSP5","EARGNN5",
     "SHRUBSP1","SHRUBN1","SHRUBSP2","SHRUBN2","SHRUBSP3","SHRUBN3","SHRUBSP4","SHRUBN4","SHRUBSP5","SHRUBN5",
     "HERBS","MOSS","GRASSEDG","GRNDSPEC","SAROSPEC","DSV","EUROBUCK","GARLMUST","MANIMAPL","INVASP","INVAQUAN",
-    "POISIVY","PHOTONUM","PESTS","PESTQUAN","DISEASE","DISEQUAN","RPD","TRACT","AGECLASS","CRUISER","CRUISER_EMAIL","PHOTOS","PHOTO_LINKS"]);
+    "POISIVY","PHOTONUM","PESTS","PESTQUAN","DISEASE","DISEQUAN","RPD","TRACT","AGECLASS","CRUISER","CRUISER_EMAIL","PHOTOS","PHOTO_LINKS",
+    "INANALYSIS"]);   // "Y" (default) or "N" — a bare plot the crew chose to leave out of the analysis
 }
 const HEADER=friHeader(), BAF=2.0;
 
@@ -1517,6 +1518,16 @@ function addTree(v,scroll){
 }
 function renumberTrees(){ [...treeRows.children].forEach((r,k)=>{ r.querySelectorAll("label.n")[0].textContent=`T${k+1} · spp`; }); }
 function treeCount(){ return [...treeRows.children].filter(r=>r.querySelector(".t_sp").value||r.querySelector(".t_s").value).length; }
+// Whether the plot on the form counts toward the analysis. Set by the check on submit for bare plots,
+// and reset to "Y" whenever a fresh or existing plot is loaded into the form.
+let plotInAnalysis="Y";
+function regenCount_(){ let n=0;
+  ["adrgn","eargn"].forEach(k=>{ const c=$(PAIR[k].el); if(!c) return;
+    [...c.children].forEach(r=>{ const sp=r.querySelector(".p_sp"), q=r.querySelector(".p_n");
+      if((sp&&sp.value&&sp.value!==ADD_SENTINEL)||(q&&q.value)) n++; }); });
+  return n; }
+// A plot with nothing in the overstory and nothing in the regen sub-plot: the case worth asking about.
+function plotIsBare_(d){ return !(d._trees!=null?d._trees:treeCount()) && !regenCount_(); }
 // Live-tree count for the top-of-form summary: excludes snags, cavity trees and coarse woody debris.
 function liveTreeCount(){ const ST=["SNG","CWD","CAV","SNAG","CAVITY"]; let n=0;
   [...treeRows.children].forEach(r=>{ const sp=String(r.querySelector(".t_sp").value||"").trim().toUpperCase(); const s=r.querySelector(".t_s").value; if((sp||s)&&ST.indexOf(sp)<0) n++; }); return n; }
@@ -1567,6 +1578,7 @@ function collect(){
   for(const id in ADDABLE){ if(d[id]===ADDABLE[id].sentinel) d[id]=""; else if(d[id]) addableAdd(id,d[id]); }
   d.HTSPP=spv(d.HTSPP);
   d.GRNDSPEC = getGround().join("; ");
+  d.INANALYSIS = plotInAnalysis||"Y";
   [...treeRows.children].forEach((r,k)=>{ const i=k+1;
     d[`T${i}SP`]=spv(r.querySelector(".t_sp").value); d[`T${i}S`]=r.querySelector(".t_s").value;
     d[`T${i}Q`]=r.querySelector(".t_q").value; d[`T${i}QL`]=r.querySelector(".t_ql").value;
@@ -1641,8 +1653,31 @@ function submitPlot(){
   const d=collect(); d._trees=treeCount();
   const {blocks,warns}=validatePlot(d);
   if(blocks.length){ showValidate(blocks,warns,null); return; }
-  if(warns.length){ showValidate([],warns,()=>finalizeSubmit(d)); return; }
-  finalizeSubmit(d);
+  const go=()=>{ if(warns.length){ showValidate([],warns,()=>finalizeSubmit(d)); return; } finalizeSubmit(d); };
+  if(plotIsBare_(d)) askIncludeBare_(d,go); else go();
+}
+/* A plot with no trees and no regen is either a real opening (a measured zero that belongs in the
+   analysis) or an entry with nothing in it. Only the person standing there can tell, so ask. The
+   answer is written to INANALYSIS and travels with the plot. */
+function askIncludeBare_(d,then){
+  showInfoSheet_("No tree or regeneration data",
+    `<div style="color:#a9c9b0;font-size:13px;line-height:1.5;margin-bottom:10px">`+
+    `This plot has no trees tallied and no regeneration recorded.</div>`+
+    `<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:10px">`+
+    `Include it if the ground really is open — it then counts as a measured zero and pulls the stand`+
+    ` averages down, which is usually what you want. Leave it out if nothing was assessed here.</div>`+
+    `<button type="button" onclick="_bareAnswer_('Y')" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">✓ Include in the analysis — the plot is genuinely open</button>`+
+    `<button type="button" onclick="_bareAnswer_('N')" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #7a5a2f;background:#2a1f12;color:#e8f0e6;font:inherit;font-size:13px">⊘ Leave out of the analysis — no data collected</button>`,
+    ()=>{ if(_bareCtx_){ _bareCtx_=null; toast("Not submitted — choose include or leave out"); } });
+  _bareCtx_={d:d,then:then};
+}
+let _bareCtx_=null;
+function _bareAnswer_(v){
+  const c=_bareCtx_; _bareCtx_=null; closeInfoSheet_();
+  if(!c) return;
+  plotInAnalysis=v; c.d.INANALYSIS=v;
+  if(v==="N") toast("Plot saved, left out of the analysis");
+  c.then();
 }
 function finalizeSubmit(d){
   d._sent=false; d._ts=nowStr();
@@ -1673,7 +1708,8 @@ function finalizeSubmit(d){
 function resend(i){ send(saved[i], false); }
 
 function editPlot(i){
-  loadPlot(saved[i]); editingIndex=i; setEditMode(true);
+  loadPlot(saved[i]); plotInAnalysis=String(saved[i].INANALYSIS||"Y").toUpperCase()==="N"?"N":"Y";
+  editingIndex=i; setEditMode(true);
   window.scrollTo({top:0,behavior:"smooth"});
   toast("Editing plot — change it, then Update");
 }
@@ -2114,6 +2150,7 @@ function nextPlot(){
   { const ht=$("HTSPP"); if(ht) sppSelect(ht); }                   // rebuild so most-used species stay at the top
   htSelect_($("HT"));                                              // refresh height order from latest usage
   defaultNoneFields_();   // pest / disease / SAR / invasive fields default to None
+  plotInAnalysis="Y";   // a fresh plot starts included
   setField($("PLOTNUM"), nextPlotFor(carryStand)); renderGround([]); currentPhotoNames=[]; clearPhotos(); setNow(); updateTally(); autoGPS();
 }
 
@@ -2699,21 +2736,70 @@ function valForField_(a,k){
     case "ags":   return (a.ags===""?"":String(a.ags));
     case "vol":   return (a.vol===""?"":String(a.vol));
     case "stk":   return (a.stk===""?"":String(a.stk));
+    // the rest of the Compartment Summary field set
+    case "comp":       return a.comp||"";
+    case "sapComp":    return a.sapComp||"";
+    case "cc":         return (a.cc===""||a.cc==null?"":String(a.cc));
+    case "cords":      return (a.cords===""||a.cords==null?"":String(a.cords));
+    case "plonVol":    return (a.plonVol===""||a.plonVol==null?"":String(a.plonVol));
+    case "volRatio":   return (a.volRatio===""||a.volRatio==null?"":String(a.volRatio));
+    case "yieldGap":   return (a.yieldGap===""||a.yieldGap==null?"":String(a.yieldGap));
+    case "advComp":    return a.advComp||"";
+    case "advSph":     return (a.advSph===""||a.advSph==null?"":String(a.advSph));
+    case "earlyComp":  return a.earlyComp||"";
+    case "earlySph":   return (a.earlySph===""||a.earlySph==null?"":String(a.earlySph));
+    case "regenClass": return a.regenClass||"";
+    case "cavity":     return (a.cavity===""||a.cavity==null?"":String(a.cavity));
+    case "cwd":        return (a.cwd===""||a.cwd==null?"":String(a.cwd));
+    case "snags":      return (a.snags===""||a.snags==null?"":String(a.snags));
+    case "baCls":      return sizeClassStr_(a.baCls);
+    case "stCls":      return sizeClassStr_(a.stCls);
     default:      return "";
   }
 }
-// Text inside a saved plot's dot: join each selected field's value with " · ". Number-only or missing
-// analysis falls back to the plot number.
+// The six size classes as one compact string, e.g. "1.2/4.8/7.0/2.1/–/–" (sapling → XLarge).
+function sizeClassStr_(arr){
+  if(!Array.isArray(arr)||!arr.length) return "";
+  const t=arr.map(v=>(v===""||v==null)?"–":String(v)).join("/");
+  return /^[–/]+$/.test(t)?"":t;
+}
+// Short tag shown ahead of each value on the dot, so "24.5 · 18.2" reads "QMD 24.5 · BA 18.2".
+// Kept terse because the dot is small; the picker carries the full name and units.
+const MY_LABEL_TAG={num:"Plot",ft:"FT",dom:"Dom",comp:"Comp",sapComp:"Sap",ba:"BA",qmd:"QMD",
+  stems:"SPH",age:"Age",ht:"Ht",cc:"CC",ags:"AGS",baCls:"BAcls",stCls:"SPHcls",
+  advComp:"Adv",advSph:"AdvSPH",earlyComp:"Early",earlySph:"EarSPH",regenClass:"Regen",
+  vol:"Vol",cords:"Cds",plonVol:"Plon",stk:"Stk",volRatio:"VR",yieldGap:"YG",
+  cavity:"Cav",cwd:"CWD",snags:"Sng"};
+// Text inside a saved plot's dot: each selected field as "tag value", joined with " · ". Number-only
+// or missing analysis falls back to the plot number. Whole fields are dropped to fit, never mid-value.
 function myDotLabel_(p){
   const fields=(myLabelFields&&myLabelFields.length)?myLabelFields:["num"];
   if(fields.length===1 && fields[0]==="num") return esc(p.PLOTNUM||"?");
   const a=analysisFor_(p);
   const parts=[];
-  fields.forEach(k=>{ if(k==="num"){ parts.push(String(p.PLOTNUM||"?")); return; } const v=valForField_(a,k); if(v!=="") parts.push(v); });
+  fields.forEach(k=>{
+    const v = k==="num" ? String(p.PLOTNUM||"?") : valForField_(a,k);
+    if(v==="") return;
+    const tag=MY_LABEL_TAG[k]; parts.push(tag?tag+" "+v:v);
+  });
   if(!parts.length) return esc(p.PLOTNUM||"?");
-  let s=parts.join(" · "); if(s.length>22) s=s.slice(0,22); return esc(s);
+  const cap=fields.some(k=>k==="baCls"||k==="stCls")?52:34;
+  const keep=[]; let len=0;
+  for(const t of parts){ const add=keep.length?t.length+3:t.length; if(keep.length && len+add>cap) break; keep.push(t); len+=add; }
+  return esc(keep.join(" · "));
 }
-const MY_LABEL_OPTS=[["num","Plot number"],["ft","Forest type"],["dom","Dominant species"],["ba","BA m²/ha"],["qmd","QMD cm"],["stems","Stems/ha"],["age","Age"],["ht","Height m"],["ags","% AGS"],["vol","Volume m³/ha"],["stk","Stocking ratio"]];
+// Every field the Compartment Summary reports, in the same order, minus the stand-only
+// columns (Plots, Area ha, Total Stems / m³ / Cords) which have no meaning for one plot.
+const MY_LABEL_OPTS=[["num","Plot number"],["ft","Forest type"],["dom","Dominant species"],
+  ["comp","Comp (>9cm)"],["sapComp","Sap comp"],
+  ["ba","BA m²/ha"],["qmd","QMD cm"],["stems","Stems/ha"],["age","Age"],["ht","Height m"],
+  ["cc","Canopy closure %"],["ags","% AGS"],
+  ["baCls","BA by size class"],["stCls","Stems by size class"],
+  ["advComp","Adv comp"],["advSph","Adv sph"],["earlyComp","Early comp"],["earlySph","Early sph"],
+  ["regenClass","Regen class"],
+  ["vol","Volume m³/ha"],["cords","Cords/ha"],["plonVol","Plonski vol"],["stk","Stocking ratio"],
+  ["volRatio","Vol ratio"],["yieldGap","Yield gap"],
+  ["cavity","Cavity/ha"],["cwd","CWD/ha"],["snags","Snags/ha"]];
 let _labelPickerOpen=false;
 function openMyLabelPicker(){
   if(!saved.length){ toast("No plots to label",true); return; }
@@ -3325,7 +3411,13 @@ let summaryTract = "__all__";
 function sumCollectorOf_(p){ return String((p&&(p.CRUISER||p.CRUISER_EMAIL))||"").trim(); }
 function sumTractOf_(p){ return String((p&&p.TRACT)||"").trim(); }
 function sumSourcePool_(){ return summarySource==="audit"?auditPlots.slice() : summarySource==="both"?saved.concat(auditPlots) : saved.slice(); }
+// Plots the crew marked as "no data collected" are held out of every summary figure. The count is
+// kept so the analysis can say so rather than quietly reporting a smaller plot count.
+let _sumExcluded=0;
 function sumPlots_(){ let base=sumSourcePool_();
+  const before=base.length;
+  base=base.filter(p=>String(p.INANALYSIS||"Y").toUpperCase()!=="N");
+  _sumExcluded=before-base.length;
   if(summaryCollector!=="__all__") base=base.filter(p=>sumCollectorOf_(p).toLowerCase()===summaryCollector.toLowerCase());
   if(summaryTract!=="__all__") base=base.filter(p=>sumTractOf_(p).toLowerCase()===summaryTract.toLowerCase());
   return base; }
@@ -3408,7 +3500,7 @@ function renderSummary(){
     </div>
     <div style="margin-top:4px"><b>Species — by basal area</b>${comp}</div>
     ${hab}
-    <div class="note">Live-tree metrics (BA, stems, QMD, composition, volume): DBH ≥ ${inclSmall?"6":"10"} cm. BAF ${BAF.toFixed(1)} variable-radius plots. Volume = Pettawawa total stem volume — height modelled from DBH per species (Bonnor &amp; Magnussen 1986)${s.vol?` · ≈ ${(s.vol*M3_TO_CORDS).toFixed(1)} cords/ha`:""}. Species outside the equation set default to Pr (conifer) or Mh (hardwood).</div>`;
+    <div class="note">Live-tree metrics (BA, stems, QMD, composition, volume): DBH ≥ ${inclSmall?"6":"10"} cm. BAF ${BAF.toFixed(1)} variable-radius plots. Volume = Pettawawa total stem volume — height modelled from DBH per species (Bonnor &amp; Magnussen 1986)${s.vol?` · ≈ ${(s.vol*M3_TO_CORDS).toFixed(1)} cords/ha`:""}. Species outside the equation set default to Pr (conifer) or Mh (hardwood).${_sumExcluded?` <b>${_sumExcluded} plot${_sumExcluded>1?"s":""} left out</b> (marked no data collected).`:""}</div>`;
 }
 function closeSummary(){ $("standSummary").style.display="none"; }
 function exportSummaryCSV(){
