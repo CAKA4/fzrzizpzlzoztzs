@@ -530,7 +530,7 @@
       <div><label>Ht-tree height — m <span class="code">HT</span></label><select id="HT"></select></div>
       <div><label>Age — cored, actual yrs <span class="code">AGECORED</span></label><select id="AGECORED"></select></div>
       <div><label>CAI <span class="code">CAI</span></label><select id="CAI"></select></div>
-      <div class="full"><label>Crown closure — % of sky obscured by vegetation <span class="code">CC</span></label><select id="CC"></select></div>
+      <div class="full"><label>Crown closure — % of sky obscured by vegetation measured at eye level <span class="code">CC</span></label><select id="CC"></select></div>
     </div></div>
   </details>
 
@@ -980,7 +980,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-06-28 · v198";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v202";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1050,7 +1050,9 @@ const ADD_SENTINEL="__ADD__";
 const ABUND_OPTS=[["",""],["None","None"],["Few","Few · ≈2×2 m"],["Small","Small · ≈4×4 m"],["Medium","Medium · ≈10×10 m"],["Large","Large · >10×10 m"]];
 function abundSelect(s){ s.innerHTML=ABUND_OPTS.map(([v,l])=>`<option value="${esc(v)}">${l===""?"—":esc(l)}</option>`).join(""); }
 // Pest, disease, Species-at-Risk and invasive fields all start at "None" (blank means "not checked").
-function defaultNoneFields_(){ ["PESTS","PESTQUAN","DISEASE","DISEQUAN","RPD","SAROSPEC","DSV","EUROBUCK","GARLMUST","MANIMAPL","POISIVY","INVASP","INVAQUAN"].forEach(id=>{ const el=$(id); if(el && [...el.options].some(o=>o.value==="None")) el.value="None"; }); }
+function defaultNoneFields_(){ ["PESTS","PESTQUAN","DISEASE","DISEQUAN","RPD","SAROSPEC","DSV","EUROBUCK","GARLMUST","MANIMAPL","POISIVY","INVASP","INVAQUAN"].forEach(id=>{ const el=$(id); if(el && [...el.options].some(o=>o.value==="None")) el.value="None"; });
+ }
+// Herbs / moss / grass are deliberately left blank (—) so a measured 0 % stays distinct from "not recorded".
 function numRangeSelect(s,max){ if(!s) return; let h=`<option value="">—</option>`; for(let i=1;i<=max;i++) h+=`<option value="${i}">${i}</option>`; s.innerHTML=h; }
 // Height list ordered so the most-used heights sit at the top. Seeds a sensible forestry default order,
 // then real usage from prior plots takes over (×10 so a few entries outweigh the seed).
@@ -1063,13 +1065,20 @@ function htSelect_(s){ if(!s) return;
   all.sort((a,b)=> score(b)-score(a) || (parseInt(a,10)-parseInt(b,10)));
   s.innerHTML=`<option value="">—</option>`+all.map(v=>`<option value="${v}">${v}</option>`).join("");
 }
+/* Cavity trees, snags and coarse woody debris are tallied constantly, so they sit at the top
+   of the tree-tally list ahead of the species. */
+const HABITAT_TOP=["CAV","Sng","CWD"];
+function pinHabitat_(list){
+  const top=[]; HABITAT_TOP.forEach(c=>{ const h=list.find(o=>o.code===c); if(h) top.push(h); });
+  return top.concat(list.filter(o=>HABITAT_TOP.indexOf(o.code)<0));
+}
 function sppSelect(s){
   const opts = SPECIES.filter(([c])=>c!=="").map(([c,l])=>({code:c,name:l.slice(c.length+1)}))
     .concat(customTree.map(o=>({code:o.code,name:o.name})));
   const byCode=(a,b)=>a.code.toLowerCase().localeCompare(b.code.toLowerCase());
   const used = opts.filter(o=>(speciesUse[o.code]||0)>0).sort((a,b)=>(speciesUse[b.code]-speciesUse[a.code])||byCode(a,b));
   const rest = opts.filter(o=>!(speciesUse[o.code]||0)).sort(byCode);
-  const ordered = used.concat(rest);   // your most-used species rise to the top; the rest stay alphabetical
+  const ordered = pinHabitat_(used.concat(rest));   // habitat codes first, then most-used species, then alphabetical
   s.innerHTML = `<option value="">—</option>` +
     ordered.map(o=>`<option value="${esc(o.code)}">${esc(o.code)} — ${esc(o.name)}</option>`).join("") +
     `<option value="${ADD_SENTINEL}">＋ Add species…</option>`;
@@ -1082,12 +1091,13 @@ function sppPickerOpen_(ev){
   _sppTarget=el; _sppShrub=el.classList.contains("p_sp") && !!el.closest("#shrubRows");
   if(_sppShrub){
     _sppItems=[...SHRUB_SPECIES.filter(Boolean),...customShrub].filter((v,i,a)=>a.findIndex(x=>x.toLowerCase()===v.toLowerCase())===i)
+      .sort((a,b)=>a.toLowerCase().localeCompare(b.toLowerCase()))   // added shrubs file in alphabetically, not at the bottom
       .map(n=>({code:"",name:n,val:n}));
   } else {
     const opts=SPECIES.filter(([c])=>c!=="").map(([c,l])=>({code:c,name:l.slice(c.length+1)})).concat(customTree.map(o=>({code:o.code,name:o.name})));
     const used=opts.filter(o=>(speciesUse[o.code]||0)>0).sort((a,b)=>(speciesUse[b.code]-speciesUse[a.code]));
     const rest=opts.filter(o=>!(speciesUse[o.code]||0)).sort((a,b)=>a.code.toLowerCase().localeCompare(b.code.toLowerCase()));
-    _sppItems=used.concat(rest).map(o=>({code:o.code,name:o.name,val:o.code}));
+    _sppItems=pinHabitat_(used.concat(rest)).map(o=>({code:o.code,name:o.name,val:o.code}));
   }
   $("sppPickerTitle").textContent=_sppShrub?"Choose a shrub":"Choose a species";
   $("sppPickerSearch").value=""; $("sppPicker").style.display="flex"; renderSppPicker_(_sppItems);
@@ -1335,6 +1345,7 @@ function renderGround(selected){
   const sel=new Set((selected||[]).filter(Boolean));
   const all=[...GROUND_SPECIES]; customGround.forEach(s=>{ if(!all.some(x=>x.toLowerCase()===s.toLowerCase())) all.push(s); });
   sel.forEach(s=>{ if(!all.some(x=>x.toLowerCase()===s.toLowerCase())) all.push(s); });
+  all.sort((a,b)=>a.toLowerCase().localeCompare(b.toLowerCase()));   // added plants file in alphabetically on this and every later plot
   $("grndChips").innerHTML = all.map(n=>`<button type="button" class="chip-tog${sel.has(n)?" on":""}" data-name="${esc(n)}" onclick="toggleGround(this)">${esc(n)}</button>`).join("");
   updateGroundCount();
 }
@@ -1620,7 +1631,9 @@ function finalizeSubmit(d){
     d._done=true; d._doneAt=nowStr(); d._doneBy=(cruiser&&cruiser.name)||d.CRUISER||"";   // edited = field-checked/completed
     auditPlots[editingAudit]=d; persistAudit(); editingAudit=null; setEditMode(false);
     clearDraft(); nextPlot(); renderSaved();
-    window.scrollTo({top:0,behavior:"smooth"}); toast("Imported plot marked complete ✓"); return;
+    window.scrollTo({top:0,behavior:"smooth"}); toast("Imported plot marked complete ✓");
+    setTimeout(()=>{ try{ openMap(); }catch(e){} },250);   // back to the map to carry on navigating
+    return;
   }
   const isUpdate = editingIndex!=null;
   if(!String(d.PLOTSRC||"").trim()) d.PLOTSRC="FIELD";   // note the source of a field-collected plot (imported plots use "IMPORTED")
@@ -1633,7 +1646,7 @@ function finalizeSubmit(d){
   nextPlot();
   renderSaved(); netDot();
   window.scrollTo({top:0,behavior:"smooth"});   // back to the top, ready for the next plot's date/header
-  if(!isUpdate) setTimeout(()=>{ try{ openMap(); }catch(e){} },250);   // straight to the map — the usual next step after a plot
+  setTimeout(()=>{ try{ openMap(); }catch(e){} },250);   // straight to the map — after a new plot AND after an edit
 }
 function resend(i){ send(saved[i], false); }
 
@@ -3158,27 +3171,48 @@ function validatePlot(d){
   // Required identity fields for a field plot (not enforced when completing an imported plot, which is
   // numbered from the map). These are shown with an OK button and block submission until filled.
   if(!isAuditEdit){
-    if(!String(d.STANDID||"").trim() || d.STANDID==="-") blocks.push("Stand ID is required.");
-    if(!String(d.PLOTNUM||"").trim()) blocks.push("Plot number is required.");
+    if(!String(d.STANDID||"").trim() || d.STANDID==="-") blocks.push({m:"Stand ID is required.",f:"STANDID"});
+    if(!String(d.PLOTNUM||"").trim()) blocks.push({m:"Plot number is required.",f:"PLOTNUM"});
   }
-  if(!d.X || !d.Y) warns.push("No GPS location captured (X/Y empty).");
+  if(!d.X || !d.Y) warns.push({m:"No GPS location captured (X/Y empty)."});
   const n = d._trees!=null ? d._trees : treeCount();
-  if(!n) warns.push("No trees tallied — is this an empty / non-forested plot?");
+  if(!n) warns.push({m:"No trees tallied — is this an empty / non-forested plot?",f:"treeRows"});
   let incomplete=0; for(let i=1;i<=28;i++){ const sp=d["T"+i+"SP"], s=d["T"+i+"S"]; if((sp&&!s)||(!sp&&s)) incomplete++; }
-  if(incomplete) blocks.push(`${incomplete} tree row${incomplete>1?"s":""} missing species or DBH — complete or clear them.`);
-  if(d.CC==="") warns.push("Crown closure (CC) not set.");
+  if(incomplete) blocks.push({m:`${incomplete} tree row${incomplete>1?"s":""} missing species or DBH — complete or clear them.`,f:"treeRows"});
+  if(d.CC==="") warns.push({m:"Crown closure (CC) not set.",f:"CC"});
   const dup = d.STANDID && d.STANDID!=="-" && saved.some((p,idx)=> idx!==editingIndex && p.PLOTNUM && p.STANDID===d.STANDID && p.PLOTNUM===d.PLOTNUM);
-  if(dup) warns.push(`Stand ${d.STANDID} already has a plot ${d.PLOTNUM}.`);
+  if(dup) warns.push({m:`Stand ${d.STANDID} already has a plot ${d.PLOTNUM}.`,f:"PLOTNUM"});
   return {blocks,warns};
 }
+/* Take the crew straight to the field the message is about: open its section, scroll it into
+   view, highlight it, and open the picker for a dropdown so it can be filled on the spot. */
+function gotoField_(id){
+  if(!id) return false;
+  const el=$(id); if(!el) return false;
+  const sec=el.closest("details.sec"); if(sec) sec.open=true;
+  try{ closeMap(); }catch(e){}   // if the map is up, drop back to the card first
+  setTimeout(()=>{
+    el.scrollIntoView({behavior:"smooth",block:"center"});
+    if(el.tagName==="SELECT"||el.tagName==="INPUT"){
+      el.classList.add("needs-entry");
+      el.addEventListener("change",()=>{ if(el.value) el.classList.remove("needs-entry"); },{once:true});
+      try{ el.focus({preventScroll:true}); }catch(e){}
+    }
+  },120);
+  return true;
+}
 function showValidate(blocks,warns,onProceed){
+  const txt=o=>typeof o==="string"?o:(o&&o.m)||"";
+  const fld=o=>(o&&typeof o==="object"&&o.f)||"";
   $("validateTitle").textContent = blocks.length ? "Can't submit yet" : "Before you submit";
   $("validateBody").innerHTML =
-    blocks.map(m=>`<div class="v-item block"><span class="ic">⛔</span><span>${esc(m)}</span></div>`).join("") +
-    warns.map(m=>`<div class="v-item warn"><span class="ic">⚠️</span><span>${esc(m)}</span></div>`).join("");
+    blocks.map(o=>`<div class="v-item block"><span class="ic">⛔</span><span>${esc(txt(o))}</span></div>`).join("") +
+    warns.map(o=>`<div class="v-item warn"><span class="ic">⚠️</span><span>${esc(txt(o))}</span></div>`).join("");
+  const first=[...blocks,...warns].map(fld).find(Boolean)||"";
   const acts=$("validateActions"); acts.innerHTML="";
   const back=document.createElement("button"); back.className="btn ghost"; back.type="button";
-  back.textContent = blocks.length ? "OK" : "Go back"; back.onclick=closeValidate; acts.appendChild(back);
+  back.textContent = first ? "Fill it in" : (blocks.length ? "OK" : "Go back");
+  back.onclick=()=>{ closeValidate(); gotoField_(first); }; acts.appendChild(back);
   if(onProceed && !blocks.length){ const go=document.createElement("button"); go.className="btn submit"; go.type="button";
     go.textContent="Submit anyway"; go.onclick=()=>{ closeValidate(); onProceed(); }; acts.appendChild(go); }
   $("validateModal").style.display="flex";
@@ -3232,9 +3266,15 @@ function importBackup(file){
 const PETT={"Ap":[3.001,-7.643,0.634,134.264,0.0043336],"Ab":[3.001,-7.643,0.634,134.264,0.0043336],"Ag":[3.001,-7.643,0.634,134.264,0.0043336],"Aw":[3.001,-7.643,0.634,134.264,0.0043336],"Bb":[3.28,-9.964,1.877,101.376,0.0043336],"Bd":[3.128,-8.648,0.948,122.377,0.0043336],"Be":[3.071,-7.073,0.959,102.047,0.0043336],"Bf":[3.152,-10.924,2.139,91.9277,0.004331],"Bn":[3.31,-10.764,1.046,117.043,0.0043336],"Bt":[3.001,-7.643,0.634,134.264,0.0043336],"Bw":[3.1,-9.964,2.222,91.5619,0.0043218],"By":[3.262,-13.837,1.449,105.075,0.0043119],"Cb":[3.31,-10.764,1,100,0.0043336],"Ce":[3.075,-13.299,4.167,74.6455,0.0043298],"Cp":[3.28,-9.964,1.877,101.376,0.0043336],"El":[3.28,-9.964,0.634,134.264,0.0043336],"Ff":[3.513,-17.376,1.44,104.303,0.0043218],"He":[2.705,-5.454,1.112,106.71,0.0043298],"Hi":[3.31,-10.764,1.046,117.043,0.0043336],"Iw":[3.28,-9.964,1.877,101.376,0.0043336],"La":[2.95,-7.182,1.588,101.62,0.004331],"Lb":[3.28,-9.964,1,100,0.0043336],"Mh":[3.2,-10.764,1.046,117.043,0.0043336],"Mm":[3.2,-10.764,1.046,117.043,0.0043336],"Mr":[3.2,-10.764,1.046,117.043,0.0043336],"Ms":[3.2,-10.764,1.046,117.043,0.0043336],"Ob":[3.055,-9.569,1.512,102.565,0.0043336],"Or":[3.055,-9.569,1.512,102.565,0.0043336],"Pj":[3.209,-11.758,0.897,106.223,0.0043313],"Po":[3.1,-9.341,-0.312,133.106,0.0043405],"Pr":[3.395,-13.281,0.71,108.387,0.0043313],"Ps":[3.209,-11.758,0.897,106.223,0.0043313],"Pw":[3.5,-15.125,0.691,110.856,0.0043188],"Sblu":[3.25,-17.376,1.44,104.303,0.0043218],"Sw":[3.2,-17.376,1.44,104.303,0.0043218],"Sn":[3.25,-17.376,1.44,104.303,0.0043218],"Ta":[2.991,-7.182,1.588,101.62,0.0043264],"Wi":[3.2,-9.341,-0.312,133.106,0.0043405],"Wn":[3.31,-10.764,1.046,117.043,0.0043336],"Pa":[3.395,-13.281,0.71,108.387,0.0043313],"Pt":[3.1,-9.341,-0.312,133.106,0.0043405],"Pb":[3.1,-9.341,-0.312,133.106,0.0043405],"Pg":[3.1,-9.341,-0.312,133.106,0.0043405]};
 const PETT_SOFT=new Set(["Pw","Pr","Pj","Ps","Pa","Sw","Sb","Sn","Bf","He","Ce","La","Ta"]); // conifers, for defaulting
 const PETT_SKIP=new Set(["Sng","CWD","CAV"]);   // habitat features — no merchantable volume
+/* Selectable species with no Bonnor & Magnussen set of their own — mapped to the nearest
+   congener that does have one, so the app and the Sheet agree. Sb/Ow/Cc are placeholders:
+   replace with true coefficients when the Petawawa workbook is to hand. Mn is the app's
+   dropdown code for Manitoba maple; the authoritative Ontario code is Mm. */
+const PETT_ALIAS={"Sb":"Sw","Ow":"Or","Cc":"Cb","Mn":"Mm"};
 const M3_TO_CORDS=1/5.929;
 function pettCoef(sp){ if(PETT[sp]) return PETT[sp]; if(!sp||PETT_SKIP.has(sp)) return null;
-  return PETT_SOFT.has(sp)?PETT["Pr"]:PETT["Mh"]; }   // not in list → Pr (conifer) / Mh (hardwood)
+  if(PETT_ALIAS[sp]&&PETT[PETT_ALIAS[sp]]) return PETT[PETT_ALIAS[sp]];
+  return PETT_SOFT.has(sp)?PETT["Pr"]:PETT["Mh"]; }   // still not in list → Pr (conifer) / Mh (hardwood)
 function pettVol(sp,dbh){ if(!isFinite(dbh)||dbh<=0) return 0; const c=pettCoef(sp); if(!c) return 0;
   const H=1.3*Math.exp(c[0]+c[1]/dbh); return c[4]*dbh*dbh/(c[2]+c[3]/H); }   // m³, one tree
 function plotTrees(p){ const t=[]; for(let i=1;i<=28;i++){ const sp=p["T"+i+"SP"]||"", s=parseFloat(p["T"+i+"S"]);
@@ -5291,15 +5331,26 @@ function clearRefFiles(){
   try{ STORE&&STORE.removeItem("fi_reffiles"); }catch(e){}
   updateLayerStatus(); renderLayerVis_(); toast("Reference layers removed");
 }
+// Find a plot-number value on an imported reference point (the point grid usually carries one).
+function refPlotNum_(pr){
+  if(!pr) return "";
+  const keys=Object.keys(pr);
+  const norm=k=>String(k).replace(/[\s_#().-]/g,"").toLowerCase();
+  let k=keys.find(x=>/^(plotnum|plotno|plotnumber|plotid|plot)$/.test(norm(x)));
+  if(!k) k=keys.find(x=>/^(pointnum|pointno|point|station|stn|ptnum|pt|num|number|id)$/.test(norm(x)));
+  if(k && pr[k]!=null && String(pr[k]).trim()!=="") return String(pr[k]).trim();
+  return "";
+}
 function renderRef(gj){
   if(!refLayer) return 0; const cols=Array.isArray(gj)?gj:[gj]; let n=0; const b=[];
   const pal=["#ff7043","#80cbc4","#ffe082","#ce93d8","#a5d6a7","#90caf9"]; let ci=0;
   cols.forEach(fc=>{ if(!fc||!fc.features) return; const col=pal[ci++%pal.length];
     fc.features.forEach(f=>{ const g=f.geometry, pr=f.properties||{}; if(!g) return;
       const label=Object.values(pr).filter(v=>v!=null&&v!=="").slice(0,2).join(" — ")||"feature";
+      const pn=refPlotNum_(pr).replace(/'/g,"\\'");
       const addPt=(lon,lat)=>{ if(!isFinite(lat)||!isFinite(lon)) return;
         L.circleMarker([lat,lon],{radius:6,color:"#fff",weight:1.5,fillColor:"#ff7043",fillOpacity:.95}).addTo(refLayer)
-         .bindPopup(`<div style="font-family:monospace;font-size:11px;color:#16271a"><b>${esc(label)}</b><br>${lat.toFixed(5)}, ${lon.toFixed(5)}<br><a href="javascript:void(0)" onclick="placeFromRef(${lat},${lon})">Place plot here ›</a></div>`);
+         .bindPopup(`<div style="font-family:monospace;font-size:11px;color:#16271a"><b>${esc(label)}</b><br>${lat.toFixed(5)}, ${lon.toFixed(5)}${pn?`<br>plot ${esc(pn)}`:""}<br><a href="javascript:void(0)" onclick="placeFromRef(${lat},${lon},'${pn}')">Place plot here ›</a></div>`);
         refLabels.push({lat:lat,lng:lon,props:pr});
         b.push([lat,lon]); n++; };
       if(g.type==="Point") addPt(g.coordinates[0],g.coordinates[1]);
@@ -5345,7 +5396,12 @@ function pickRefField(){
   renderRefLabels();
 }
 function setRefField(k){ refLabelField=k; renderRefLabels(); }
-function placeFromRef(lat,lon){ setLocation(lat,lon,"reference point"); }
+function placeFromRef(lat,lon,pn){
+  setLocation(lat,lon,"reference point");
+  // Take the plot number from the reference point (stand & tract still come from the compartment polygon).
+  if(pn && $("PLOTNUM")){ addablePlotNum_(pn); setField($("PLOTNUM"), pn); }
+}
+function addablePlotNum_(v){ const sel=$("PLOTNUM"); if(!sel||sel.tagName!=="SELECT") return; v=String(v); if(![...sel.options].some(o=>o.value===v)) sel.insertAdjacentHTML("beforeend",`<option value="${esc(v)}">${esc(v)}</option>`); }
 function gpxToGeo(text){ const xml=new DOMParser().parseFromString(text,"application/xml"); const feats=[];
   xml.querySelectorAll("wpt").forEach(w=>{ const lat=+w.getAttribute("lat"),lon=+w.getAttribute("lon"); const nm=w.querySelector("name");
     if(isFinite(lat)&&isFinite(lon)) feats.push({type:"Feature",properties:{note:nm?nm.textContent:""},geometry:{type:"Point",coordinates:[lon,lat]}}); });
