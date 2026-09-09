@@ -995,7 +995,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v213";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v214";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1121,7 +1121,12 @@ function sppPickerOpen_(ev){
   }
   $("sppPickerTitle").textContent=_sppShrub?"Choose a shrub":"Choose a species";
   $("sppPickerSearch").value=""; $("sppPicker").style.display="flex"; renderSppPicker_(_sppItems);
-  setTimeout(()=>$("sppPickerSearch").focus(),40);
+  /* Don't grab focus on a touch device. iOS ignores a programmatic focus() that isn't inside a user
+     gesture, so the keyboard never appeared there; Android honours it and throws the keyboard up over
+     the species list. The list is meant to be tapped — tapping the filter box still opens the keyboard
+     for anyone who wants to type. Focus is only taken where there's a real pointer (a desktop browser). */
+  const finePointer = !!(window.matchMedia && window.matchMedia("(pointer:fine)").matches);
+  if(finePointer) setTimeout(()=>{ const b=$("sppPickerSearch"); if(b) b.focus(); },40);
 }
 function renderSppPicker_(items){
   $("sppPickerList").innerHTML = items.length ? items.map(o=>
