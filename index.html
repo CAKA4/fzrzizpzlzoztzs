@@ -995,7 +995,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v211";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v213";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3409,6 +3409,13 @@ function plotTrees(p){ const t=[]; for(let i=1;i<=28;i++){ const sp=p["T"+i+"SP"
   if(p["T"+i+"SP"]||p["T"+i+"S"]) t.push({sp,dbh:isFinite(s)?s:null}); } return t; }
 function treeBA(dbh){ return Math.PI/4*Math.pow(dbh/100,2); }   // m² per tree
 const HAB_LABEL={Sng:"Snags",CWD:"Coarse woody debris",CAV:"Cavity trees"};
+// Mirrors ageValue_ in Code.gs — keep the two in step or the phone and the Sheet will disagree on age.
+function ageValue_(v){
+  if(v==null||v==="") return null;
+  if(typeof v==="number") return (isFinite(v)&&v>0)?v:null;
+  const m=String(v).match(/-?\d+(\.\d+)?/); if(!m) return null;
+  const n=parseFloat(m[0]); return (isFinite(n)&&n>0)?n:null;
+}
 function computeStand(plots, includeSmall){
   let baSum=0,stemsSum=0,dbh2=0,dbhN=0,ageSum=0,ageN=0,htSum=0,htN=0,volSum=0; const spBA={};
   const hab={}; PETT_SKIP.forEach(h=>hab[h]={count:0,baSum:0,stemsSum:0});
@@ -3417,7 +3424,9 @@ function computeStand(plots, includeSmall){
       else { if(!includeSmall && !(t.dbh && t.dbh>=10)) return;   // default: live metrics use trees ≥10 cm DBH only
         baSum+=BAF; if(t.dbh){ const ef=BAF/treeBA(t.dbh); stemsSum+=ef; dbh2+=t.dbh*t.dbh; dbhN++; if(t.dbh>=10) volSum+=pettVol(t.sp,t.dbh)*ef; } if(t.sp) spBA[t.sp]=(spBA[t.sp]||0)+BAF; }   // volume always trees ≥10 cm
     });
-    const a=parseFloat(p.AGECORED); if(isFinite(a)){ ageSum+=a; ageN++; } const ht=parseFloat(p.HT); if(isFinite(ht)){ htSum+=ht; htN++; } });
+    // same rule as the Sheet: the entered age wins, tolerant of "80 yrs" and the like
+    let a=ageValue_(p.AGECORED); if(a==null) a=ageValue_(p.AGE); if(a==null) a=ageValue_(p.AGECLASS);
+    if(a!=null){ ageSum+=a; ageN++; } const ht=parseFloat(p.HT); if(isFinite(ht)){ htSum+=ht; htN++; } });
   const np=plots.length, baHa=np?baSum/np:0, stemsHa=np?stemsSum/np:0, qmd=dbhN?Math.sqrt(dbh2/dbhN):0;
   const meanAge=ageN?ageSum/ageN:null, meanHt=htN?htSum/htN:null, volHa=np?volSum/np:0;
   const tot=Object.values(spBA).reduce((a,b)=>a+b,0);
