@@ -701,7 +701,7 @@
           </select>
         </div>
         <button type="button" id="crewRouteBtn" onclick="closeLayersMenu();toggleCrewRoutes()">🧭 Show crew routes (from Sheet)</button>
-        <button type="button" id="liveBtn" onclick="closeLayersMenu();liveStatus_()">📡 Live location — always on</button>
+
       </div>
     </details>
 
@@ -716,7 +716,6 @@
         <button type="button" onclick="closeLayersMenu();exportPolyShp()">⤓ Export area polygon (Shapefile · UTM 17N)</button>
         <button type="button" onclick="closeLayersMenu();syncPolys()">↻ Sync areas to Sheet &amp; recalc plots</button>
         <button type="button" onclick="closeLayersMenu();clearTrack()">✕ Clear track log</button>
-        <button type="button" id="pfClearBtn" style="display:none" onclick="closeLayersMenu();pfClear_()">✕ Clear crew &amp; date highlight</button>
       </div>
     </details>
     </div>
@@ -741,6 +740,7 @@
     <span><i style="background:#e8b84b;border-radius:50%"></i>Plot</span>
     <span><i style="background:transparent;border:1px solid #8fd18a"></i>Stand</span>
     <span id="legImported" style="display:none"><i style="background:#4aa3e0;border-radius:50%"></i>Imported</span>
+    <span id="liveState" style="margin-top:2px"></span>
     <span id="legDone" style="display:none"><i style="background:#37c26b;border-radius:50%"></i>Done ✓</span>
     <span id="legTodo" style="display:none"><i style="background:transparent;border:2px dashed #ff8c1a;border-radius:50%"></i>To do / empty</span>
   </div>
@@ -771,6 +771,8 @@
     <button type="button" onclick="openSearch()" title="Search stands / compartments, or filter plots by attribute">🔎 Search</button>
     <button type="button" onclick="openMyLabel()" title="Label plot dots by analysis">🏷 Label</button>
     <button type="button" onclick="openMapExport()" title="Export plots / compartments + analysis to shapefile">📤 Export</button>
+    <button type="button" id="crewWhereBtn" onclick="toggleCrewWhere()" title="Show or hide where the crew are, and where they were last seen">👤 Crew</button>
+    <button type="button" id="pfClearBtn" style="display:none;background:#3a1030;border-color:#ff36c0;color:#ffd7f2" onclick="pfClear_()" title="Remove the crew &amp; date highlight">✕ Clear highlight</button>
   </div>
   <div class="map-drop" id="mapDrop">
     <button class="dropbtn" type="button" onclick="dropAtMe()">＋ Drop plot at my location</button>
@@ -1004,7 +1006,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v218";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v221";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2988,14 +2990,16 @@ function pfShowOnMap_(){
         L.circleMarker([la,lo],{renderer:pinCanvas_(),radius:9,color:"#ff36c0",weight:3,fill:false,opacity:.95}).addTo(pfLayer_);
         pts.push([la,lo]); });
       if(pts.length) fmap.fitBounds(L.latLngBounds(pts).pad(0.2),{maxZoom:17});
-      const b=$("pfClearBtn"); if(b) b.style.display="";
-      toast(`${hits.length} plot${hits.length>1?"s":""} ringed — clear from + Layers`);
+      pfChip_(true);
+      toast(`${hits.length} plot${hits.length>1?"s":""} ringed — tap ✕ Clear highlight to remove`);
     }catch(e){}
   },260);
 }
 let pfLayer_=null;
 function pfClear_(){ if(pfLayer_) pfLayer_.clearLayers();
   const b=$("pfClearBtn"); if(b) b.style.display="none"; toast("Highlight cleared"); }
+// keep the chip hidden until there is actually something to clear
+function pfChip_(on){ const b=$("pfClearBtn"); if(b) b.style.display = on ? "" : "none"; }
 function fetchCrew(silent){
   if(!connected || isOffline()) return;
   const cb="__crew"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?";
@@ -3091,9 +3095,15 @@ function renderCrewPlots(rows, silent){
 /* ---------- opt-in live crew location (shares while map is open; map GPS already running) ---------- */
 function agoStr_(t){ const s=Math.max(0,Math.round((Date.now()-t)/1000)); if(s<60) return "just now"; const m=Math.round(s/60); if(m<60) return m+" min ago"; const h=Math.floor(m/60); return h+"h "+(m%60)+"m ago"; }
 function clockStr_(t){ const d=new Date(t); let h=d.getHours(), m=d.getMinutes(); const ap=h<12?"AM":"PM"; h=h%12||12; return h+":"+(m<10?"0":"")+m+" "+ap; }
-function setLiveBtn(){ const b=$("liveBtn"); if(!b) return;
-  b.textContent = !cruiserEmail ? "📡 Live location — add your email to share"
-                : (liveBroadcastTimer ? "📡 Live location — sharing" : "📡 Live location — on (waiting for signal)"); }
+/* No button to press — sharing can't be turned off — so the state sits in the map legend where the
+   crew already look, and only speaks up when something needs doing (a missing email). */
+function setLiveBtn(){
+  const el=$("liveState"); if(!el) return;
+  if(!cruiserEmail){ el.innerHTML=`<span style="color:#e8a33a">📡 add your email to share</span>`; el.onclick=openCruiser; el.style.cursor="pointer"; return; }
+  el.onclick=null; el.style.cursor="";
+  el.innerHTML = liveBroadcastTimer ? `<span style="color:#7fd0a0">📡 sharing</span>`
+                                    : `<span style="color:#8fae95">📡 waiting for signal</span>`;
+}
 /* Sharing is no longer something to switch on or off, so this only explains the current state.
    The crew are told on first run that position and plots are shared while the map is open. */
 /* Sharing can't be turned off, so the crew are told once, plainly, what is being shared and when. */
@@ -3102,8 +3112,7 @@ function sharingNotice_(){
   showInfoSheet_("Your crew can see this map",
     `<div style="color:#a9c9b0;font-size:13px;line-height:1.55">`+
     `<p style="margin:0 0 8px">Plots submitted by everyone on the project appear on this map, so you can see what's already been done before walking to a plot. It refreshes about once a minute.</p>`+
-    `<p style="margin:0 0 8px">While the map is open, your own position is shared with the crew the same way — useful if anyone needs to find you. It stops when you leave the map, and nothing is shared while you're out of signal.</p>`+
-    `<p style="margin:0">Speak to whoever manages the spreadsheet if you have any concerns about this.</p></div>`,
+    `<p style="margin:0">While the map is open, your own position is shared with the crew the same way — useful if anyone needs to find you. It stops when you leave the map, and nothing is shared while you're out of signal.</p></div>`,
     ()=>{ try{ if(STORE) STORE.setItem("fi_share_notice","1"); }catch(e){} });
 }
 function liveStatus_(){
@@ -3139,9 +3148,37 @@ function pollLive(){
   sc.src=SCRIPT_URL+sep+"action=presence&callback="+cb;
   document.body.appendChild(sc);
 }
+/* Crew positions are still collected the whole time — this only governs whether they're drawn.
+   The markers carry permanent tooltips and the legend sits over the map, so left on all day they
+   bury the plots underneath. Off by default; the chip remembers its state between sessions. */
+let crewWhereOn=false;
+try{ if(STORE && STORE.getItem("fi_crew_where")==="1") crewWhereOn=true; }catch(e){}
+function setCrewWhereBtn(){
+  const b=$("crewWhereBtn"); if(!b) return;
+  b.textContent = crewWhereOn ? ("👤 Crew"+(_crewSeen?" ("+_crewSeen+")":"")) : "👤 Crew";
+  b.style.background = crewWhereOn ? "#123a1c" : "";
+  b.style.borderColor = crewWhereOn ? "#2f7a44" : "";
+}
+function toggleCrewWhere(){
+  crewWhereOn=!crewWhereOn;
+  try{ if(STORE) STORE.setItem("fi_crew_where", crewWhereOn?"1":"0"); }catch(e){}
+  setCrewWhereBtn();
+  if(!crewWhereOn){
+    if(liveLayer) liveLayer.clearLayers();
+    const el=$("liveLegend"); if(el){ el.style.display="none"; el.innerHTML=""; }
+    toast("Crew positions hidden");
+  } else {
+    renderLive(_crewLast||[]);          // draw straight away from the last poll
+    pollLive();                          // and refresh
+    toast("Showing where the crew are");
+  }
+}
+let _crewLast=[], _crewSeen=0;
 function renderLive(crew){
   if(!liveLayer) return;
+  _crewLast=crew||[];
   liveLayer.clearLayers();
+  if(!crewWhereOn){ const el0=$("liveLegend"); if(el0){ el0.style.display="none"; el0.innerHTML=""; } setCrewWhereBtn(); return; }
   const me=(cruiserEmail||"").trim().toLowerCase();
   const others=crew.filter(c=>String(c.email||"").trim().toLowerCase()!==me && isFinite(c.lat) && isFinite(c.lon));
   others.sort((a,b)=>(Date.parse(b.t)||0)-(Date.parse(a.t)||0));   // freshest first
@@ -3168,6 +3205,7 @@ function renderLive(crew){
   if(legOld.length) html+=`<div class="lh"${legLive.length?' style="margin-top:6px"':''}>Last known</div>`+legOld.map(l=>`<div class="lr lr-old"><i style="background:${l.col}"></i><b>${esc(l.who)}</b><span>${esc(l.info)}</span></div>`).join("");
   if(!html) html=`<div class="lh">Live crew</div><div class="lr" style="color:#9bb6a3">No one else sharing yet</div>`;
   el.innerHTML=html; el.style.display="block";
+  _crewSeen=legLive.length+legOld.length; setCrewWhereBtn();
 }
 
 /* ---------- show other crews' cruise routes from the Sheet ---------- */
@@ -3902,7 +3940,7 @@ function resumeSharing_(){
     liveBroadcastTimer=setInterval(broadcastLive, LIVE_MS);
     livePollTimer=setInterval(pollLive, LIVE_MS);
   }
-  setCrewBtn(); setCrewRouteBtn(); setLiveBtn();
+  setCrewBtn(); setCrewRouteBtn(); setLiveBtn(); setCrewWhereBtn();
 }
 function closeMap(){ rememberMapView_(); $("mapView").style.display="none"; document.body.classList.remove("map-open"); stopMapGPS(); if(crewTimer){ clearInterval(crewTimer); crewTimer=null; } if(crewRoutesTimer){ clearInterval(crewRoutesTimer); crewRoutesTimer=null; }
   if(liveOn) pauseLive_();   // pause, don't switch off: resumeSharing_ picks it back up on reopen
