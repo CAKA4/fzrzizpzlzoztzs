@@ -2,7 +2,7 @@
    © 2026 Silv-Econ Ltd. All rights reserved. Proprietary — no license granted.
    Caches the app shell + map libraries so the form (and map shell) open with no signal
    after the first online visit. Bump CACHE when you change index.html so devices update. */
-const CACHE = "fi-plotcard-v221";
+const CACHE = "fi-plotcard-v222";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 // Aerial imagery tiles, kept in their own cache so an app update never wipes them: whatever
 // ground the crew panned over while in signal stays viewable back in the bush. Imagery doesn't

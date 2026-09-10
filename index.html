@@ -1006,7 +1006,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v221";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v222";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -4532,6 +4532,7 @@ function plotCardHtml_(p){
   let pc=""; const np=Array.isArray(p._photos)?p._photos.length:(pcHas_(p.PHOTONUM)?pcVal_(p.PHOTONUM):"");
   if(pcHas_(p.PHOTONUM)) pc+=pcRow_("Photo #", pcVal_(p.PHOTONUM));
   if(pcHas_(p.COMMENT)) pc+=`<div style="padding:4px 0;color:#e8f0e6">${esc(pcVal_(p.COMMENT))}</div>`;
+  pc+=`<div id="pcPhotos" style="margin-top:6px;display:flex;gap:5px;flex-wrap:wrap"></div>`;
 
   return `<div style="font-size:14px">
     <div style="background:#14251a;border:1px solid #274b30;border-radius:10px;padding:10px;margin-bottom:6px">
@@ -4549,11 +4550,48 @@ function plotCardHtml_(p){
     ${pcSection_("Photo & comment", pc)}
   </div>`;
 }
+/* Photos on the plot card. Two sources, because a plot can reach this card two ways:
+     · taken on this phone  → the image is in the device's photo store, works with no signal
+     · restored from Sheet  → only filenames and Drive links came back, so fall back to Drive
+   Filled in after the card is on screen, since reading the device store is asynchronous. Nothing is
+   drawn if neither source yields anything, rather than leaving empty frames on the card. */
+function driveIdsFrom_(p){
+  const ids=[];
+  String(p.PHOTO_LINKS||"").split(/[;,\s]+/).forEach(u=>{
+    const m=String(u).match(/[-\w]{25,}/); if(m && ids.indexOf(m[0])<0) ids.push(m[0]);
+  });
+  return ids.slice(0,4);
+}
+async function pcFillPhotos_(p){
+  const box=$("pcPhotos"); if(!box) return;
+  const want=String(p.PHOTOS||"").split(/[;,]/).map(x=>x.trim()).filter(Boolean);
+  const cards=[];
+  // 1. anything still held on this device, matched by filename
+  try{
+    if(want.length){
+      const all = HAS_IDB ? await idbAll() : pendingMem.slice();
+      all.forEach(r=>{ if(r && r.data && want.indexOf(r.filename)>=0 && cards.length<4)
+        cards.push(`<img src="${r.data}" style="width:82px;height:82px;object-fit:cover;border-radius:6px;border:1px solid #5a7a62">`); });
+    }
+  }catch(e){}
+  // 2. otherwise whatever Drive links came back with the plot
+  if(!cards.length){
+    driveIdsFrom_(p).forEach(id=>{
+      const thumb=`https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w300`;
+      const full=`https://drive.google.com/file/d/${encodeURIComponent(id)}/view`;
+      cards.push(`<a href="${full}" target="_blank" rel="noopener"><img src="${thumb}" loading="lazy" `+
+        `onerror="this.parentNode.style.display='none'" `+
+        `style="width:82px;height:82px;object-fit:cover;border-radius:6px;border:1px solid #5a7a62"></a>`);
+    });
+  }
+  box.innerHTML=cards.join("");
+}
 function plotCard(i,isAudit){
   const p=isAudit?auditPlots[i]:saved[i]; if(!p) return;
   try{ fmap&&fmap.closePopup(); }catch(e){}
   _plotCardIdx=i; _plotCardAudit=!!isAudit;
   $("plotCardTitle").textContent=(isAudit?"Imported plot":"Plot")+" · "+(p.STANDID||"—")+" / "+(p.PLOTNUM||"?");
+  setTimeout(()=>{ pcFillPhotos_(p).catch(()=>{}); },0);
   $("plotCardBody").innerHTML=plotCardHtml_(p);
   $("plotCardActions").innerHTML = isAudit
     ? `<button class="btn ghost" type="button" onclick="closePlotCard()">Close</button><button class="btn submit" type="button" onclick="plotCardEdit()">🔍 Review / edit</button>`
