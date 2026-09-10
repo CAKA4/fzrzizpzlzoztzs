@@ -551,6 +551,9 @@
       <div><label>Ht-tree DBH <span class="code">HTDBH</span></label><select id="HTDBH"></select></div>
       <div><label>Ht-tree height — m <span class="code">HT</span></label><select id="HT"></select></div>
       <div><label>Age — cored, actual yrs <span class="code">AGECORED</span></label><select id="AGECORED"></select></div>
+      <!-- AGE is stamped from the compartment layer when the plot's GPS lands inside a polygon. It had no
+           input on the form, so autoStandTract_ had nothing to write to and collect() never sent it. -->
+      <div><label>Stand age — from compartment <span class="code">AGE</span></label><input id="AGE" type="number" inputmode="numeric" min="0" max="400" step="1" placeholder="auto from boundary"></div>
       <div><label>CAI <span class="code">CAI</span></label><select id="CAI"></select></div>
       <div class="full"><label>Crown closure — % of sky obscured by vegetation measured at eye level <span class="code">CC</span></label><select id="CC"></select></div>
     </div></div>
@@ -1006,7 +1009,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v222";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v223";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
