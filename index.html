@@ -184,6 +184,10 @@
   .dropbtn{ width:100%; padding:15px; border-radius:10px; border:1px solid #f0c860; background:#f2a83d; color:#1a1000;
     font:inherit; font-size:15px; font-weight:800; letter-spacing:.03em; cursor:pointer; box-shadow:0 4px 18px rgba(0,0,0,.55), 0 0 0 2px rgba(242,168,61,.25); }
   .standlabel{ font-family:var(--mono); font-size:11px; font-weight:700; color:#fff; text-shadow:0 1px 3px #000,0 0 6px #000; white-space:nowrap; }
+  /* Compartment popup: let the inner list do the scrolling so Leaflet doesn't grow the bubble to fit
+     26 analysis rows and swallow the map. */
+  .bpop .leaflet-popup-content{ margin:9px 11px; }
+  .bpop .leaflet-popup-content-wrapper{ max-height:46vh; }
   /* Saved-plot pins carry two label states. "full" is every ticked field, one per line; "min" is the
      bare plot number, used when zoomed out or when a full label would land on one already drawn. */
   .pdot{ background:#e8b84b; box-sizing:border-box; font:700 10px/1.3 'Courier New',monospace; color:#1a2e18; }
@@ -1020,7 +1024,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v226";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v228";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2990,17 +2994,20 @@ let _finderRows=[];
 function openPlotFinder(){
   showDataSheet_("Who did what, and when",
     `<div id="pfBody" style="font-size:13px;color:#cfe3d2">Loading plots…</div>`);
-  if(crewData && crewData.length){ _finderRows=crewData.slice(); pfRender_(); }
-  else if(!connected || isOffline()){ _finderRows=[]; pfRender_("Offline — open the map in signal once to load the crew's plots."); }
-  else pfFetch_();
+  // Always fetched fresh: crewData holds only the field set, so reusing it would hide imported plots.
+  if(!connected || isOffline()){
+    if(_finderRows.length) pfRender_(); else pfRender_("Offline — connect once to load the plots from the Sheet.");
+  } else pfFetch_();
 }
 function pfFetch_(){
   const cb="__pf"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?";
   const sc=document.createElement("script");
   const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
-  window[cb]=r=>{ _finderRows=((r&&r.plots)||[]).slice(); crewData=_finderRows.slice(); pfRender_(); clean(); };
+  window[cb]=r=>{ _finderRows=((r&&r.plots)||[]).slice(); pfRender_(); clean(); };
   sc.onerror=()=>{ clean(); pfRender_("Couldn't reach the Sheet — check your connection."); };
-  sc.src=SCRIPT_URL+sep+"action=plotanalysis&callback="+cb;
+  // set=all: the feed defaults to the field set only, which silently drops every imported plot
+  // and every collector who only ever did imported ones.
+  sc.src=SCRIPT_URL+sep+"action=plotanalysis&set=all&callback="+cb;
   document.body.appendChild(sc);
 }
 function pfWho_(r){ return (String(r.cruiser||"").trim()) || shortEmail_(r.email) || "Unknown"; }
@@ -3038,14 +3045,15 @@ function pfResults_(){
   const hits=pfMatch_();
   if(!hits.length){ out.innerHTML=`<div style="color:#8fae95">No plots match.</div>`; return; }
   // a count per person, then a count per day — the two things worth knowing at the end of a day
-  const byWho={}, byDay={};
-  hits.forEach(r=>{ byWho[pfWho_(r)]=(byWho[pfWho_(r)]||0)+1; const d=pfDay_(r)||"(no date)"; byDay[d]=(byDay[d]||0)+1; });
+  const byWho={}, byDay={}, bySrc={};
+  hits.forEach(r=>{ byWho[pfWho_(r)]=(byWho[pfWho_(r)]||0)+1; const d=pfDay_(r)||"(no date)"; byDay[d]=(byDay[d]||0)+1;
+    const sr=(r.src==="imported")?"Imported":"Collected in the app"; bySrc[sr]=(bySrc[sr]||0)+1; });
   const tbl=(title,obj)=>`<div style="margin-top:8px;color:#8fae95;font-size:11px">${title}</div>`+
     `<table style="width:100%;border-collapse:collapse;font-size:13px">`+
     Object.keys(obj).sort().map(k=>`<tr><td style="padding:3px 0">${esc(k)}</td><td style="text-align:right"><b>${obj[k]}</b></td></tr>`).join("")+`</table>`;
   out.innerHTML =
     `<div style="font-size:20px;font-weight:700;color:#eafae8">${hits.length} plot${hits.length>1?"s":""}</div>`+
-    tbl("By crew member",byWho)+tbl("By day",byDay)+
+    tbl("By crew member",byWho)+tbl("By day",byDay)+(Object.keys(bySrc).length>1?tbl("By source",bySrc):"")+
     `<button type="button" onclick="pfShowOnMap_()" style="margin-top:12px;width:100%;padding:11px;border-radius:9px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">📍 Show these ${hits.length} on the map</button>`;
 }
 function pfShowOnMap_(){
@@ -4385,8 +4393,9 @@ function renderBoundPopup_(){
   }
   const seg=(v,lab)=>`<span onclick="setBoundPopupView('${v}')" style="cursor:pointer;padding:2px 7px;border-radius:6px;font-size:11px;`+
     (_bpView===v?`background:#16271a;color:#eafae8`:`color:#5a7a62`)+`">${lab}</span>`;
-  const body=(rows?`<table style="border-collapse:collapse;margin-top:4px;font-size:12px">${rows}</table>`:"")+note;
-  L.popup({maxWidth:280,autoPan:true}).setLatLng(_bpLatLng)
+  const table=rows?`<table style="border-collapse:collapse;font-size:12px;width:100%">${rows}</table>`:"";
+  const body=`<div style="max-height:38vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${table}${note}</div>`;
+  L.popup({maxWidth:280,autoPan:true,className:"bpop"}).setLatLng(_bpLatLng)
     .setContent(`<div style="font-family:'Courier New',monospace;color:#16271a;line-height:1.4">`+
       `<b style="font-size:13px">${esc(title)}</b>`+
       `<div style="margin:3px 0 1px;border-top:1px solid #cfe0d2;padding-top:3px">${seg("attr","Layer")}${seg("analysis","Analysis")}</div>`+
