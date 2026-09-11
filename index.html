@@ -661,6 +661,17 @@
         <div class="map-field" id="mapFieldRow" style="display:none">
           <label>Stand name field</label><select id="standFieldSel" onchange="setStandField(this.value)"></select>
         </div>
+        <!-- Label compartments by their own attribute, or by what the plots inside them analyse to. -->
+        <div class="map-field" id="standLabModeRow" style="display:none">
+          <label>Label compartments by</label>
+          <select id="standLabModeSel" onchange="setStandLabelMode(this.value)">
+            <option value="attr">The layer's own stand name</option>
+            <option value="analysis">Analysed plot data</option>
+          </select>
+        </div>
+        <div class="map-field" id="standAnFieldRow" style="display:none">
+          <label>Analysis value</label><select id="standAnFieldSel" onchange="setStandAnField(this.value)"></select>
+        </div>
         <button type="button" id="sendAreasBtn" class="btn ghost" style="display:none;width:100%;margin:4px 0" onclick="pushCompartmentAreas_(false)">📐 Send compartment areas to Sheet</button>
         <div class="map-field" id="ageFieldRow" style="display:none">
           <label>Age field (auto-fills plot AGE)</label><select id="ageFieldSel" onchange="setAgeField(this.value)"></select>
@@ -1009,7 +1020,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v225";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v226";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -4020,7 +4031,7 @@ function initMap(){
   fmap.on("moveend zoomend",rememberMapView_);
   fmap.on("click",e=>{ if(selectMode){ addSelPoint(e.latlng); return; } if(polyMode){ addPolyPoint(e.latlng); return; } if(routeMode){ addRoutePoint(e.latlng); return; } if(measureMode){ addMeasurePoint(e.latlng); return; } if(placeMode){ placeAt(e.latlng.lat,e.latlng.lng); return; }
     if(nearbyPlotPopup_(e.latlng)) return;                    // a plot pin near the tap wins over the boundary
-    if(popupFields.length){ const bf=boundaryFeatureAt(e.latlng.lat,e.latlng.lng); if(bf) showBoundPopup(e.latlng,bf); } });
+    { const bf=boundaryFeatureAt(e.latlng.lat,e.latlng.lng); if(bf) showBoundPopup(e.latlng,bf); } });
   // Keep taps on the on-map controls from also being treated as map clicks (which in draw modes would drop a stray point).
   try{ ["measureBar","routeBar","polyBar","mapDrop","layersMenu"].forEach(id=>{ const el=$(id); if(el){ L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); } });
     const sc=document.querySelector(".layers-scroll"); if(sc){ L.DomEvent.disableClickPropagation(sc); L.DomEvent.disableScrollPropagation(sc); }
@@ -4198,6 +4209,14 @@ function pickStandField(){
     if(!ageField){ ageField = keys.find(k=>/^age$|ageclass|age_?cl|standage|stand_age|origin|yearorig|estage|age_?yr/i.test(k)) || ""; }
     asel.value=ageField||"";
     $("ageFieldRow").style.display = keys.length ? "flex" : "none";
+    // the analysis controls only make sense once a stand-name field is chosen to join on
+    const lm=$("standLabModeRow"), af=$("standAnFieldRow"), afs=$("standAnFieldSel"), lms=$("standLabModeSel");
+    if(lm) lm.style.display = standField ? "flex" : "none";
+    if(lms) lms.value = standLabelMode;
+    if(afs && !afs.options.length) afs.innerHTML = STAND_AN_OPTS.map(([k,l])=>`<option value="${k}">${esc(l)}</option>`).join("");
+    if(afs) afs.value = standAnField;
+    if(af) af.style.display = (standField && standLabelMode==="analysis") ? "flex" : "none";
+    if(standField && standLabelMode==="analysis") standAnFetch_(false);
   }
   const tsel=$("tractFieldSel");
   if(tsel){
@@ -4269,6 +4288,50 @@ function renderBoundaries(){
 }
 /* draw stand labels only for polygons in the current view and only when zoomed in enough — keeps
    the DOM-marker count tiny even with hundreds of compartments (the heavy part on mobile). */
+/* ── Analysed data on the compartments ─────────────────────────────────────────
+   The polygons carry whatever attributes came with the shapefile. What a cruiser usually wants to
+   see is what their own plots say about that compartment — so the Sheet's per-stand summary is
+   fetched and keyed by STANDID, and the labels and the tap popup can switch between the two.
+   The original attributes are never overwritten; this is a second view of the same polygon. */
+let standAn={}, standAnAt=0, standAnField="ba", standLabelMode="attr";
+try{ if(STORE){ standAnField=STORE.getItem("fi_standanfield")||"ba"; standLabelMode=STORE.getItem("fi_standlabmode")||"attr"; } }catch(e){}
+const STAND_AN_OPTS=[["ft","Forest type"],["comp","Comp (>9cm)"],["dom","Dominant species"],["sapComp","Sap comp"],
+  ["nplots","Plots"],["ba","BA m²/ha"],["qmd","QMD cm"],["stems","Stems/ha"],["age","Age"],["ht","Height m"],
+  ["cc","Canopy closure %"],["ags","% AGS"],["advComp","Adv comp"],["advSph","Adv sph"],
+  ["earlyComp","Early comp"],["earlySph","Early sph"],["regenClass","Regen class"],
+  ["vol","Volume m³/ha"],["cords","Cords/ha"],["plonVol","Plonski vol"],["stk","Stocking ratio"],
+  ["volRatio","Vol ratio"],["yieldGap","Yield gap"],["cavity","Cavity/ha"],["cwd","CWD/ha"],["snags","Snags/ha"]];
+function standAnFetch_(force){
+  if(!connected || isOffline()) return;
+  if(!force && standAnAt && Date.now()-standAnAt < 60000) return;   // a minute is plenty between rebuilds
+  const cb="__sa"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  window[cb]=r=>{ clean(); standAn={}; ((r&&r.stands)||[]).forEach(x=>{ standAn[String(x.stand).trim().toLowerCase()]=x; });
+    standAnAt=Date.now(); try{ renderLabels(); }catch(e){} };
+  sc.onerror=clean; setTimeout(()=>{ if(window[cb]) clean(); },12000);
+  sc.src=SCRIPT_URL+sep+"action=standanalysis&callback="+cb;
+  document.body.appendChild(sc);
+}
+function standAnFor_(f){
+  const p=f&&f.properties||{}; if(!standField) return null;
+  const k=String(p[standField]==null?"":p[standField]).trim().toLowerCase();
+  return k?(standAn[k]||null):null;
+}
+function standAnVal_(a,key){
+  if(!a) return "";
+  if(key==="baCls"||key==="stCls") return sizeClassStr_(a[key]);
+  const v=a[key]; return (v==null||v==="")?"":String(v)+(key==="age"&&a.ageEst?"*":"");
+}
+function setStandAnField(k){ standAnField=k||"ba"; try{ if(STORE) STORE.setItem("fi_standanfield",standAnField); }catch(e){}
+  standLabelMode="analysis"; try{ if(STORE) STORE.setItem("fi_standlabmode","analysis"); }catch(e){}
+  const m=$("standLabModeSel"); if(m) m.value="analysis";
+  standAnFetch_(true); renderLabels(); }
+function setStandLabelMode(v){ standLabelMode=(v==="analysis")?"analysis":"attr";
+  try{ if(STORE) STORE.setItem("fi_standlabmode",standLabelMode); }catch(e){}
+  const af=$("standAnFieldRow"); if(af) af.style.display = standLabelMode==="analysis" ? "flex" : "none";
+  if(standLabelMode==="analysis") standAnFetch_(true);
+  renderLabels();
+  toast(standLabelMode==="analysis"?"Compartments labelled by analysis":"Compartments labelled by the layer's own field"); }
 function renderLabels(){
   if(!flabelLayer) return; flabelLayer.clearLayers();
   if((typeof labelVis!=="undefined"&&labelVis.bound===false)) return;   // labels turned off
@@ -4277,7 +4340,13 @@ function renderLabels(){
   for(const L0 of boundLabels){
     if(n>=LABEL_MAX) break;
     if(!b.contains([L0.lat,L0.lng])) continue;
-    L.marker([L0.lat,L0.lng],{interactive:false,icon:L.divIcon({className:"",html:`<div class="standlabel">${esc(L0.name)}</div>`,iconSize:[60,16],iconAnchor:[30,8]})}).addTo(flabelLayer);
+    let txt=L0.name;
+    if(standLabelMode==="analysis"){
+      const a=standAn[String(L0.name).trim().toLowerCase()];
+      const v=standAnVal_(a,standAnField);
+      txt = v==="" ? L0.name+" ·—" : L0.name+" · "+v;   // no plots analysed there yet
+    }
+    L.marker([L0.lat,L0.lng],{interactive:false,icon:L.divIcon({className:"",html:`<div class="standlabel">${esc(txt)}</div>`,iconSize:[90,16],iconAnchor:[45,8]})}).addTo(flabelLayer);
     n++;
   }
 }
@@ -4292,17 +4361,36 @@ function boundaryFeatureAt(lat,lon){
   }
   return null;
 }
-function showBoundPopup(latlng,f){
+let _bpFeat=null, _bpLatLng=null, _bpView="attr";
+function showBoundPopup(latlng,f){ _bpFeat=f; _bpLatLng=latlng; renderBoundPopup_(); }
+function setBoundPopupView(v){ _bpView=v; if(v==="analysis") standAnFetch_(false); renderBoundPopup_(); }
+function renderBoundPopup_(){
+  const f=_bpFeat; if(!f) return;
   const p=f.properties||{};
   const title=(standField&&p[standField]!=null&&String(p[standField]).trim()!=="")?String(p[standField]):"Stand";
-  let rows="";
-  popupFields.forEach(k=>{ if(k===standField) return; const v=p[k];
-    if(v==null||String(v).trim()==="") return;
-    rows+=`<tr><td style="color:#5a7a62;padding:1px 10px 1px 0;vertical-align:top;white-space:nowrap">${esc(k)}</td><td style="padding:1px 0;vertical-align:top">${esc(String(v))}</td></tr>`; });
-  const body=rows?`<table style="border-collapse:collapse;margin-top:4px;font-size:12px">${rows}</table>`
-                 :`<div style="color:#5a7a62;margin-top:3px;font-size:11px">No values in the selected field(s) for this stand.</div>`;
-  L.popup({maxWidth:260,autoPan:true}).setLatLng(latlng)
-    .setContent(`<div style="font-family:'Courier New',monospace;color:#16271a;line-height:1.4"><b style="font-size:13px">${esc(title)}</b>${body}</div>`)
+  const row=(k,v)=>`<tr><td style="color:#5a7a62;padding:1px 10px 1px 0;vertical-align:top;white-space:nowrap">${esc(k)}</td><td style="padding:1px 0;vertical-align:top">${esc(String(v))}</td></tr>`;
+  let rows="", note="";
+  if(_bpView==="analysis"){
+    const a=standAnFor_(f);
+    if(a){
+      rows+=row("Plots",a.nplots);
+      STAND_AN_OPTS.forEach(([k,label])=>{ if(k==="nplots") return; const v=standAnVal_(a,k); if(v!=="") rows+=row(label,v); });
+    } else {
+      note=`<div style="color:#5a7a62;margin-top:3px;font-size:11px">No analysed plots in this compartment yet${(!connected||isOffline())?" (or you're offline)":""}.</div>`;
+    }
+  } else {
+    popupFields.forEach(k=>{ if(k===standField) return; const v=p[k];
+      if(v==null||String(v).trim()==="") return; rows+=row(k,String(v)); });
+    if(!rows) note=`<div style="color:#5a7a62;margin-top:3px;font-size:11px">No values in the selected field(s) for this stand.</div>`;
+  }
+  const seg=(v,lab)=>`<span onclick="setBoundPopupView('${v}')" style="cursor:pointer;padding:2px 7px;border-radius:6px;font-size:11px;`+
+    (_bpView===v?`background:#16271a;color:#eafae8`:`color:#5a7a62`)+`">${lab}</span>`;
+  const body=(rows?`<table style="border-collapse:collapse;margin-top:4px;font-size:12px">${rows}</table>`:"")+note;
+  L.popup({maxWidth:280,autoPan:true}).setLatLng(_bpLatLng)
+    .setContent(`<div style="font-family:'Courier New',monospace;color:#16271a;line-height:1.4">`+
+      `<b style="font-size:13px">${esc(title)}</b>`+
+      `<div style="margin:3px 0 1px;border-top:1px solid #cfe0d2;padding-top:3px">${seg("attr","Layer")}${seg("analysis","Analysis")}</div>`+
+      `${body}</div>`)
     .openOn(fmap);
 }
 
