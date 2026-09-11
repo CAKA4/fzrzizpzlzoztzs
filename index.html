@@ -1009,7 +1009,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v223";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v225";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1406,7 +1406,10 @@ function renderGround(selected){
   const all=[...GROUND_SPECIES]; customGround.forEach(s=>{ if(!all.some(x=>x.toLowerCase()===s.toLowerCase())) all.push(s); });
   sel.forEach(s=>{ if(!all.some(x=>x.toLowerCase()===s.toLowerCase())) all.push(s); });
   all.sort((a,b)=>a.toLowerCase().localeCompare(b.toLowerCase()));   // added plants file in alphabetically on this and every later plot
-  $("grndChips").innerHTML = all.map(n=>`<button type="button" class="chip-tog alpha${sel.has(n)?" on":""}" style="${chipTint_(n)}" data-name="${esc(n)}" onclick="toggleGround(this)">${esc(n)}</button>`).join("");
+  const isCustom=n=>customGround.some(x=>x.toLowerCase()===String(n).toLowerCase());
+  $("grndChips").innerHTML = all.map(n=>`<button type="button" class="chip-tog alpha${sel.has(n)?" on":""}" style="${chipTint_(n)}" data-name="${esc(n)}" onclick="toggleGround(this)">${esc(n)}`+
+    (isCustom(n)?`<span onclick="event.stopPropagation();editGround_('${esc(n).replace(/'/g,"&#39;")}')" style="margin-left:5px;opacity:.75">✎</span>`:"")+
+    `</button>`).join("");
   updateGroundCount();
 }
 // One tap records a measured zero across the cover trio. Left blank they stay "not recorded".
@@ -1418,6 +1421,58 @@ function coverNone(){
 function toggleGround(btn){ btn.classList.toggle("on"); updateGroundCount(); }
 function getGround(){ return [...$("grndChips").querySelectorAll(".chip-tog.on")].map(b=>b.getAttribute("data-name")); }
 function updateGroundCount(){ $("grndCount").textContent = getGround().length; }
+/* Correcting a plant someone added. A name nobody has recorded yet can be fixed or removed on the
+   spot — that is the usual case, a typo spotted a minute after typing it. Once it is in collected
+   data the rename has to rewrite those plots too, so the app hands it to FRI Tools rather than
+   half-doing it. The Sheet decides whether it is in use; the phone never assumes. */
+function editGround_(name){
+  if(!connected || isOffline()){ toast("Need a connection to correct the shared list",true); return; }
+  toast("Checking whether it's been used…");
+  const cb="__gu"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  window[cb]=r=>{ clean(); groundEditSheet_(name, (r&&r.used)||0); };
+  sc.onerror=()=>{ clean(); toast("Couldn't reach the Sheet",true); };
+  setTimeout(()=>{ if(window[cb]){ clean(); toast("No answer from the Sheet",true); } },9000);
+  sc.src=SCRIPT_URL+sep+"action=grndusage&name="+encodeURIComponent(name)+"&callback="+cb;
+  document.body.appendChild(sc);
+}
+function groundEditSheet_(name,used){
+  const esc2=v=>String(v).replace(/'/g,"&#39;");
+  if(used>0){
+    showInfoSheet_("Already recorded",
+      `<div style="color:#a9c9b0;font-size:13px;line-height:1.55">`+
+      `<p style="margin:0 0 8px"><b>${esc(name)}</b> is recorded on ${used} plot${used>1?"s":""}, so changing it here would leave those plots pointing at a name that no longer exists.</p>`+
+      `<p style="margin:0">Ask whoever manages the spreadsheet to use <b>FRI Tools → Rename a ground species</b>, which corrects the list and those plots together.</p></div>`);
+    return;
+  }
+  showInfoSheet_("Correct “"+name+"”",
+    `<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:10px">No plots have recorded this yet, so it can be fixed for the whole crew.</div>`+
+    `<input id="grndNewName" value="${esc(name)}" style="width:100%;padding:10px;border-radius:8px;background:#0f1e0d;color:#e8f0e6;border:1px solid #33623a;font:inherit;font-size:14px">`+
+    `<button type="button" onclick="groundDo_('rename','${esc2(name)}')" style="display:block;width:100%;text-align:left;padding:12px;margin:8px 0 5px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">✓ Save the new spelling</button>`+
+    `<button type="button" onclick="groundDo_('remove','${esc2(name)}')" style="display:block;width:100%;text-align:left;padding:12px;margin:0;border-radius:8px;border:1px solid #7a3a3a;background:#2a1212;color:#e8f0e6;font:inherit;font-size:13px">🗑 Remove it from the list</button>`);
+}
+function groundDo_(op,name){
+  const to = op==="rename" ? String(($("grndNewName")||{}).value||"").trim() : "";
+  if(op==="rename" && !to){ toast("Type the corrected name first",true); return; }
+  if(op==="rename" && to.toLowerCase()===name.toLowerCase()){ closeInfoSheet_(); return; }
+  closeInfoSheet_(); toast("Updating the shared list…");
+  const cb="__ge"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  window[cb]=r=>{ clean(); done_(r); };
+  sc.onerror=()=>{ clean(); toast("Couldn't reach the Sheet",true); };
+  setTimeout(()=>{ if(window[cb]){ clean(); toast("No answer from the Sheet",true); } },9000);
+  sc.src=SCRIPT_URL+sep+"action=groundedit&op="+encodeURIComponent(op)+"&name="+encodeURIComponent(name)+"&to="+encodeURIComponent(to)+"&callback="+cb;
+  document.body.appendChild(sc);
+  function done_(r){
+    if(!r || r.ok===false){ toast((r&&r.error)?r.error:"Couldn't update the shared list",true); return; }
+    // mirror it on this device so the chip is right straight away
+    customGround=customGround.filter(x=>x.toLowerCase()!==name.toLowerCase());
+    if(op==="rename" && !customGround.some(x=>x.toLowerCase()===to.toLowerCase())) customGround.push(to);
+    const cur=getGround().map(x=>x.toLowerCase()===name.toLowerCase()?(op==="rename"?to:null):x).filter(Boolean);
+    persistCustom(); renderGround(cur); updateGroundCount();
+    toast(op==="rename"?`Renamed to “${to}” for the whole crew`:`“${name}” removed for the whole crew`);
+  }
+}
 function addGroundOther(){
   const v=$("grndOther").value.trim(); if(!v) return;
   // remember the new plant so it's available on every plot and after a restart, and push it to the shared Sheet
@@ -4565,29 +4620,60 @@ function driveIdsFrom_(p){
   });
   return ids.slice(0,4);
 }
+/* Filename -> Drive id, fetched once per session. A plot restored from the Sheet carries filenames
+   but often no PHOTO_LINKS (that column is only filled when links are rebuilt), so this is what lets
+   the card find the images anyway. */
+let _photoIdx=null, _photoIdxTried=false;
+function photoIndex_(){
+  return new Promise(res=>{
+    if(_photoIdx) return res(_photoIdx);
+    if(_photoIdxTried || !connected || isOffline()) return res(null);
+    _photoIdxTried=true;
+    const cb="__px"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+    const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+    window[cb]=r=>{ _photoIdx=(r&&r.map)||{}; clean(); res(_photoIdx); };
+    sc.onerror=()=>{ clean(); res(null); };
+    setTimeout(()=>{ if(!_photoIdx){ clean(); res(null); } }, 8000);
+    sc.src=SCRIPT_URL+sep+"action=photoindex&callback="+cb;
+    document.body.appendChild(sc);
+  });
+}
+function photoTile_(id){
+  const thumb=`https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w300`;
+  const full=`https://drive.google.com/file/d/${encodeURIComponent(id)}/view`;
+  return `<a href="${full}" target="_blank" rel="noopener"><img src="${thumb}" loading="lazy" `+
+    `onerror="this.parentNode.innerHTML='&#128247; open';this.parentNode.style.cssText='display:inline-block;padding:8px 10px;border:1px solid #5a7a62;border-radius:6px;color:#8fd18a;font-size:12px'" `+
+    `style="width:82px;height:82px;object-fit:cover;border-radius:6px;border:1px solid #5a7a62"></a>`;
+}
+/* Three sources, in order: the image still on this device, the plot's own PHOTO_LINKS, then the
+   Photos index looked up by filename. If all three come up empty the card says why rather than
+   showing nothing — a blank space is indistinguishable from a bug. */
 async function pcFillPhotos_(p){
   const box=$("pcPhotos"); if(!box) return;
-  const want=String(p.PHOTOS||"").split(/[;,]/).map(x=>x.trim()).filter(Boolean);
+  const names=String(p.PHOTOS||"").split(/[;,]/).map(x=>x.trim()).filter(Boolean);
+  const nums=String(p.PHOTONUM||"").split(/[;,]/).map(x=>x.trim()).filter(Boolean);
   const cards=[];
-  // 1. anything still held on this device, matched by filename
   try{
-    if(want.length){
+    if(names.length){
       const all = HAS_IDB ? await idbAll() : pendingMem.slice();
-      all.forEach(r=>{ if(r && r.data && want.indexOf(r.filename)>=0 && cards.length<4)
+      all.forEach(r=>{ if(r && r.data && names.indexOf(r.filename)>=0 && cards.length<4)
         cards.push(`<img src="${r.data}" style="width:82px;height:82px;object-fit:cover;border-radius:6px;border:1px solid #5a7a62">`); });
     }
   }catch(e){}
-  // 2. otherwise whatever Drive links came back with the plot
-  if(!cards.length){
-    driveIdsFrom_(p).forEach(id=>{
-      const thumb=`https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w300`;
-      const full=`https://drive.google.com/file/d/${encodeURIComponent(id)}/view`;
-      cards.push(`<a href="${full}" target="_blank" rel="noopener"><img src="${thumb}" loading="lazy" `+
-        `onerror="this.parentNode.style.display='none'" `+
-        `style="width:82px;height:82px;object-fit:cover;border-radius:6px;border:1px solid #5a7a62"></a>`);
-    });
+  if(!cards.length) driveIdsFrom_(p).forEach(id=>cards.push(photoTile_(id)));
+  if(!cards.length && names.length){
+    const idx=await photoIndex_();
+    if(idx) names.slice(0,4).forEach(n=>{ if(idx[n]) cards.push(photoTile_(idx[n])); });
   }
-  box.innerHTML=cards.join("");
+  if(cards.length){ box.innerHTML=cards.join(""); return; }
+  if(!names.length && !nums.length){ box.innerHTML=""; return; }          // no photos on this plot at all
+  const why = !names.length
+    ? "the PHOTOS column is empty for this plot"
+    : (!connected || isOffline() ? "you're offline, and the image isn't on this device"
+       : "the photo isn't in the Sheet's Photos index");
+  box.innerHTML=`<div style="color:#8fae95;font-size:12px;line-height:1.4">`+
+    `${nums.length||names.length} photo${(nums.length||names.length)>1?"s":""} recorded, but none could be shown — ${esc(why)}.`+
+    `<br>Try FRI Tools → Data maintenance → Rebuild photo links.</div>`;
 }
 function plotCard(i,isAudit){
   const p=isAudit?auditPlots[i]:saved[i]; if(!p) return;
