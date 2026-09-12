@@ -10,7 +10,7 @@
 <meta name="googlebot" content="noindex, nofollow">
 <meta name="author" content="Silv-Econ Ltd.">
 <meta name="copyright" content="© 2026 Silv-Econ Ltd. All rights reserved.">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0e1311">
 <link rel="manifest" href="./manifest.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -32,7 +32,9 @@
   *{box-sizing:border-box}
   html,body{margin:0;padding:0}
   body{ font-family:var(--sans); color:var(--text); background:var(--bg);
-    font-size:16px; line-height:1.4; -webkit-text-size-adjust:100%; padding-bottom:122px; }
+    font-size:16px; line-height:1.4; -webkit-text-size-adjust:100%; text-size-adjust:100%;
+    touch-action:manipulation;   /* kills the double-tap-to-zoom gesture on the shell */
+    padding-bottom:122px; }
 
   .appbar{ position:sticky; top:0; z-index:20;
     background:linear-gradient(180deg,#16271d,#10191450 0%,#0e1311);
@@ -1024,7 +1026,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v228";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v230";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -4381,6 +4383,12 @@ function renderBoundPopup_(){
   if(_bpView==="analysis"){
     const a=standAnFor_(f);
     if(a){
+      if(a.notes){
+        const tag = a.notesSrc==="gemini" ? "Crew notes — AI summary" : "Crew notes";
+        note=`<div style="margin-top:5px;padding:6px 8px;background:#eef4ea;border-left:3px solid #7aa77f;border-radius:4px">`+
+          `<div style="font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:#5a7a62">${esc(tag)}</div>`+
+          `<div style="font-size:12px;color:#16271a;margin-top:2px">${esc(a.notes)}</div></div>`;
+      }
       rows+=row("Plots",a.nplots);
       STAND_AN_OPTS.forEach(([k,label])=>{ if(k==="nplots") return; const v=standAnVal_(a,k); if(v!=="") rows+=row(label,v); });
     } else {
@@ -4394,7 +4402,7 @@ function renderBoundPopup_(){
   const seg=(v,lab)=>`<span onclick="setBoundPopupView('${v}')" style="cursor:pointer;padding:2px 7px;border-radius:6px;font-size:11px;`+
     (_bpView===v?`background:#16271a;color:#eafae8`:`color:#5a7a62`)+`">${lab}</span>`;
   const table=rows?`<table style="border-collapse:collapse;font-size:12px;width:100%">${rows}</table>`:"";
-  const body=`<div style="max-height:38vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${table}${note}</div>`;
+  const body=`<div style="max-height:38vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${note}${table}</div>`;
   L.popup({maxWidth:280,autoPan:true,className:"bpop"}).setLatLng(_bpLatLng)
     .setContent(`<div style="font-family:'Courier New',monospace;color:#16271a;line-height:1.4">`+
       `<b style="font-size:13px">${esc(title)}</b>`+
@@ -4644,7 +4652,21 @@ function plotPopupHtml_(p,i){ return `<div style="font-family:'Courier New',mono
 // ---- Plot data card: a readable, grouped view of everything in a plot, opened by tapping its pin ----
 let _plotCardIdx=null, _plotCardAudit=false;
 const PLOTCARD_SITE_={TEXTURE:"Texture",MOISTURE:"Moisture",DEPTH:"Depth",TOPOGRAPHY:"Topography",ROCKINESS:"Rockiness",FLAG:"Flag",STBNDRY:"Stand boundary",ACCESS:"Access",HARVEST:"Harvest",RENEWAL:"Renewal",TENDING:"Tending",STICNEST:"Stick nest",CC:"Crown closure %"};
-const PLOTCARD_SAMPLE_={HTSPP:"Species",HTDBH:"DBH cm",HT:"Height m",AGECORED:"Age (cored) yr",CAI:"CAI"};
+const PLOTCARD_SAMPLE_={HTSPP:"Species",HTDBH:"DBH cm",HT:"Height m",
+  AGECORED:"Age (cored) yr",AGE:"Age (compartment) yr",AGECLASS:"Age class",CAI:"CAI"};
+/* Everything the named sections above already account for. Anything in the header that isn't in
+   here falls through to the catch-all section, so a field can't be silently missing from the card
+   just because nobody thought to list it. */
+function pcShownKeys_(){
+  const k=new Set(["STANDID","PLOTNUM","TRACT","DATE","CRUISER","CRUISER_EMAIL","X","Y","Z",
+    "HERBS","MOSS","GRASSEDG","GRNDSPEC","PHOTONUM","COMMENT","PHOTOS","PHOTO_LINKS"]);
+  [PLOTCARD_SAMPLE_,PLOTCARD_SAR_,PLOTCARD_PEST_,PLOTCARD_SITE_].forEach(o=>Object.keys(o).forEach(x=>k.add(x)));
+  for(let i=1;i<=28;i++) ["SP","S","Q","QL","LOGS"].forEach(x=>k.add("T"+i+x));
+  for(let i=1;i<=5;i++) ["ADRGNSP","ADRGNN","EARGNSP","EARGNN","SHRUBSP","SHRUBN"].forEach(x=>k.add(x+i));
+  return k;
+}
+const PLOTCARD_OTHER_LABEL_={INANALYSIS:"In the analysis",PLOTSRC:"Source",POLYNAME:"Compartment",
+  POLYAREA:"Compartment area ha",AREASRC:"Area source",BAF:"BAF",PHOTONUM2:"Photo #"};
 const PLOTCARD_SAR_={SAROSPEC:"Species at risk",DSV:"Dog-strangling vine",EUROBUCK:"European buckthorn",GARLMUST:"Garlic mustard",MANIMAPL:"Manitoba/Norway maple",POISIVY:"Poison ivy",INVASP:"Other invasive",INVAQUAN:"Other invasive amount"};
 const PLOTCARD_PEST_={PESTS:"Pests",PESTQUAN:"Pest severity",DISEASE:"Disease",DISEQUAN:"Disease severity",RPD:"Red pine decline"};
 function pcVal_(v){ return (v==null)?"":String(v).trim(); }
@@ -4683,6 +4705,12 @@ function plotCardHtml_(p){
   let pest=""; Object.keys(PLOTCARD_PEST_).forEach(k=>{ if(pcHas_(p[k])) pest+=pcRow_(PLOTCARD_PEST_[k], pcVal_(p[k])); });
   // Site & management
   let site=""; Object.keys(PLOTCARD_SITE_).forEach(k=>{ if(pcHas_(p[k])) site+=pcRow_(PLOTCARD_SITE_[k], pcVal_(p[k])); });
+  // Anything else the plot carries that no section above claimed
+  let other=""; try{
+    const shown=pcShownKeys_();
+    friHeader().forEach(k=>{ if(shown.has(k)) return; if(!pcHas_(p[k])) return;
+      other+=pcRow_(PLOTCARD_OTHER_LABEL_[k]||k, pcVal_(p[k])); });
+  }catch(e){}
   // Photo & comment
   let pc=""; const np=Array.isArray(p._photos)?p._photos.length:(pcHas_(p.PHOTONUM)?pcVal_(p.PHOTONUM):"");
   if(pcHas_(p.PHOTONUM)) pc+=pcRow_("Photo #", pcVal_(p.PHOTONUM));
@@ -4702,6 +4730,7 @@ function plotCardHtml_(p){
     ${pcSection_("SAR & invasives observed", sar)}
     ${pcSection_("Pest / disease", pest)}
     ${pcSection_("Site, soil & management", site)}
+    ${pcSection_("Other recorded fields", other)}
     ${pcSection_("Photo & comment", pc)}
   </div>`;
 }
