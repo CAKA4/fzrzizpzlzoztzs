@@ -857,6 +857,7 @@
         <button type="button" onclick="closeMore();openFullAnalysis('main')">📈 Full analysis — all tabs (view)</button>
         <button type="button" onclick="closeMore();openDataTable()">▦ View plot data table</button>
         <button type="button" onclick="closeMore();openPlotFinder()">🔎 Who did what, and when — find plots by crew &amp; date</button>
+        <button type="button" onclick="closeMore();openInventoryDesc()">📖 Inventory description (by tract)</button>
         <button type="button" onclick="closeMore();buildAllSummary()">🗂 Build Sheet summary — all plots</button>
       </details>
       <details class="mgroup"><summary>📤 Export &amp; share</summary>
@@ -1026,7 +1027,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v230";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v237";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2993,6 +2994,45 @@ function syncUnsentThenLabel_(k){
    and where were they. Reads the Sheet's per-plot feed (everyone's plots, not just this device's)
    and falls back to whatever is already cached when offline. */
 let _finderRows=[];
+/* ── Inventory description ─────────────────────────────────────────────────────
+   Written in the Sheet (one per tract, plus one covering everything) and read here. Kept on the
+   device after the first load so it can be reread in the bush with no signal — it is a page of prose
+   and the crew may well want it standing in the stand it describes. */
+let _descItems=[], _descPick=0;
+function openInventoryDesc(){
+  try{ if(STORE){ const c=STORE.getItem("fi_invdesc"); if(c) _descItems=JSON.parse(c)||[]; } }catch(e){}
+  showDataSheet_("Inventory description",
+    `<div id="idBody" style="font-size:13px;color:#cfe3d2">`+
+    (_descItems.length?"Loading the latest…":"Loading…")+`</div>`);
+  if(_descItems.length) idRender_();
+  if(!connected || isOffline()){ if(!_descItems.length) idRender_("Offline — connect once to load the description."); return; }
+  const cb="__id"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  window[cb]=r=>{ clean();
+    const items=((r&&r.items)||[]);
+    if(items.length){ _descItems=items; try{ if(STORE) STORE.setItem("fi_invdesc",JSON.stringify(items)); }catch(e){} }
+    idRender_(items.length?null:(_descItems.length?null:"Nothing written yet — in the Sheet, FRI Tools → Note summaries → Describe the whole inventory.")); };
+  sc.onerror=()=>{ clean(); idRender_(_descItems.length?null:"Couldn't reach the Sheet."); };
+  setTimeout(()=>{ if(window[cb]){ clean(); idRender_(_descItems.length?null:"No answer from the Sheet."); } },15000);
+  sc.src=SCRIPT_URL+sep+"action=inventorydesc&callback="+cb;
+  document.body.appendChild(sc);
+}
+function setDescPick(i){ _descPick=parseInt(i,10)||0; idRender_(); }
+function idRender_(err){
+  const box=$("idBody"); if(!box) return;
+  if(err){ box.innerHTML=`<div style="color:#e8a33a;line-height:1.5">${esc(err)}</div>`; return; }
+  if(!_descItems.length){ box.innerHTML=`<div style="color:#8fae95">Nothing written yet.</div>`; return; }
+  if(_descPick>=_descItems.length) _descPick=0;
+  const it=_descItems[_descPick];
+  const sel=_descItems.length>1
+    ? `<select onchange="setDescPick(this.value)" style="width:100%;padding:9px;border-radius:8px;background:#0f1e0d;color:#e8f0e6;border:1px solid #33623a;font:inherit;margin-bottom:8px">`+
+      _descItems.map((x,i)=>`<option value="${i}"${i===_descPick?" selected":""}>${esc(x.tract)}${x.ncomp?" — "+esc(String(x.ncomp))+" compartments":""}</option>`).join("")+`</select>`
+    : "";
+  box.innerHTML = sel +
+    `<div style="color:#5a7a62;font-size:11px;margin-bottom:6px">${esc(it.tract)}${it.when?" · written "+esc(it.when):""}</div>`+
+    `<div style="white-space:pre-wrap;line-height:1.55;color:#e8f0e6;font-size:13px">${esc(it.text)}</div>`+
+    `<div style="color:#5a7a62;font-size:11px;margin-top:10px;line-height:1.4">Written from the measured results and crew notes. Check it against the data before using it in a deliverable.</div>`;
+}
 function openPlotFinder(){
   showDataSheet_("Who did what, and when",
     `<div id="pfBody" style="font-size:13px;color:#cfe3d2">Loading plots…</div>`);
@@ -4391,6 +4431,8 @@ function renderBoundPopup_(){
       }
       rows+=row("Plots",a.nplots);
       STAND_AN_OPTS.forEach(([k,label])=>{ if(k==="nplots") return; const v=standAnVal_(a,k); if(v!=="") rows+=row(label,v); });
+      // summaries are written by the Sheet's rebuild, not generated on demand — say so if absent
+      if(!a.notes) rows+=row("Crew notes","(rebuild the summary in the Sheet to generate)");
     } else {
       note=`<div style="color:#5a7a62;margin-top:3px;font-size:11px">No analysed plots in this compartment yet${(!connected||isOffline())?" (or you're offline)":""}.</div>`;
     }
