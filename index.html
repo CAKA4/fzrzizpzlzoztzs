@@ -858,6 +858,7 @@
         <button type="button" onclick="closeMore();openDataTable()">▦ View plot data table</button>
         <button type="button" onclick="closeMore();openPlotFinder()">🔎 Who did what, and when — find plots by crew &amp; date</button>
         <button type="button" onclick="closeMore();openInventoryDesc()">📖 Inventory description (by tract)</button>
+        <button type="button" onclick="closeMore();openNoteGen()">✎ Write compartment summaries (all missing)</button>
         <button type="button" onclick="closeMore();buildAllSummary()">🗂 Build Sheet summary — all plots</button>
       </details>
       <details class="mgroup"><summary>📤 Export &amp; share</summary>
@@ -1027,7 +1028,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v246";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v250";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3075,6 +3076,48 @@ function idRender_(err){
       : (_descMayGen ? `<div style="margin-top:12px">${toWrite}${rewrite}</div>`
         : `<div style="color:#8fae95;font-size:12px;margin-top:12px">Descriptions are written by whoever manages the spreadsheet.</div>`));
 }
+/* Running the whole property from the phone. The Sheet does this in one go, but the app has to work
+   in batches — a request cannot carry 40 Gemini calls — so this keeps asking for a few more until the
+   server reports nothing left, showing progress as it goes. Stoppable, because it is a long job and
+   the person holding the phone should be able to change their mind. */
+let _ngRun=false, _ngDone=0, _ngLeft=null, _ngErr="";
+function openNoteGen(){
+  showDataSheet_("Write compartment summaries",`<div id="ngBody" style="font-size:13px;color:#cfe3d2"></div>`);
+  _ngDone=0; _ngLeft=null; _ngErr=""; _ngRun=false; ngRender_();
+}
+function ngRender_(){
+  const box=$("ngBody"); if(!box) return;
+  if(!connected || isOffline()){ box.innerHTML=`<div style="color:#e8a33a">Offline — this needs a connection.</div>`; return; }
+  const head=`<div style="color:#a9c9b0;line-height:1.5;margin-bottom:10px">Writes a summary for every compartment that doesn't have one — from the crew's notes where they exist, from the measured results where they don't.</div>`;
+  const prog = (_ngLeft==null && !_ngDone) ? ""
+    : `<div style="margin:8px 0;font-size:13px;color:#e8f0e6"><b>${_ngDone}</b> written${_ngLeft!=null?` · <b>${_ngLeft}</b> to go`:""}</div>`;
+  const err = _ngErr?`<div style="color:#e8a33a;font-size:12px;margin:6px 0">${esc(_ngErr)}</div>`:"";
+  const btn = _ngRun
+    ? `<button type="button" onclick="ngStop_()" style="display:block;width:100%;padding:12px;border-radius:8px;border:1px solid #7a5a2f;background:#2a1f12;color:#e8f0e6;font:inherit;font-size:13px">■ Stop after this one</button>`
+    : `<button type="button" onclick="ngStart_()" style="display:block;width:100%;padding:12px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">${_ngLeft===0?"✓ All done — run again to check":"✎ Start writing"}</button>`;
+  const note = _ngRun?`<div style="color:#8fae95;font-size:12px;margin-top:8px">About 7 seconds each. Keep this screen open.</div>`:"";
+  box.innerHTML=head+prog+err+btn+note;
+}
+function ngStop_(){ _ngRun=false; ngRender_(); }
+function ngStart_(){ _ngRun=true; _ngErr=""; ngRender_(); ngBatch_(); }
+function ngBatch_(){
+  if(!_ngRun) return;
+  const cb="__ng"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  const done=r=>{
+    if(!r || !r.ok){ _ngRun=false; _ngErr=(r&&r.error)?r.error:"Couldn't reach the Sheet"; ngRender_(); return; }
+    _ngDone+=(r.done||0); _ngLeft=(r.remaining==null?null:r.remaining);
+    if(r.error) _ngErr=r.error;
+    if(_ngLeft>0 && (r.done||0)>0 && _ngRun && !r.error){ ngRender_(); setTimeout(ngBatch_,400); return; }
+    _ngRun=false; ngRender_();
+    if(_ngLeft===0){ toast(`${_ngDone} summar${_ngDone===1?"y":"ies"} written`); standAnAt=0; try{ standAnFetch_(true); }catch(e){} }
+  };
+  window[cb]=r=>{ clean(); done(r); };
+  sc.onerror=()=>{ clean(); done(null); };
+  setTimeout(()=>{ if(window[cb]){ clean(); done(null); } },120000);
+  sc.src=SCRIPT_URL+sep+"action=gennotes&max=6&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
+  document.body.appendChild(sc);
+}
 function openPlotFinder(){
   showDataSheet_("Who did what, and when",
     `<div id="pfBody" style="font-size:13px;color:#cfe3d2">Loading plots…</div>`);
@@ -4399,9 +4442,12 @@ function standAnFetch_(force){
   const cb="__sa"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
   const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
   window[cb]=r=>{ clean(); standAn={}; ((r&&r.stands)||[]).forEach(x=>{ standAn[String(x.stand).trim().toLowerCase()]=x; });
+    // permission comes with the stand feed too, so the map knows what it may offer without the
+    // Inventory description panel having been opened first
+    if(r && r.mayGenerate!==undefined){ _descMayGen=!!r.mayGenerate; _descHasKey=!!r.hasKey; }
     standAnAt=Date.now(); try{ renderLabels(); }catch(e){} };
   sc.onerror=clean; setTimeout(()=>{ if(window[cb]) clean(); },12000);
-  sc.src=SCRIPT_URL+sep+"action=standanalysis&callback="+cb;
+  sc.src=SCRIPT_URL+sep+"action=standanalysis&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
   document.body.appendChild(sc);
 }
 function standAnFor_(f){
@@ -4462,7 +4508,8 @@ let _genBusy="";
 function noteGenPrompt_(stand){
   if(!stand) return "";
   if(_genBusy===stand) return `<div style="margin-top:5px;padding:6px 8px;background:#eef4ea;border-left:3px solid #7aa77f;border-radius:4px;font-size:12px;color:#16271a">Writing the summary… a few seconds.</div>`;
-  if(!_descMayGen) return `<div style="margin-top:5px;color:#5a7a62;font-size:11px">No crew-note summary for this compartment yet.</div>`;
+  if(!_descHasKey) return `<div style="margin-top:5px;color:#5a7a62;font-size:11px">No crew-note summary — no Gemini key set in the Sheet.</div>`;
+  if(!_descMayGen) return `<div style="margin-top:5px;color:#5a7a62;font-size:11px">No crew-note summary yet — written by whoever manages the spreadsheet.</div>`;
   const safe=String(stand).replace(/'/g,"&#39;");
   return `<div style="margin-top:5px;padding:6px 8px;background:#f3f1e6;border-left:3px solid #b5a86a;border-radius:4px">`+
     `<div style="font-size:11px;color:#5a7a62">No crew-note summary for this compartment yet.</div>`+
@@ -4496,7 +4543,9 @@ function renderBoundPopup_(){
     const a=standAnFor_(f);
     if(a){
       if(a.notes){
-        const tag = a.notesSrc==="gemini" ? "Crew notes — AI summary" : "Crew notes";
+        // label it for what it is: written from notes, or from the measured data alone
+        const tag = a.notesSrc==="gemini" ? "Crew notes — AI summary"
+                  : (a.notesSrc==="gemini-stats" ? "Stand summary — from the measured data" : "Crew notes");
         note=`<div style="margin-top:5px;padding:6px 8px;background:#eef4ea;border-left:3px solid #7aa77f;border-radius:4px">`+
           `<div style="font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:#5a7a62">${esc(tag)}</div>`+
           `<div style="font-size:12px;color:#16271a;margin-top:2px">${esc(a.notes)}</div></div>`;
