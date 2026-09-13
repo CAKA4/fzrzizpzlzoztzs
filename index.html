@@ -1027,7 +1027,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v238";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v244";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2998,40 +2998,82 @@ let _finderRows=[];
    Written in the Sheet (one per tract, plus one covering everything) and read here. Kept on the
    device after the first load so it can be reread in the bush with no signal — it is a page of prose
    and the crew may well want it standing in the stand it describes. */
-let _descItems=[], _descPick=0;
+let _descItems=[], _descPick=0, _descTracts=[], _descHasKey=false, _descMayGen=false, _descBusy="";
 function openInventoryDesc(){
   try{ if(STORE){ const c=STORE.getItem("fi_invdesc"); if(c) _descItems=JSON.parse(c)||[]; } }catch(e){}
   showDataSheet_("Inventory description",
-    `<div id="idBody" style="font-size:13px;color:#cfe3d2">`+
-    (_descItems.length?"Loading the latest…":"Loading…")+`</div>`);
+    `<div id="idBody" style="font-size:13px;color:#cfe3d2">`+(_descItems.length?"Loading the latest…":"Loading…")+`</div>`);
   if(_descItems.length) idRender_();
   if(!connected || isOffline()){ if(!_descItems.length) idRender_("Offline — connect once to load the description."); return; }
+  idFetch_();
+}
+function idFetch_(){
   const cb="__id"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
   const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
   window[cb]=r=>{ clean();
     const items=((r&&r.items)||[]);
+    _descTracts=((r&&r.tracts)||[]); _descHasKey=!!(r&&r.hasKey); _descMayGen=!!(r&&r.mayGenerate);
     if(items.length){ _descItems=items; try{ if(STORE) STORE.setItem("fi_invdesc",JSON.stringify(items)); }catch(e){} }
-    idRender_(items.length?null:(_descItems.length?null:"Nothing written yet — in the Sheet, FRI Tools → Note summaries → Describe the whole inventory.")); };
+    idRender_(); };
   sc.onerror=()=>{ clean(); idRender_(_descItems.length?null:"Couldn't reach the Sheet."); };
   setTimeout(()=>{ if(window[cb]){ clean(); idRender_(_descItems.length?null:"No answer from the Sheet."); } },15000);
-  sc.src=SCRIPT_URL+sep+"action=inventorydesc&callback="+cb;
+  sc.src=SCRIPT_URL+sep+"action=inventorydesc&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
   document.body.appendChild(sc);
 }
 function setDescPick(i){ _descPick=parseInt(i,10)||0; idRender_(); }
+/* Writing one tract's description from here. 350-500 words is a slower call than a note summary, so
+   the wait is longer — but it is one request, which the whole-property loop in the Sheet is not. */
+function genDesc_(tract){
+  if(!connected || isOffline()){ toast("Need a connection to write the description",true); return; }
+  if(!_descHasKey){ toast("Set the Gemini key in the Sheet first",true); return; }
+  _descBusy=tract; idRender_();
+  const cb="__gd"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  const done=r=>{ _descBusy="";
+    if(r && r.ok && r.text){
+      const k=_descItems.findIndex(x=>x.tract===r.tract);
+      const item={tract:r.tract,ncomp:r.ncomp,when:"just now",text:r.text};
+      if(k>=0) _descItems[k]=item; else _descItems.push(item);
+      _descPick=_descItems.findIndex(x=>x.tract===r.tract);
+      try{ if(STORE) STORE.setItem("fi_invdesc",JSON.stringify(_descItems)); }catch(e){}
+      idRender_(); toast("Description written");
+    } else { idRender_(); toast((r&&r.error)?r.error:"Couldn't write the description",true); } };
+  window[cb]=r=>{ clean(); done(r); };
+  sc.onerror=()=>{ clean(); done(null); };
+  setTimeout(()=>{ if(window[cb]){ clean(); done(null); } },90000);   // long prose takes a while
+  sc.src=SCRIPT_URL+sep+"action=gendesc&tract="+encodeURIComponent(tract)+"&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
+  document.body.appendChild(sc);
+}
 function idRender_(err){
   const box=$("idBody"); if(!box) return;
   if(err){ box.innerHTML=`<div style="color:#e8a33a;line-height:1.5">${esc(err)}</div>`; return; }
-  if(!_descItems.length){ box.innerHTML=`<div style="color:#8fae95">Nothing written yet.</div>`; return; }
+  if(_descBusy){ box.innerHTML=`<div style="color:#cfe3d2;line-height:1.5">Writing the description for <b>${esc(_descBusy)}</b>…<br><span style="color:#8fae95;font-size:12px">A few hundred words — this takes up to a minute.</span></div>`; return; }
+
+  // every tract that could be described, whether or not it has been
+  const written={}; _descItems.forEach((x,i)=>written[x.tract]=i);
+  const all=_descTracts.length?_descTracts.slice():_descItems.map(x=>({tract:x.tract,ncomp:x.ncomp}));
+  if(!all.length){ box.innerHTML=`<div style="color:#8fae95">No plots to describe yet.</div>`; return; }
   if(_descPick>=_descItems.length) _descPick=0;
-  const it=_descItems[_descPick];
-  const sel=_descItems.length>1
-    ? `<select onchange="setDescPick(this.value)" style="width:100%;padding:9px;border-radius:8px;background:#0f1e0d;color:#e8f0e6;border:1px solid #33623a;font:inherit;margin-bottom:8px">`+
-      _descItems.map((x,i)=>`<option value="${i}"${i===_descPick?" selected":""}>${esc(x.tract)}${x.ncomp?" — "+esc(String(x.ncomp))+" compartments":""}</option>`).join("")+`</select>`
-    : "";
+
+  const cur=_descItems[_descPick];
+  const sel=`<select onchange="setDescPick(this.value)" style="width:100%;padding:9px;border-radius:8px;background:#0f1e0d;color:#e8f0e6;border:1px solid #33623a;font:inherit">`+
+    (_descItems.length?_descItems.map((x,i)=>`<option value="${i}"${i===_descPick?" selected":""}>${esc(x.tract)}${x.ncomp?" — "+esc(String(x.ncomp))+" compartments":""}</option>`).join("")
+      :`<option>— none written yet —</option>`)+`</select>`;
+  const missing=all.filter(t=>!(t.tract in written));
+  const btn=(label,tract,style)=>`<button type="button" onclick="genDesc_('${String(tract).replace(/'/g,"&#39;")}')" style="${style};display:block;width:100%;text-align:left;padding:11px;margin:5px 0;border-radius:8px;font:inherit;font-size:13px">${label}</button>`;
+  const toWrite = missing.map(t=>btn("✎ Write the description for <b>"+esc(t.tract)+"</b> ("+t.ncomp+" compartments)", t.tract,
+      "border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6")).join("");
+  const rewrite = cur ? btn("↻ Rewrite <b>"+esc(cur.tract)+"</b> with the latest data", cur.tract,
+      "border:1px solid #33623a;background:#10240f;color:#a9c9b0") : "";
+
   box.innerHTML = sel +
-    `<div style="color:#5a7a62;font-size:11px;margin-bottom:6px">${esc(it.tract)}${it.when?" · written "+esc(it.when):""}</div>`+
-    `<div style="white-space:pre-wrap;line-height:1.55;color:#e8f0e6;font-size:13px">${esc(it.text)}</div>`+
-    `<div style="color:#5a7a62;font-size:11px;margin-top:10px;line-height:1.4">Written from the measured results and crew notes. Check it against the data before using it in a deliverable.</div>`;
+    (cur ? `<div style="color:#5a7a62;font-size:11px;margin:8px 0 6px">${esc(cur.tract)}${cur.when?" · written "+esc(cur.when):""}</div>`+
+      `<div style="white-space:pre-wrap;line-height:1.55;color:#e8f0e6;font-size:13px">${esc(cur.text)}</div>`+
+      `<div style="color:#5a7a62;font-size:11px;margin-top:10px;line-height:1.4">Written from the measured results and crew notes. Check it against the data before using it in a deliverable.</div>`
+      : `<div style="color:#8fae95;margin-top:10px;font-size:12px">Nothing written yet.</div>`) +
+    (!_descHasKey ? `<div style="color:#8fae95;font-size:12px;margin-top:12px">Set the Gemini key in the Sheet to write descriptions.</div>`
+      : (_descMayGen ? `<div style="margin-top:12px">${toWrite}${rewrite}</div>`
+        : `<div style="color:#8fae95;font-size:12px;margin-top:12px">Descriptions are written by whoever manages the spreadsheet.</div>`));
 }
 function openPlotFinder(){
   showDataSheet_("Who did what, and when",
@@ -4413,6 +4455,36 @@ function boundaryFeatureAt(lat,lon){
 }
 let _bpFeat=null, _bpLatLng=null, _bpView="attr";
 function showBoundPopup(latlng,f){ _bpFeat=f; _bpLatLng=latlng; renderBoundPopup_(); }
+/* Generating one compartment's summary from the map. The whole-property job belongs in the Sheet
+   (43 compartments will not fit inside a web request), but one is quick, and a crew member standing
+   in the stand is exactly who wants to read it. */
+let _genBusy="";
+function noteGenPrompt_(stand){
+  if(!stand) return "";
+  if(_genBusy===stand) return `<div style="margin-top:5px;padding:6px 8px;background:#eef4ea;border-left:3px solid #7aa77f;border-radius:4px;font-size:12px;color:#16271a">Writing the summary… a few seconds.</div>`;
+  if(!_descMayGen) return `<div style="margin-top:5px;color:#5a7a62;font-size:11px">No crew-note summary for this compartment yet.</div>`;
+  const safe=String(stand).replace(/'/g,"&#39;");
+  return `<div style="margin-top:5px;padding:6px 8px;background:#f3f1e6;border-left:3px solid #b5a86a;border-radius:4px">`+
+    `<div style="font-size:11px;color:#5a7a62">No crew-note summary for this compartment yet.</div>`+
+    `<button type="button" onclick="genNote_('${safe}')" style="margin-top:5px;padding:6px 10px;border-radius:6px;border:1px solid #2f7a44;background:#123a1c;color:#eafae8;font:inherit;font-size:12px">Write it now</button></div>`;
+}
+function genNote_(stand){
+  if(!connected || isOffline()){ toast("Need a connection to write the summary",true); return; }
+  _genBusy=stand; renderBoundPopup_();
+  const cb="__gn"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  const done=r=>{ _genBusy="";
+    if(r && r.ok && r.text){
+      const a=standAn[String(stand).trim().toLowerCase()];
+      if(a){ a.notes=r.text; a.notesSrc=r.src||"gemini"; }
+      renderBoundPopup_(); toast("Summary written");
+    } else { renderBoundPopup_(); toast((r&&r.error)?r.error:"Couldn't write the summary",true); } };
+  window[cb]=r=>{ clean(); done(r); };
+  sc.onerror=()=>{ clean(); done(null); };
+  setTimeout(()=>{ if(window[cb]){ clean(); done(null); } },45000);   // a Gemini call, not a page fetch
+  sc.src=SCRIPT_URL+sep+"action=gennote&stand="+encodeURIComponent(stand)+"&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
+  document.body.appendChild(sc);
+}
 function setBoundPopupView(v){ _bpView=v; if(v==="analysis") standAnFetch_(false); renderBoundPopup_(); }
 function renderBoundPopup_(){
   const f=_bpFeat; if(!f) return;
@@ -4431,8 +4503,8 @@ function renderBoundPopup_(){
       }
       rows+=row("Plots",a.nplots);
       STAND_AN_OPTS.forEach(([k,label])=>{ if(k==="nplots") return; const v=standAnVal_(a,k); if(v!=="") rows+=row(label,v); });
-      // summaries are written by the Sheet's rebuild, not generated on demand — say so if absent
-      if(!a.notes) rows+=row("Crew notes","(rebuild the summary in the Sheet to generate)");
+      // No summary yet: offer to write this one compartment's now — a single call, a few seconds.
+      if(!a.notes && a.nplots) note=noteGenPrompt_(a.stand||"");
     } else {
       note=`<div style="color:#5a7a62;margin-top:3px;font-size:11px">No analysed plots in this compartment yet${(!connected||isOffline())?" (or you're offline)":""}.</div>`;
     }
