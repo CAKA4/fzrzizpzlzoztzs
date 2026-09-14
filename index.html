@@ -1050,7 +1050,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v268";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v269";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3609,6 +3609,19 @@ function renderCrewRoutes(routes, silent){
   if(!silent && bounds.length) try{ fmap.fitBounds(bounds,{padding:[44,44]}); }catch(e){}
 }
 
+let _goneIds=null;
+function restoreDropGone_(){
+  const ids=_goneIds; _goneIds=null; closeInfoSheet_();
+  if(!ids || !ids.size) return;
+  const keep=p=>!(p && p._sent && ids.has(String(p._id||"").trim()));
+  const before=saved.length+auditPlots.length;
+  saved=saved.filter(keep); auditPlots=auditPlots.filter(keep);
+  const n=before-(saved.length+auditPlots.length);
+  persist(); persistAudit(); renderSaved(); netDot();
+  if(fmap) renderMapPins();
+  try{ if(typeof updateLayerStatus==="function") updateLayerStatus(); }catch(e){}
+  toast(`${n} plot${n>1?"s":""} removed from this device`);
+}
 function restoreFromSheet(){
   if(!connected){ toast("Not connected to a Sheet",true); return; }
   if(isOffline()){ toast("Need internet to restore from the Sheet",true); return; }
@@ -3624,6 +3637,7 @@ function restoreFromSheet(){
       const idOf=p=>String((p&&(p._id||p.PlotID))||"").trim();
       const fullKey=r=>[r.STANDID||"",r.PLOTNUM||"",r.DATE||"",r.X||"",r.Y||""].join("|");
       const haveIds=new Set(saved.concat(auditPlots).map(idOf).filter(Boolean));
+      const sheetIds=new Set(rows.map(r=>String(r.PlotID||"").trim()).filter(Boolean));
       const seen=new Set();
       rows.forEach(r=>{
         const rid=String(r.PlotID||"").trim();
@@ -3640,6 +3654,26 @@ function restoreFromSheet(){
         if(rid) haveIds.add(rid); added++; });
       if(added){ persist(); persistAudit(); renderSaved(); netDot(); if(fmap) renderMapPins(); if(typeof renderLayerVis_==="function") renderLayerVis_(); if(typeof updateLayerStatus==="function") updateLayerStatus(); }
       toast(added?`Restored ${added} plot${added>1?"s":""} from the Sheet`+(imp?` (${imp} imported)`:""):"No new plots in the Sheet");
+      /* Restore only ever adds, so a plot deleted in the Sheet stayed on the device for good. Offer to
+         drop those too — but only plots that came from the Sheet in the first place (_sent, with a
+         PlotID the Sheet no longer has). Anything collected here and not yet uploaded is never
+         touched, because losing unsent fieldwork is far worse than a stale pin. */
+      setTimeout(()=>{
+        try{
+          const gone=p=>p && p._sent && String(p._id||"").trim() && !sheetIds.has(String(p._id).trim());
+          const goneMine=saved.filter(gone), goneImp=auditPlots.filter(gone);
+          const n=goneMine.length+goneImp.length;
+          if(!n) return;
+          showInfoSheet_("Plots removed in the Sheet",
+            `<div style="color:#a9c9b0;font-size:13px;line-height:1.55">`+
+            `<p style="margin:0 0 8px"><b>${n}</b> plot${n>1?"s":""} on this device ${n>1?"are":"is"} no longer in the Sheet`+
+            `${goneImp.length?` (${goneImp.length} imported)`:""} — ${n>1?"they were":"it was"} deleted there.</p>`+
+            `<p style="margin:0 0 10px">Remove ${n>1?"them":"it"} from this device too? Nothing you have collected and not yet sent is affected.</p></div>`+
+            `<button type="button" onclick="restoreDropGone_()" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #7a3a3a;background:#2a1212;color:#e8f0e6;font:inherit;font-size:13px">🗑 Remove ${n} from this device</button>`+
+            `<button type="button" onclick="closeInfoSheet_()" style="display:block;width:100%;text-align:left;padding:12px;margin:0;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#a9c9b0;font:inherit;font-size:13px">Keep them for now</button>`);
+          _goneIds=new Set(goneMine.concat(goneImp).map(p=>String(p._id).trim()));
+        }catch(e){}
+      },400);
     }catch(e){ toast("Restore failed",true); } cleanup(); };
   sc.onerror=()=>{ cleanup(); toast("Restore failed — check connection",true); };
   sc.src=SCRIPT_URL+sep+"action=plots&callback="+cb;
