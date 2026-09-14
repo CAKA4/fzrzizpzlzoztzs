@@ -861,44 +861,54 @@
 <div class="modal" id="moreMenu" style="display:none" onclick="if(event.target===this)closeMore()">
   <div class="modal-card">
     <div class="modal-title" style="display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--card);padding:6px 0 12px;margin:0 0 8px;z-index:2">Tools <button type="button" onclick="closeMore()" style="background:#16271a;border:1px solid #33623a;border-radius:8px;color:#cdebcf;width:40px;height:40px;font-size:20px;line-height:1;cursor:pointer;flex:none" aria-label="Close">✕</button></div>
-    <div class="more-list">
-      <details class="mgroup"><summary>📊 Analysis</summary>
-        <button type="button" onclick="closeMore();openSummary()">📊 Stand summary (on device)</button>
-        <button type="button" onclick="closeMore();openFullAnalysis('main')">📈 Full analysis — all tabs (view)</button>
-        <button type="button" onclick="closeMore();openDataTable()">▦ View plot data table</button>
-        <button type="button" onclick="closeMore();openPlotFinder()">🔎 Who did what, and when — find plots by crew &amp; date</button>
-        <button type="button" onclick="closeMore();openInventoryDesc()">📖 Inventory description (by tract)</button>
-        <button type="button" onclick="closeMore();openMapFiles()">🗂 Map files on Drive (tracks, routes, areas)</button>
-        <button type="button" onclick="closeMore();openNoteGen()">✎ Write compartment summaries (all missing)</button>
-        <button type="button" onclick="closeMore();buildAllSummary()">🗂 Build Sheet summary — all plots</button>
+      <details class="mgroup" open><summary>📈 View the analysis</summary>
+        <button type="button" onclick="closeMore();openSummary()">📊 Stand summary — quick totals per stand</button>
+        <button type="button" onclick="closeMore();openFullAnalysis('main')">📈 Full analysis — every summary tab</button>
+        <button type="button" onclick="closeMore();openDataTable()">▦ Plot data table — every field, every plot</button>
+        <button type="button" onclick="closeMore();openPlotFinder()">🔎 Who did what, and when — by crew &amp; date</button>
       </details>
-      <details class="mgroup"><summary>📤 Export &amp; share</summary>
+
+      <details class="mgroup"><summary>✍️ Written summaries</summary>
+        <button type="button" onclick="closeMore();openInventoryDesc()">📖 Inventory description — a page per tract</button>
+        <button type="button" onclick="closeMore();openNoteGen()">✎ Write compartment summaries (all missing)</button>
+      </details>
+
+      <details class="mgroup"><summary>📤 Send &amp; export</summary>
         <button type="button" onclick="closeMore();openReportModal()">📧 Email analysis report — Excel / PDF (by property)</button>
         <button type="button" onclick="closeMore();exportPlotsAnalysisShp('main')">📍 Plots + analysis → shapefile (ArcGIS)</button>
         <button type="button" onclick="closeMore();exportCompartmentsAnalysisShp('main')">⬠ Compartments + analysis → shapefile</button>
+        <button type="button" onclick="closeMore();openMapFiles()">🗂 Map files on Drive — tracks, routes, areas</button>
       </details>
+
       <details class="mgroup"><summary>🗂 Plots &amp; stands</summary>
         <button type="button" onclick="closeMore();autoAssignStands()">▧ Auto-assign stand · age · tract from boundaries</button>
         <button type="button" onclick="closeMore();openTractAssign()">🏷 Assign tract / property to plots</button>
         <button type="button" onclick="closeMore();openDeletedPlots()">↩ Restore deleted plots</button>
+        <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:6px 2px 2px">Rebuilding the Sheet&rsquo;s summary tabs takes a few minutes and is best started from the Sheet itself.</div>
+        <button type="button" onclick="closeMore();buildAllSummary()">🗂 Rebuild the Sheet&rsquo;s summary tabs</button>
       </details>
-      <details class="mgroup" id="auditGroup"><summary>🔍 Imported</summary>
+
+      <details class="mgroup" id="auditGroup"><summary>🔍 Imported plots</summary>
         <button type="button" id="pushAuditBtn" onclick="closeMore();pushAuditToSheet()" style="display:none">📤 Push imported plots to the Sheet</button>
         <button type="button" id="auditSumBtn" onclick="closeMore();buildAuditSummary()" style="display:none">📊 Build imported-set summary (separate)</button>
-        <button type="button" onclick="closeMore();openFullAnalysis('audit')">📈 Imported-set full analysis</button>
+        <button type="button" onclick="closeMore();openFullAnalysis('audit')">📈 Full analysis — imported set only</button>
         <button type="button" onclick="closeMore();exportPlotsAnalysisShp('audit')">📍 Imported plots + analysis → shapefile</button>
         <button type="button" onclick="closeMore();exportCompartmentsAnalysisShp('audit')">⬠ Imported compartments + analysis → shapefile</button>
-        <button type="button" id="includeAuditBtn" onclick="toggleIncludeAudit()" style="display:none">🔀 Imported in main: OFF (tap to include)</button>
         <button type="button" id="auditLabelBtn" onclick="closeMore();openAuditLabelPicker()" style="display:none">🏷 Label imported plots by…</button>
-        <button type="button" id="clearAuditBtn" onclick="closeMore();clearAuditPlots()" style="display:none">🗑 Clear imported plots</button>
+        <button type="button" id="clearAuditBtn" onclick="closeMore();clearAuditPlots()" style="display:none;color:#e9a89f">🗑 Clear imported plots from this device</button>
       </details>
-      <details class="mgroup"><summary>💾 Data &amp; backup</summary>
-        <button type="button" onclick="closeMore();openCruiser()">👤 Data-entry person (your name / email)</button>
-        <button type="button" onclick="closeMore();exportBackup()">⬆ Back up all data</button>
-        <button type="button" onclick="closeMore();document.getElementById('restoreInput').click()">⬇ Restore from backup</button>
-        <button type="button" onclick="closeMore();clearAllData()" style="color:#e9a89f">🗑 Start new project (erase all data)</button>
+
+      <details class="mgroup"><summary>⚙️ This device</summary>
+        <button type="button" onclick="closeMore();openCruiser()">👤 Your name &amp; email — set this first</button>
+        <button type="button" onclick="closeMore();appStatus_()">ℹ️ App status — build, storage, connection</button>
+        <button type="button" onclick="closeMore();exportBackup()">⬆ Back up all data to a file</button>
+        <button type="button" onclick="closeMore();document.getElementById('restoreInput').click()">⬇ Restore from a backup file</button>
       </details>
-    </div>
+
+      <details class="mgroup"><summary style="color:#e9a89f">⚠️ Start over</summary>
+        <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:6px 2px">Erases every plot, photo and layer on this device. Plots already sent to the Sheet stay there. Back up first.</div>
+        <button type="button" onclick="closeMore();clearAllData()" style="color:#e9a89f">🗑 Start new project — erase all data on this device</button>
+      </details>
     <div class="modal-actions"><button class="btn ghost" type="button" onclick="closeMore()">Close</button></div>
   </div>
 </div>
@@ -1039,7 +1049,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v264";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v266";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2720,6 +2730,31 @@ function openMore(){ const mm=$("moreMenu"); mm.style.display="flex";
   }catch(e){}
   try{ if(connected) refreshAuditState_(); }catch(e){} }
 function closeMore(){ $("moreMenu").style.display="none"; }
+/* One place to see what this device is running and whether it can reach the Sheet. Several problems
+   today looked like bugs and were a backend one version behind — that should be visible from here
+   rather than inferred from a failure message. */
+function appStatus_(){
+  const row=(k,v)=>`<tr><td style="color:#8fae95;padding:3px 12px 3px 0;white-space:nowrap">${esc(k)}</td><td style="color:#e8f0e6">${v}</td></tr>`;
+  const kb=Math.round(storageBytes_()/1024), pct=Math.min(100,Math.round(kb/5120*100));
+  const nMine=(typeof saved!=="undefined"&&saved)?saved.length:0;
+  const nImp=(typeof auditPlots!=="undefined"&&auditPlots)?auditPlots.length:0;
+  const draw=()=>{
+    showInfoSheet_("App status",
+      `<table style="border-collapse:collapse;font-size:13px">`+
+      row("App build", esc(APP_BUILD))+
+      row("Sheet script", _sheetBuild?esc(_sheetBuild):`<span style="color:#8fae95">checking…</span>`)+
+      row("Connection", (!connected?`<span style="color:#e8a33a">no Sheet configured</span>`
+                        :(isOffline()?`<span style="color:#e8a33a">offline</span>`:`<span style="color:#7fd0a0">online</span>`)))+
+      row("You", (cruiser||cruiserEmail)?esc((cruiser||"")+(cruiserEmail?" · "+cruiserEmail:"")) 
+                 :`<span style="color:#e8a33a">not set — tap “Your name &amp; email”</span>`)+
+      row("Plots on device", nMine+(nImp?` <span style="color:#8fae95">· ${nImp} imported</span>`:""))+
+      row("Storage used", kb+" KB ("+pct+"%)")+
+      `</table>`+
+      `<div style="color:#5a7a62;font-size:11px;margin-top:10px;line-height:1.4">If a feature says the Sheet can&rsquo;t be reached while you have signal, compare the two build numbers — the script usually just needs redeploying.</div>`);
+  };
+  draw();
+  if(connected && !isOffline() && !_sheetBuild) sheetReachable_(()=>draw());
+}
 
 /* ---------- data-entry person (per device): set once, stamped on every plot ---------- */
 let cruiser = (STORE && (()=>{ try{ return STORE.getItem("fi_cruiser")||""; }catch(e){ return ""; } })()) || "";
