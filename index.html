@@ -901,6 +901,7 @@
       <details class="mgroup"><summary>⚙️ This device</summary>
         <button type="button" onclick="closeMore();openCruiser()">👤 Your name &amp; email — set this first</button>
         <button type="button" onclick="closeMore();appStatus_()">ℹ️ App status — build, storage, connection</button>
+        <button type="button" onclick="closeMore();storagePanel_()">🧮 Storage — what&rsquo;s using space, and free it</button>
         <button type="button" onclick="closeMore();exportBackup()">⬆ Back up all data to a file</button>
         <button type="button" onclick="closeMore();document.getElementById('restoreInput').click()">⬇ Restore from a backup file</button>
       </details>
@@ -1049,7 +1050,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v266";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v268";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2733,6 +2734,74 @@ function closeMore(){ $("moreMenu").style.display="none"; }
 /* One place to see what this device is running and whether it can reach the Sheet. Several problems
    today looked like bugs and were a backend one version behind — that should be visible from here
    rather than inferred from a failure message. */
+/* What is actually taking the space, and a way to drop the parts that are safe to drop. Removing the
+   compartments and still seeing 60% is the usual surprise: a georeferenced PDF, a long track log or a
+   cached reference layer can each be larger than every plot put together, and nothing on screen said
+   so. Plots are listed but never offered for deletion here — that is what "Start over" is for. */
+const STORE_LABELS_=[
+  ["fi_pdf",      "Georeferenced PDF map", true,  "The PDF overlay stored on this device."],
+  ["fi_reffiles", "Reference points / lines", true, "Loaded reference layers."],
+  ["fi_track",    "Track log", true,  "Where you have walked since it was last cleared."],
+  ["fi_route",    "Cruise route", true, "The planned route line."],
+  ["fi_polys",    "Drawn compartments", true, "Areas outlined on this device."],
+  ["fi_poly",     "Outline in progress", true, "An unsaved outline."],
+  ["fi_invdesc",  "Inventory descriptions", true, "Cached copy for reading offline — reloads from the Sheet."],
+  ["fi_mylabels", "Map label settings", false, ""],
+  ["fi_plots",    "Your plots", false, "Field data. Cleared only by Start over."],
+  ["fi_auditplots","Imported plots", false, "Cleared from the Imported plots group."],
+  ["fi_ctree",    "Custom species", false, ""],
+  ["fi_cground",  "Custom ground species", false, ""],
+  ["fi_cstands",  "Stand list", false, ""],
+  ["fi_tracts",   "Tract list", false, ""]
+];
+function storagePanel_(){
+  const items=[]; let total=0, known=0;
+  try{
+    for(let i=0;i<STORE.length;i++){
+      const k=STORE.key(i), v=STORE.getItem(k)||"";
+      total+=(k||"").length+v.length;
+    }
+    STORE_LABELS_.forEach(([k,label,clearable,note])=>{
+      const v=STORE.getItem(k); if(v==null) return;
+      const b=k.length+v.length; known+=b;
+      items.push({k,label,clearable,note,kb:Math.round(b/1024)});
+    });
+  }catch(e){}
+  items.sort((a,b)=>b.kb-a.kb);
+  const otherKb=Math.max(0,Math.round((total-known)/1024));
+  const totKb=Math.round(total/1024), pct=Math.min(100,Math.round(totKb/5120*100));
+  const rows=items.filter(x=>x.kb>0).map(x=>
+    `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #1d3320">`+
+    `<div style="flex:1"><div style="color:#eafae8;font-size:13px">${esc(x.label)}</div>`+
+    (x.note?`<div style="color:#5a7a62;font-size:11px;line-height:1.3;margin-top:1px">${esc(x.note)}</div>`:"")+
+    `</div><div style="color:#8fae95;font-size:12px;white-space:nowrap">${x.kb} KB</div>`+
+    (x.clearable?`<button type="button" onclick="storageClear_('${x.k}')" style="padding:5px 9px;border-radius:7px;border:1px solid #7a3a3a;background:#2a1212;color:#e9c9c9;font:inherit;font-size:11px">Clear</button>`:`<div style="width:44px"></div>`)+
+    `</div>`).join("");
+  showInfoSheet_("Storage on this device",
+    `<div style="font-size:20px;font-weight:700;color:#eafae8">${totKb} KB used <span style="font-size:13px;font-weight:400;color:#8fae95">· ${pct}% of the browser's allowance</span></div>`+
+    `<div style="height:6px;border-radius:3px;background:#1d3320;margin:8px 0 12px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${pct>=85?"#e05c4a":(pct>=60?"#e8b84b":"#5aa860")}"></div></div>`+
+    rows+
+    (otherKb?`<div style="display:flex;padding:7px 0;border-bottom:1px solid #1d3320"><div style="flex:1;color:#8fae95;font-size:13px">Settings and lists</div><div style="color:#8fae95;font-size:12px">${otherKb} KB</div><div style="width:44px"></div></div>`:"")+
+    `<div style="color:#5a7a62;font-size:11px;margin-top:10px;line-height:1.4">Photos are stored separately and are not counted here. Clearing a layer does not affect any plot you have collected.</div>`);
+}
+function storageClear_(k){
+  const row=STORE_LABELS_.find(x=>x[0]===k);
+  if(!row) return;
+  if(!confirm("Clear “"+row[1]+"” from this device?\n\nNo plot data is affected.")) return;
+  try{ STORE.removeItem(k); }catch(e){}
+  toast(row[1]+" cleared");
+  // drop it from the running app too, so the map matches what storage now says
+  try{
+    if(k==="fi_track"){ trackLog=[]; if(typeof renderTrack==="function") renderTrack(); }
+    if(k==="fi_route"){ routePts=[]; if(typeof renderRoute==="function") renderRoute(); }
+    if(k==="fi_polys"){ polys=[]; if(typeof renderPolys==="function") renderPolys(); }
+    if(k==="fi_reffiles"){ if(typeof clearRefFiles==="function") clearRefFiles(); }
+    if(k==="fi_pdf"){ if(typeof unloadPDF==="function") unloadPDF(); }
+    if(k==="fi_invdesc"){ _descItems=[]; }
+    if(typeof updateLayerStatus==="function") updateLayerStatus();
+  }catch(e){}
+  storagePanel_();
+}
 function appStatus_(){
   const row=(k,v)=>`<tr><td style="color:#8fae95;padding:3px 12px 3px 0;white-space:nowrap">${esc(k)}</td><td style="color:#e8f0e6">${v}</td></tr>`;
   const kb=Math.round(storageBytes_()/1024), pct=Math.min(100,Math.round(kb/5120*100));
@@ -3780,6 +3849,9 @@ function validatePlot(d){
   }
   const dup = d.STANDID && d.STANDID!=="-" && saved.some((p,idx)=> idx!==editingIndex && p.PLOTNUM && p.STANDID===d.STANDID && p.PLOTNUM===d.PLOTNUM);
   if(dup) warns.push({m:`Stand ${d.STANDID} already has a plot ${d.PLOTNUM}.`,f:"PLOTNUM"});
+  // A photo can't be taken after the fact from the office, so say so while you're still standing there.
+  if(!(currentPhotoNames&&currentPhotoNames.length) && !String(d.PHOTONUM||"").trim())
+    warns.push({m:"No photo taken at this plot.",f:"PHOTONUM"});
   return {blocks,warns};
 }
 /* Take the crew straight to the field the message is about: open its section, scroll it into
