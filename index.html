@@ -134,8 +134,13 @@
   .seg-btn:first-child{ border-left:none }
   .seg-btn.on{ background:#c8952a; color:#0b160a; font-weight:700 }
   .map-rail{ position:absolute; right:10px; top:calc(64px + env(safe-area-inset-top)); z-index:5200; display:flex; flex-direction:column; gap:8px; }
-  .map-tool{ width:44px; height:44px; border-radius:10px; background:rgba(15,30,13,.92); border:1px solid var(--line2,#33623a);
-    color:#bfe6cb; font-size:19px; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; }
+  /* Icon plus a word. Eight unlabelled glyphs were unreadable — nobody should have to remember that
+     ◎ means one kind of counting and #️⃣ another. */
+  .map-tool{ width:52px; min-height:46px; border-radius:10px; background:rgba(15,30,13,.92); border:1px solid var(--line2,#33623a);
+    color:#bfe6cb; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.5);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; padding:4px 2px; }
+  .map-tool .mt-i{ font-size:17px; line-height:1 }
+  .map-tool .mt-l{ font-size:9px; letter-spacing:.02em; font-family:var(--mono); opacity:.85 }
   .map-tool.on{ border-color:#c8952a; color:#e8b84b; background:#1c2e14; }
   .pdf-opacity-bar{ position:absolute; left:10px; bottom:180px; z-index:5200; display:flex; align-items:center; gap:8px;
     background:rgba(15,30,13,.92); border:1px solid var(--line2,#33623a); border-radius:8px; padding:6px 11px; font-family:var(--mono); }
@@ -668,16 +673,19 @@
         <div class="map-field" id="mapFieldRow" style="display:none">
           <label>Stand name field</label><select id="standFieldSel" onchange="setStandField(this.value)"></select>
         </div>
-        <!-- Label compartments by their own attribute, or by what the plots inside them analyse to. -->
         <div class="map-field" id="standLabModeRow" style="display:none">
-          <label>Label compartments by</label>
+          <label>Text shown on each compartment</label>
           <select id="standLabModeSel" onchange="setStandLabelMode(this.value)">
-            <option value="attr">The layer's own stand name</option>
-            <option value="analysis">Analysed plot data</option>
+            <option value="attr">Just the compartment name</option>
+            <option value="analysis">Name + a value from the analysis</option>
           </select>
         </div>
         <div class="map-field" id="standAnFieldRow" style="display:none">
-          <label>Analysis value</label><select id="standAnFieldSel" onchange="setStandAnField(this.value)"></select>
+          <label>…which analysed value</label><select id="standAnFieldSel" onchange="setStandAnField(this.value)"></select>
+        </div>
+        <div class="ls-muted" id="standLabHint" style="display:none;font-size:11px;line-height:1.4;padding:2px 2px 6px">
+          Writes the value beside the compartment name on the map — e.g. <b>96c · 24.5</b> for basal area.
+          It changes the label only; nothing in the file or the analysis is altered.
         </div>
         <button type="button" id="sendAreasBtn" class="btn ghost" style="display:none;width:100%;margin:4px 0" onclick="pushCompartmentAreas_(false)">📐 Send compartment areas to Sheet</button>
         <div class="map-field" id="ageFieldRow" style="display:none">
@@ -744,14 +752,14 @@
   <div id="fmap"></div>
   <div class="map-rail">
     <!-- tap-to-place button removed: use "＋ Create inventory plot" (crosshair/GPS) instead; tapping conflicted with selecting polygons -->
-    <button class="map-tool" id="toolTrack" type="button" onclick="toggleTrack()" title="Record track log">⏺</button>
-    <button class="map-tool" id="toolMeasure" type="button" onclick="toggleMeasure()" title="Measure distance / area">📐</button>
-    <button class="map-tool" id="toolRoute" type="button" onclick="toggleRoute()" title="Draw cruise route">〰️</button>
-    <button class="map-tool" id="toolPoly" type="button" onclick="togglePoly()" title="Draw area polygon">⬠</button>
-    <button class="map-tool" id="toolCount" type="button" onclick="countPoints()" title="Count points on the map (by layer &amp; compartment)">#️⃣</button>
-    <button class="map-tool" id="toolCountPoly" type="button" onclick="countInPolygon()" title="Count points inside the drawn polygon">◎</button>
-    <button class="map-tool" id="toolSelect" type="button" onclick="toggleSelect()" title="Lasso-select plots (tap corners), then delete / export / email">☒</button>
-    <button class="map-tool" id="toolPdf" type="button" onclick="togglePDF()" title="Show / hide PDF" style="display:none">🗺</button>
+    <button class="map-tool" id="toolTrack" type="button" onclick="toggleTrack()" title="Record where you walk"><span class="mt-i">⏺</span><span class="mt-l">Track</span></button>
+    <button class="map-tool" id="toolMeasure" type="button" onclick="toggleMeasure()" title="Measure a distance or an area"><span class="mt-i">📐</span><span class="mt-l">Measure</span></button>
+    <button class="map-tool" id="toolRoute" type="button" onclick="toggleRoute()" title="Lay out a cruise line to follow"><span class="mt-i">〰️</span><span class="mt-l">Route</span></button>
+    <button class="map-tool" id="toolPoly" type="button" onclick="togglePoly()" title="Outline a compartment"><span class="mt-i">⬠</span><span class="mt-l">Draw</span></button>
+    <button class="map-tool" id="toolCount" type="button" onclick="openCount_()" title="Count plots and reference points"><span class="mt-i">#️⃣</span><span class="mt-l">Count</span></button>
+    <button class="map-tool" id="toolSelect" type="button" onclick="toggleSelect()" title="Pick out plots to delete, export or email"><span class="mt-i">☒</span><span class="mt-l">Select</span></button>
+    <button class="map-tool" id="toolPdf" type="button" onclick="togglePDF()" title="Show or hide the PDF map" style="display:none"><span class="mt-i">🗺</span><span class="mt-l">PDF</span></button>
+    <button class="map-tool" id="toolHelp" type="button" onclick="mapToolHelp_()" title="What do these do?"><span class="mt-i">？</span><span class="mt-l">Help</span></button>
   </div>
   <div class="pdf-opacity-bar" id="pdfOpacityBar" style="display:none">
     <label>PDF</label><input type="range" id="pdfOpacity" min="0" max="100" value="85" oninput="setPDFOpacity(this.value)"><span id="pdfOpacityVal">85%</span>
@@ -1031,7 +1039,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v261";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v263";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1686,7 +1694,7 @@ function renumPair(kind){ const c=$(PAIR[kind].el); [...c.children].forEach((r,k
 
 /* ---------- collect form -> FRIPLOTS dict ---------- */
 const SIMPLE=["STANDID","PLOTNUM","DATE","HT","FLAG","ACCESS","HARVEST","RENEWAL","TENDING","COMMENT","CC","HTDBH",
-   "AGECORED","HTSPP","CAI","X","Y","Z","HERBS","MOSS","GRASSEDG","SAROSPEC","INVASP","PHOTONUM",
+   "AGECORED","AGE","HTSPP","CAI","X","Y","Z","HERBS","MOSS","GRASSEDG","SAROSPEC","INVASP","PHOTONUM",
    "TEXTURE","MOISTURE","DEPTH","TOPOGRAPHY","ROCKINESS","STBNDRY","STICNEST","DSV","EUROBUCK","GARLMUST",
    "MANIMAPL","INVAQUAN","POISIVY","PESTS","PESTQUAN","DISEASE","DISEQUAN","RPD","TRACT"];
 function collect(){
@@ -3109,9 +3117,10 @@ function ngBatch_(){
   const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
   const done=r=>{
     if(!r || !r.ok){ _ngRun=false;
-      _ngErr=(r&&r.error) ? r.error
-            : (staleBackendMsg_(251) || "Couldn't reach the Sheet — check your connection.");
-      ngRender_(); return; }
+      if(r && r.error){ _ngErr=r.error; ngRender_(); return; }
+      _ngErr="Checking…"; ngRender_();
+      backendFailMsg_(251, m=>{ _ngErr=m; ngRender_(); });
+      return; }
     _ngDone+=(r.done||0); _ngLeft=(r.remaining==null?null:r.remaining);
     if(r.error) _ngErr=r.error;
     if(_ngLeft>0 && (r.done||0)>0 && _ngRun && !r.error){ ngRender_(); setTimeout(ngBatch_,400); return; }
@@ -4283,9 +4292,10 @@ function openDriveLayers(){
   const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
   window[cb]=r=>{ clean();
     if(r&&r.ok){ _dlItems=r.items||[]; dlRender_(); }
-    else dlRender_((r&&r.error) || staleBackendMsg_(261) || "Couldn't reach the Sheet."); };
-  sc.onerror=()=>{ clean(); dlRender_("Couldn't reach the Sheet."); };
-  setTimeout(()=>{ if(window[cb]){ clean(); dlRender_("No answer from the Sheet."); } },15000);
+    else if(r&&r.error) dlRender_(r.error);
+    else backendFailMsg_(261, m=>dlRender_(m)); };
+  sc.onerror=()=>{ clean(); backendFailMsg_(261, m=>dlRender_(m)); };
+  setTimeout(()=>{ if(window[cb]){ clean(); dlRender_("Checking…"); backendFailMsg_(261, m=>dlRender_(m)); } },15000);
   sc.src=SCRIPT_URL+sep+"action=layerlist&callback="+cb;
   document.body.appendChild(sc);
 }
@@ -4464,6 +4474,7 @@ function pickStandField(){
     if(afs && !afs.options.length) afs.innerHTML = STAND_AN_OPTS.map(([k,l])=>`<option value="${k}">${esc(l)}</option>`).join("");
     if(afs) afs.value = standAnField;
     if(af) af.style.display = (standField && standLabelMode==="analysis") ? "flex" : "none";
+    const hint=$("standLabHint"); if(hint) hint.style.display = (standField && standLabelMode==="analysis") ? "" : "none";
     if(standField && standLabelMode==="analysis") standAnFetch_(false);
   }
   const tsel=$("tractFieldSel");
@@ -4550,6 +4561,29 @@ function sheetBuildAtLeast_(n){
   const m=String(_sheetBuild||"").match(/(\d+)/);
   return m ? (parseInt(m[1],10) >= n) : false;
 }
+/* When a JSONP call goes unanswered the app cannot tell "no signal" from "the deployed script is too
+   old to know that request" — both are silence. So probe an endpoint that has existed since the
+   beginning: if that answers, the Sheet is reachable and the feature simply is not deployed. */
+function sheetReachable_(then){
+  if(!connected || isOffline()){ then(false); return; }
+  const cb="__pb"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  let settled=false;
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  window[cb]=r=>{ if(settled) return; settled=true; clean(); if(r&&r.build) _sheetBuild=String(r.build); then(true); };
+  sc.onerror=()=>{ if(settled) return; settled=true; clean(); then(false); };
+  setTimeout(()=>{ if(!settled){ settled=true; clean(); then(false); } },10000);
+  sc.src=SCRIPT_URL+sep+"action=standanalysis&callback="+cb+"&notes=0&email="+encodeURIComponent(cruiserEmail||"");
+  document.body.appendChild(sc);
+}
+/* One sentence that says which of the two it is, and what to do about it. */
+function backendFailMsg_(need,then){
+  sheetReachable_(ok=>{
+    if(!ok){ then("Couldn't reach the Sheet — check your connection and try again."); return; }
+    const b=_sheetBuild?("is "+_sheetBuild):"is older than this needs";
+    then(`The Sheet is reachable, but its script ${b} and this feature needs v${need} or newer. `+
+         `Paste the latest Code.gs into the Apps Script editor, then Deploy → Manage deployments → New version.`);
+  });
+}
 function staleBackendMsg_(need){
   if(!_sheetBuild) return "";
   return sheetBuildAtLeast_(need) ? ""
@@ -4594,6 +4628,7 @@ function setStandAnField(k){ standAnField=k||"ba"; try{ if(STORE) STORE.setItem(
 function setStandLabelMode(v){ standLabelMode=(v==="analysis")?"analysis":"attr";
   try{ if(STORE) STORE.setItem("fi_standlabmode",standLabelMode); }catch(e){}
   const af=$("standAnFieldRow"); if(af) af.style.display = standLabelMode==="analysis" ? "flex" : "none";
+  const hint=$("standLabHint"); if(hint) hint.style.display = standLabelMode==="analysis" ? "" : "none";
   if(standLabelMode==="analysis") standAnFetch_(true);
   renderLabels();
   toast(standLabelMode==="analysis"?"Compartments labelled by analysis":"Compartments labelled by the layer's own field"); }
@@ -6050,6 +6085,34 @@ function allPointLayers_(){
 }
 function countByStand_(pts){ const m={}; pts.forEach(p=>{ const s=p.stand||"(unattributed)"; m[s]=(m[s]||0)+1; }); return m; }
 // Count everything on the map, per layer and per compartment.
+/* One Count button instead of two. #️⃣ counted the whole map and ◎ counted inside a polygon — two
+   near-identical glyphs for a difference nobody could guess. Ask instead. */
+function openCount_(){
+  const hasPoly = (typeof polyPts!=="undefined" && polyPts && polyPts.length>=3) ||
+                  (typeof polys!=="undefined" && polys && polys.length);
+  showInfoSheet_("Count points",
+    `<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:10px">Counts your plots, crew plots, imported plots and reference points.</div>`+
+    `<button type="button" onclick="closeInfoSheet_();countPoints()" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">#️⃣ Everything on the map<div style="color:#8fae95;font-size:11px;margin-top:2px">Totals, broken down by compartment</div></button>`+
+    (hasPoly
+      ? `<button type="button" onclick="closeInfoSheet_();countInPolygon()" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">◎ Inside an outline<div style="color:#8fae95;font-size:11px;margin-top:2px">Uses the area you have drawn, with its size in hectares</div></button>`
+      : `<div style="color:#5a7a62;font-size:11px;margin-top:8px;line-height:1.4">To count inside an area, use <b>Draw</b> to outline it first — then this offers to count what falls inside.</div>`));
+}
+/* A plain list of what the rail does, because a tooltip you have to hover for is no use on a phone. */
+function mapToolHelp_(){
+  const row=(i,n,d)=>`<div style="display:flex;gap:10px;padding:7px 0;border-bottom:1px solid #1d3320">`+
+    `<div style="width:24px;text-align:center;font-size:16px">${i}</div>`+
+    `<div><div style="color:#eafae8;font-size:13px">${n}</div>`+
+    `<div style="color:#8fae95;font-size:11px;line-height:1.4;margin-top:1px">${d}</div></div></div>`;
+  showInfoSheet_("The map tools",
+    row("⏺","Track","Records where you walk, as a line. Tap again to stop. Export it from + Layers.")+
+    row("📐","Measure","Tap two or more points for a distance; close the shape for an area. Nothing is saved.")+
+    row("〰️","Route","Lay out a line of points to walk — a planned cruise line. Can be saved and shared.")+
+    row("⬠","Draw","Outline a compartment by tapping its corners. <b>Save</b> keeps it and sends it to the Sheet; <b>Done</b> or <b>Clear</b> discards it.")+
+    row("#️⃣","Count","How many plots and reference points there are — everything on the map, or just inside an area you have drawn.")+
+    row("☒","Select","Tap corners around plots to pick them out, then delete, export or email just those.")+
+    row("🗺","PDF","Appears once a georeferenced PDF is loaded. Shows or hides it; the slider sets how see-through it is.")+
+    `<div style="color:#5a7a62;font-size:11px;margin-top:10px;line-height:1.4">A tool stays on until you tap it again — the button turns amber while it is active.</div>`);
+}
 function countPoints(){
   const layers=allPointLayers_();
   const total=layers.reduce((a,l)=>a+l.pts.length,0);
