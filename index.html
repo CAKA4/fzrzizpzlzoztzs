@@ -1050,7 +1050,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v270";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v271";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3252,6 +3252,27 @@ function openMapFiles(){
   document.body.appendChild(sc);
 }
 function setMfWho(v){ _mfWho=v; mfRender_(); }
+function mfGet_(i){
+  const list=_mfItems.filter(x=>_mfWho==="__all__"||((x.who||"unknown")===_mfWho));
+  const it=list[i]; if(!it) return;
+  if(!connected || isOffline()){ toast("Need a connection to fetch the file",true); return; }
+  toast("Fetching "+it.name+"…");
+  const cb="__mg"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  window[cb]=r=>{ clean();
+    if(!r || !r.ok || !r.data){ toast((r&&r.error)||"Couldn't fetch that file",true); return; }
+    try{
+      const bin=atob(r.data), n=bin.length, buf=new Uint8Array(n);
+      for(let j=0;j<n;j++) buf[j]=bin.charCodeAt(j);
+      dl_(new Blob([buf],{type:r.mime||"application/octet-stream"}), r.name||it.name);
+      toast("Saved to this device");
+    }catch(e){ toast("That file couldn't be read",true); }
+  };
+  sc.onerror=()=>{ clean(); toast("Couldn't fetch that file",true); };
+  setTimeout(()=>{ if(window[cb]){ clean(); toast("Timed out — the file may be too large",true); } },60000);
+  sc.src=SCRIPT_URL+sep+"action=layerget&id="+encodeURIComponent(it.id)+"&callback="+cb;
+  document.body.appendChild(sc);
+}
 function mfRender_(err){
   const box=$("mfBody"); if(!box) return;
   if(err){ box.innerHTML=`<div style="color:#e8a33a">${esc(err)}</div>`; return; }
@@ -3262,14 +3283,20 @@ function mfRender_(err){
   const sel=`<select onchange="setMfWho(this.value)" style="width:100%;padding:9px;border-radius:8px;background:#0f1e0d;color:#e8f0e6;border:1px solid #33623a;font:inherit;margin-bottom:8px">`+
     `<option value="__all__"${_mfWho==="__all__"?" selected":""}>Everyone (${_mfItems.length} files)</option>`+
     who.map(w=>`<option value="${esc(w)}"${_mfWho===w?" selected":""}>${esc(w)} — ${byWho[w]}</option>`).join("")+`</select>`;
-  const rows=list.map(x=>
-    `<a href="${esc(x.url)}" target="_blank" rel="noopener" style="display:block;text-decoration:none;padding:8px 0;border-bottom:1px solid #1d3320">`+
+  /* Download through the script, not by linking to Drive. The crew have no Google account on these
+     phones, so a Drive link is a permission wall for exactly the people the list is meant to serve —
+     while the script reads the file as the Sheet's owner, which is how every other feature works. */
+  const rows=list.map((x,i)=>
+    `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #1d3320">`+
+    `<div style="flex:1;min-width:0">`+
     `<div style="color:#eafae8;font-size:13px;word-break:break-all">${esc(x.name)}</div>`+
-    `<div style="color:#8fae95;font-size:11px;margin-top:2px">${esc(x.who||"unknown")} · ${esc(x.kind||"")} · ${esc(String(x.when||""))}${x.kb?" · "+esc(String(x.kb))+" KB":""}</div></a>`).join("");
+    `<div style="color:#8fae95;font-size:11px;margin-top:2px">${esc(x.who||"unknown")} · ${esc(x.kind||"")} · ${esc(String(x.when||""))}${x.kb?" · "+esc(String(x.kb))+" KB":""}</div></div>`+
+    `<button type="button" onclick="mfGet_(${i})" style="padding:7px 11px;border-radius:7px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:12px">Get</button>`+
+    `</div>`).join("");
   box.innerHTML = sel +
     `<div style="max-height:52vh;overflow-y:auto;-webkit-overflow-scrolling:touch">${rows}</div>`+
-    (_mfFolder?`<a href="${esc(_mfFolder)}" target="_blank" rel="noopener" style="display:block;margin-top:10px;padding:11px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;text-decoration:none;text-align:center;font-size:13px">📁 Open the whole folder in Drive</a>`:"")+
-    `<div style="color:#5a7a62;font-size:11px;margin-top:8px;line-height:1.4">Tap a file to download it. The folder link opens Drive, where you can select several and download them together.</div>`;
+    (_mfFolder?`<a href="${esc(_mfFolder)}" target="_blank" rel="noopener" style="display:block;margin-top:10px;padding:11px;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#a9c9b0;text-decoration:none;text-align:center;font-size:12px">📁 Open the folder in Drive <span style="color:#5a7a62">— needs a Google account with access</span></a>`:"")+
+    `<div style="color:#5a7a62;font-size:11px;margin-top:8px;line-height:1.4">Get saves the file to this device. It works without a Google account — the Sheet fetches it for you.</div>`;
 }
 function openPlotFinder(){
   showDataSheet_("Who did what, and when",
