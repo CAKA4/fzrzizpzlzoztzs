@@ -663,7 +663,7 @@
         <button type="button" id="refClearBtn" onclick="closeLayersMenu();clearRefFiles()" style="display:none">✕ Remove reference points / lines</button>
         <button type="button" onclick="closeLayersMenu();$('pdfInput').click()">🗺 Georeferenced PDF map</button>
         <button type="button" id="pdfUnloadBtn" onclick="closeLayersMenu();unloadPDF()" style="display:none">✕ Unload PDF map</button>
-        <button type="button" onclick="closeLayersMenu();openDriveLayers()">☁ From Drive — shared boundary, point &amp; PDF files</button>
+        <button type="button" onclick="closeLayersMenu();openDriveLayers()">☁ From Drive — plots, boundaries, points &amp; PDF maps</button>
       </div>
     </details>
 
@@ -1050,7 +1050,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v269";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v270";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -4469,14 +4469,18 @@ function dlPick_(i){
       catch(e){ file=new Blob([buf],{type:r.mime||"application/octet-stream"}); file.name=r.name; }
       _dlBusy=""; closeDataSheet_();
       if(r.kind==="pdf") loadPdfOverlay(file);
-      else if(r.kind==="shapefile"||r.kind==="geojson"||r.kind==="kml"){
-        // one file could be either boundaries or reference features — ask rather than guess wrong
+      else {
+        /* The same file could be boundaries, reference features or a set of plots to bring in — and
+           no extension tells them apart. Ask, rather than guess wrong: importing plots as reference
+           points loses the tree data, and the reverse fills the inventory with rubbish. */
+        const btn=(k,label,note)=>`<button type="button" onclick="dlUse_('${k}')" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">${label}<div style="color:#8fae95;font-size:11px;margin-top:2px">${note}</div></button>`;
         showInfoSheet_("Load "+r.name,
           `<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:10px">What is in this file?</div>`+
-          `<button type="button" onclick="dlUse_('bound')" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">⬇ Stand boundaries (polygons)</button>`+
-          `<button type="button" onclick="dlUse_('ref')" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">⬇ Reference points / lines</button>`);
+          btn("plots","📥 Plots to import","Sample plots with tree data — they join the imported set and can be pushed to the Sheet")+
+          btn("bound","⬠ Stand boundaries","Compartment polygons")+
+          btn("ref","📍 Reference points / lines","Points or lines to navigate to — no tree data"));
         _dlFile=file;
-      } else { importRefFile(file); }
+      }
     }catch(e){ fail("That file couldn't be read"); }
   };
   sc.onerror=()=>{ clean(); fail(); };
@@ -4487,7 +4491,9 @@ function dlPick_(i){
 let _dlFile=null;
 function dlUse_(what){
   const f=_dlFile; _dlFile=null; closeInfoSheet_(); if(!f) return;
-  if(what==="bound") loadBoundaries(f); else importRefFile(f);
+  if(what==="bound") loadBoundaries(f);
+  else if(what==="plots") importPlotsFile(f);   // same path as "Import plots" from a local file
+  else importRefFile(f);
 }
 function loadBoundaries(file){
   toast("Reading boundaries…");
