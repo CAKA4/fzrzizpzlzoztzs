@@ -1050,7 +1050,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v271";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v273";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2059,16 +2059,40 @@ function pushAuditToSheet(){
           // move pushed plots into the local "saved/sent" set so they show as sent
           batch.forEach(q=>{ q._sent=true; saved.push(q); });
           auditPlots=[]; persistAudit(); persist(); renderSaved(); netDot();
-          if(after>=0){
-            if(added===n) toast(`✓ Pushed ${n} — Sheet now has ${after} plot rows.`);
-            else toast(`Pushed ${n}; Sheet added ${added>=0?added:"?"} (now ${after} rows). If short, tap Push again — duplicates are prevented.`,true);
-          } else {
-            toast(`Sent ${n} imported plots. Open the Sheet to confirm.`);
-          }
+          /* Ask the Sheet what it actually did, rather than inferring from a row count. A plot that
+             matched an existing row on stand + date + coordinates is an update, not an addition —
+             the count does not move and the plots look like they vanished. */
+          lastBatchResult_(res=>{
+            if(res && res.received===n){
+              const a=res.appended||0, u=res.updated||0;
+              if(a===n) toast(`✓ ${a} plot${a>1?"s":""} added — the Sheet now has ${res.rows} rows.`);
+              else if(u) showInfoSheet_("Pushed — but mostly updates",
+                `<div style="color:#a9c9b0;font-size:13px;line-height:1.55">`+
+                `<p style="margin:0 0 8px">The Sheet received all ${n}, and wrote them as <b>${a} new row${a===1?"":"s"}</b> and <b>${u} update${u===1?"":"s"}</b> to rows it already had.</p>`+
+                `<p style="margin:0 0 8px">A plot counts as an update when its stand, date and coordinates match an existing row — so these were already in FRIPLOTS and have been overwritten with the imported version, not added beside it.</p>`+
+                `<p style="margin:0">FRIPLOTS now has ${res.rows} rows. Sort by PLOTSRC to see the imported ones.</p></div>`);
+              else toast(`Sheet received ${n} but wrote ${a} — open the Sheet to check.`,true);
+            } else if(after>=0){
+              if(added===n) toast(`✓ Pushed ${n} — Sheet now has ${after} plot rows.`);
+              else toast(`Pushed ${n}; Sheet added ${added>=0?added:"?"} (now ${after} rows). If short, tap Push again — duplicates are prevented.`,true);
+            } else toast(`Sent ${n} imported plots. Open the Sheet to confirm.`);
+          });
         }); }, 1500);
       })
       .catch(()=>{ toast("Push failed — no signal. Nothing was cleared; try again.",true); });
   });
+}
+/* What the last batch write actually did. The push itself is a no-cors POST whose reply is opaque, so
+   the outcome is stashed server-side and read back here. cb(null) if it can't be had. */
+function lastBatchResult_(cb){
+  if(!connected || isOffline()){ cb(null); return; }
+  const c="__lb"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  const clean=()=>{ try{ delete window[c]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  window[c]=r=>{ clean(); cb(r||null); };
+  sc.onerror=()=>{ clean(); cb(null); };
+  setTimeout(()=>{ if(window[c]){ clean(); cb(null); } },10000);
+  sc.src=SCRIPT_URL+sep+"action=lastbatch&callback="+c;
+  document.body.appendChild(sc);
 }
 // Fetch the current FRIPLOTS data-row count via the readable sheetinfo endpoint (JSONP). cb(-1) on failure.
 function sheetPlotCount_(cb){
