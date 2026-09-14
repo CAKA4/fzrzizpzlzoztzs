@@ -658,6 +658,7 @@
         <button type="button" id="refClearBtn" onclick="closeLayersMenu();clearRefFiles()" style="display:none">✕ Remove reference points / lines</button>
         <button type="button" onclick="closeLayersMenu();$('pdfInput').click()">🗺 Georeferenced PDF map</button>
         <button type="button" id="pdfUnloadBtn" onclick="closeLayersMenu();unloadPDF()" style="display:none">✕ Unload PDF map</button>
+        <button type="button" onclick="closeLayersMenu();openDriveLayers()">☁ From Drive — shared boundary, point &amp; PDF files</button>
       </div>
     </details>
 
@@ -780,6 +781,7 @@
     <span id="polyText">Tap to outline an area</span>
     <button type="button" id="polyTractBtn" onclick="changeDrawTract_()" title="Set the tract for the areas you draw">Tract: —</button>
     <button type="button" id="polySnapBtn" onclick="togglePolySnap()">Snap ✓</button>
+    <button type="button" onclick="countInPolygon()" title="Count the points inside this outline (same as the ◎ tool)">Count inside</button>
     <button type="button" onclick="undoPolyPt()">Undo</button>
     <button type="button" onclick="savePoly()">Save</button>
     <button type="button" onclick="finishPoly()">Done</button>
@@ -858,6 +860,7 @@
         <button type="button" onclick="closeMore();openDataTable()">▦ View plot data table</button>
         <button type="button" onclick="closeMore();openPlotFinder()">🔎 Who did what, and when — find plots by crew &amp; date</button>
         <button type="button" onclick="closeMore();openInventoryDesc()">📖 Inventory description (by tract)</button>
+        <button type="button" onclick="closeMore();openMapFiles()">🗂 Map files on Drive (tracks, routes, areas)</button>
         <button type="button" onclick="closeMore();openNoteGen()">✎ Write compartment summaries (all missing)</button>
         <button type="button" onclick="closeMore();buildAllSummary()">🗂 Build Sheet summary — all plots</button>
       </details>
@@ -1028,7 +1031,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v253";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v261";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3105,7 +3108,10 @@ function ngBatch_(){
   const cb="__ng"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
   const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
   const done=r=>{
-    if(!r || !r.ok){ _ngRun=false; _ngErr=(r&&r.error)?r.error:"Couldn't reach the Sheet"; ngRender_(); return; }
+    if(!r || !r.ok){ _ngRun=false;
+      _ngErr=(r&&r.error) ? r.error
+            : (staleBackendMsg_(251) || "Couldn't reach the Sheet — check your connection.");
+      ngRender_(); return; }
     _ngDone+=(r.done||0); _ngLeft=(r.remaining==null?null:r.remaining);
     if(r.error) _ngErr=r.error;
     if(_ngLeft>0 && (r.done||0)>0 && _ngRun && !r.error){ ngRender_(); setTimeout(ngBatch_,400); return; }
@@ -3117,6 +3123,40 @@ function ngBatch_(){
   setTimeout(()=>{ if(window[cb]){ clean(); done(null); } },120000);
   sc.src=SCRIPT_URL+sep+"action=gennotes&max=6&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
   document.body.appendChild(sc);
+}
+/* Everything the crew has exported from the map, listed by who made it. The point is that a track
+   someone recorded last week is findable by anyone, not just on the phone that made it. */
+let _mfItems=[], _mfWho="__all__", _mfFolder="";
+function openMapFiles(){
+  showDataSheet_("Map files on Drive",`<div id="mfBody" style="font-size:13px;color:#cfe3d2">Loading…</div>`);
+  if(!connected || isOffline()){ mfRender_("Offline — this list lives in the Sheet."); return; }
+  const cb="__mf"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  window[cb]=r=>{ clean(); _mfItems=((r&&r.items)||[]); _mfFolder=(r&&r.folder)||""; mfRender_(); };
+  sc.onerror=()=>{ clean(); mfRender_("Couldn't reach the Sheet."); };
+  setTimeout(()=>{ if(window[cb]){ clean(); mfRender_("No answer from the Sheet."); } },15000);
+  sc.src=SCRIPT_URL+sep+"action=mapfiles&callback="+cb;
+  document.body.appendChild(sc);
+}
+function setMfWho(v){ _mfWho=v; mfRender_(); }
+function mfRender_(err){
+  const box=$("mfBody"); if(!box) return;
+  if(err){ box.innerHTML=`<div style="color:#e8a33a">${esc(err)}</div>`; return; }
+  if(!_mfItems.length){ box.innerHTML=`<div style="color:#8fae95">Nothing exported yet. Tracks, routes, compartments and shapefiles you export from the map are saved here automatically.</div>`; return; }
+  const who=[...new Set(_mfItems.map(x=>x.who||"unknown"))].sort((a,b)=>a.localeCompare(b));
+  const list=_mfItems.filter(x=>_mfWho==="__all__"||((x.who||"unknown")===_mfWho));
+  const byWho={}; _mfItems.forEach(x=>{ const k=x.who||"unknown"; byWho[k]=(byWho[k]||0)+1; });
+  const sel=`<select onchange="setMfWho(this.value)" style="width:100%;padding:9px;border-radius:8px;background:#0f1e0d;color:#e8f0e6;border:1px solid #33623a;font:inherit;margin-bottom:8px">`+
+    `<option value="__all__"${_mfWho==="__all__"?" selected":""}>Everyone (${_mfItems.length} files)</option>`+
+    who.map(w=>`<option value="${esc(w)}"${_mfWho===w?" selected":""}>${esc(w)} — ${byWho[w]}</option>`).join("")+`</select>`;
+  const rows=list.map(x=>
+    `<a href="${esc(x.url)}" target="_blank" rel="noopener" style="display:block;text-decoration:none;padding:8px 0;border-bottom:1px solid #1d3320">`+
+    `<div style="color:#eafae8;font-size:13px;word-break:break-all">${esc(x.name)}</div>`+
+    `<div style="color:#8fae95;font-size:11px;margin-top:2px">${esc(x.who||"unknown")} · ${esc(x.kind||"")} · ${esc(String(x.when||""))}${x.kb?" · "+esc(String(x.kb))+" KB":""}</div></a>`).join("");
+  box.innerHTML = sel +
+    `<div style="max-height:52vh;overflow-y:auto;-webkit-overflow-scrolling:touch">${rows}</div>`+
+    (_mfFolder?`<a href="${esc(_mfFolder)}" target="_blank" rel="noopener" style="display:block;margin-top:10px;padding:11px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;text-decoration:none;text-align:center;font-size:13px">📁 Open the whole folder in Drive</a>`:"")+
+    `<div style="color:#5a7a62;font-size:11px;margin-top:8px;line-height:1.4">Tap a file to download it. The folder link opens Drive, where you can select several and download them together.</div>`;
 }
 function openPlotFinder(){
   showDataSheet_("Who did what, and when",
@@ -3687,6 +3727,13 @@ function validatePlot(d){
   let incomplete=0; for(let i=1;i<=28;i++){ const sp=d["T"+i+"SP"], s=d["T"+i+"S"]; if((sp&&!s)||(!sp&&s)) incomplete++; }
   if(incomplete) blocks.push({m:`${incomplete} tree row${incomplete>1?"s":""} missing species or DBH — complete or clear them.`,f:"treeRows"});
   if(d.CC==="") warns.push({m:"Crown closure (CC) not set.",f:"CC"});
+  /* Blank means "not recorded" here, while 0 means "looked, there was none" — so an empty cover field
+     is a gap in the record rather than a zero, and worth saying before the plot goes in. */
+  {
+    const cov=[["HERBS","Herbs"],["MOSS","Moss"],["GRASSEDG","Grass / edge"]].filter(([k])=>String(d[k]||"")==="");
+    if(cov.length===3) warns.push({m:"Ground cover not recorded — herbs, moss and grass are all blank. Use ‘None present’ if there was none.",f:"HERBS"});
+    else if(cov.length) warns.push({m:cov.map(c=>c[1]).join(" and ")+" not recorded (blank means not looked at; 0 means none present).",f:cov[0][0]});
+  }
   const dup = d.STANDID && d.STANDID!=="-" && saved.some((p,idx)=> idx!==editingIndex && p.PLOTNUM && p.STANDID===d.STANDID && p.PLOTNUM===d.PLOTNUM);
   if(dup) warns.push({m:`Stand ${d.STANDID} already has a plot ${d.PLOTNUM}.`,f:"PLOTNUM"});
   return {blocks,warns};
@@ -4225,6 +4272,72 @@ async function ensureWGS84(gj){
   return gj;
 }
 /* ----- boundaries (zipped shapefile via shpjs, or GeoJSON) ----- */
+/* Loading a shared layer from Drive instead of from this phone. The three loaders all take a File,
+   so a file fetched from Drive is turned into one and handed to exactly the same code path — nothing
+   downstream knows or cares where it came from. */
+let _dlItems=[], _dlBusy="";
+function openDriveLayers(){
+  showDataSheet_("Load a layer from Drive",`<div id="dlBody" style="font-size:13px;color:#cfe3d2">Loading the list…</div>`);
+  if(!connected || isOffline()){ dlRender_("Offline — layers already on this phone still work; this list needs a connection."); return; }
+  const cb="__dl"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  window[cb]=r=>{ clean();
+    if(r&&r.ok){ _dlItems=r.items||[]; dlRender_(); }
+    else dlRender_((r&&r.error) || staleBackendMsg_(261) || "Couldn't reach the Sheet."); };
+  sc.onerror=()=>{ clean(); dlRender_("Couldn't reach the Sheet."); };
+  setTimeout(()=>{ if(window[cb]){ clean(); dlRender_("No answer from the Sheet."); } },15000);
+  sc.src=SCRIPT_URL+sep+"action=layerlist&callback="+cb;
+  document.body.appendChild(sc);
+}
+function dlRender_(err){
+  const box=$("dlBody"); if(!box) return;
+  if(err){ box.innerHTML=`<div style="color:#e8a33a;line-height:1.5">${esc(err)}</div>`; return; }
+  if(_dlBusy){ box.innerHTML=`<div style="line-height:1.5">Loading <b>${esc(_dlBusy)}</b>…</div>`; return; }
+  if(!_dlItems.length){ box.innerHTML=`<div style="color:#8fae95;line-height:1.5">Nothing in the shared layers folder yet.<br><br>In Drive, put boundary shapefiles, reference point or line files and georeferenced PDFs into the <b>FRI Layers</b> folder and they will appear here for everyone.</div>`; return; }
+  const icon=k=>k==="pdf"?"🗺":(k==="shapefile"?"⬇":(k==="geojson"?"⬇":(k==="kml"?"⬇":"📄")));
+  const rows=_dlItems.map((x,i)=>
+    `<button type="button" onclick="dlPick_(${i})" style="display:block;width:100%;text-align:left;padding:10px;margin:0 0 6px;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#e8f0e6;font:inherit">`+
+    `<div style="font-size:13px;word-break:break-all">${icon(x.kind)} ${esc(x.name)}</div>`+
+    `<div style="color:#8fae95;font-size:11px;margin-top:2px">${esc(x.kind)}${x.kb?" · "+esc(String(x.kb))+" KB":""}${x.when?" · "+esc(x.when):""}</div></button>`).join("");
+  box.innerHTML=`<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:8px">Tap a file to load it onto the map. It loads the same way as a file from this phone.</div>`+
+    `<div style="max-height:52vh;overflow-y:auto;-webkit-overflow-scrolling:touch">${rows}</div>`;
+}
+function dlPick_(i){
+  const it=_dlItems[i]; if(!it) return;
+  _dlBusy=it.name; dlRender_();
+  const cb="__dg"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  const fail=m=>{ _dlBusy=""; dlRender_(); toast(m||"Couldn't load that file",true); };
+  window[cb]=r=>{ clean();
+    if(!r || !r.ok || !r.data){ fail(r&&r.error); return; }
+    try{
+      const bin=atob(r.data), len=bin.length, buf=new Uint8Array(len);
+      for(let j=0;j<len;j++) buf[j]=bin.charCodeAt(j);
+      let file;
+      try{ file=new File([buf], r.name, {type:r.mime||"application/octet-stream"}); }
+      catch(e){ file=new Blob([buf],{type:r.mime||"application/octet-stream"}); file.name=r.name; }
+      _dlBusy=""; closeDataSheet_();
+      if(r.kind==="pdf") loadPdfOverlay(file);
+      else if(r.kind==="shapefile"||r.kind==="geojson"||r.kind==="kml"){
+        // one file could be either boundaries or reference features — ask rather than guess wrong
+        showInfoSheet_("Load "+r.name,
+          `<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:10px">What is in this file?</div>`+
+          `<button type="button" onclick="dlUse_('bound')" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">⬇ Stand boundaries (polygons)</button>`+
+          `<button type="button" onclick="dlUse_('ref')" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">⬇ Reference points / lines</button>`);
+        _dlFile=file;
+      } else { importRefFile(file); }
+    }catch(e){ fail("That file couldn't be read"); }
+  };
+  sc.onerror=()=>{ clean(); fail(); };
+  setTimeout(()=>{ if(window[cb]){ clean(); fail("Timed out — the file may be too large"); } },60000);
+  sc.src=SCRIPT_URL+sep+"action=layerget&id="+encodeURIComponent(it.id)+"&callback="+cb;
+  document.body.appendChild(sc);
+}
+let _dlFile=null;
+function dlUse_(what){
+  const f=_dlFile; _dlFile=null; closeInfoSheet_(); if(!f) return;
+  if(what==="bound") loadBoundaries(f); else importRefFile(f);
+}
 function loadBoundaries(file){
   toast("Reading boundaries…");
   const lower=file.name.toLowerCase();
@@ -4429,6 +4542,19 @@ function renderBoundaries(){
    fetched and keyed by STANDID, and the labels and the tap popup can switch between the two.
    The original attributes are never overwritten; this is a second view of the same polygon. */
 let standAn={}, standAnAt=0, standAnField="ba", standLabelMode="attr";
+/* The backend version, as reported by the stand feed. An Apps Script deployment that predates an
+   endpoint simply doesn't answer it, and the app can only see "no reply" — which looks identical to
+   being out of signal. Knowing the build turns that into a sentence someone can act on. */
+let _sheetBuild="";
+function sheetBuildAtLeast_(n){
+  const m=String(_sheetBuild||"").match(/(\d+)/);
+  return m ? (parseInt(m[1],10) >= n) : false;
+}
+function staleBackendMsg_(need){
+  if(!_sheetBuild) return "";
+  return sheetBuildAtLeast_(need) ? ""
+    : `The Sheet's script is ${esc(_sheetBuild)} and this needs v${need} or newer. Paste the latest Code.gs, then Deploy → Manage deployments → New version.`;
+}
 try{ if(STORE){ standAnField=STORE.getItem("fi_standanfield")||"ba"; standLabelMode=STORE.getItem("fi_standlabmode")||"attr"; } }catch(e){}
 const STAND_AN_OPTS=[["ft","Forest type"],["comp","Comp (>9cm)"],["dom","Dominant species"],["sapComp","Sap comp"],
   ["nplots","Plots"],["ba","BA m²/ha"],["qmd","QMD cm"],["stems","Stems/ha"],["age","Age"],["ht","Height m"],
@@ -4445,6 +4571,7 @@ function standAnFetch_(force){
     // permission comes with the stand feed too, so the map knows what it may offer without the
     // Inventory description panel having been opened first
     if(r && r.mayGenerate!==undefined){ _descMayGen=!!r.mayGenerate; _descHasKey=!!r.hasKey; }
+    if(r && r.build) _sheetBuild=String(r.build);
     standAnAt=Date.now(); try{ renderLabels(); }catch(e){} };
   sc.onerror=clean; setTimeout(()=>{ if(window[cb]) clean(); },12000);
   sc.src=SCRIPT_URL+sep+"action=standanalysis&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
@@ -5185,6 +5312,7 @@ function exportTrack(){
   const gj={type:"FeatureCollection",features:[{type:"Feature",properties:{recorded:new Date().toISOString(),points:trackLog.length},geometry:{type:"LineString",coordinates:trackLog.map(p=>[p[1],p[0]])}}]};
   const blob=new Blob([JSON.stringify(gj)],{type:"application/geo+json"}), url=URL.createObjectURL(blob), a=document.createElement("a");
   a.href=url; a.download=`FRItrack_${nowStr().replace(/[: ]/g,"-")}.geojson`; document.body.appendChild(a); a.click(); a.remove();
+  driveSave_(blob,a.download,"track");
   setTimeout(()=>URL.revokeObjectURL(url),1500); toast(`Track exported — ${trackLog.length} pts`);
 }
 function exportTrackShp(){
@@ -5198,7 +5326,8 @@ function exportTrackShp(){
   const base="FRItrack_"+nowStr().replace(/[: ]/g,"-");
   const zip=zipStore_([{name:base+".shp",data:shp},{name:base+".shx",data:shx},{name:base+".dbf",data:dbf},{name:base+".prj",data:new TextEncoder().encode(PRJ_17N)}]);
   const blob=new Blob([zip],{type:"application/zip"}), url=URL.createObjectURL(blob), a=document.createElement("a");
-  a.href=url; a.download=base+".zip"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1500);
+  a.href=url; a.download=base+".zip"; document.body.appendChild(a); a.click(); a.remove();
+  driveSave_(blob,a.download,"shapefile"); setTimeout(()=>URL.revokeObjectURL(url),1500);
   toast(`Track shapefile (UTM 17N) exported — ${trackLog.length} pts`);
 }
 
@@ -5462,6 +5591,7 @@ function exportRoute(){
   const gj={type:"FeatureCollection",features:[{type:"Feature",properties:{type:"cruise route",created:new Date().toISOString(),points:routePts.length,length_m:Math.round(routeLen())},geometry:{type:"LineString",coordinates:routePts.map(p=>[p[1],p[0]])}}]};
   const blob=new Blob([JSON.stringify(gj)],{type:"application/geo+json"}), url=URL.createObjectURL(blob), a=document.createElement("a");
   a.href=url; a.download=`FRIroute_${nowStr().replace(/[: ]/g,"-")}.geojson`; document.body.appendChild(a); a.click(); a.remove();
+  driveSave_(blob,a.download,"route");
   setTimeout(()=>URL.revokeObjectURL(url),1500); toast(`Cruise route exported — ${routePts.length} pts`);
 }
 
@@ -5525,7 +5655,8 @@ function exportRouteShp(){
   const base="FRIroute_"+nowStr().replace(/[: ]/g,"-");
   const zip=zipStore_([{name:base+".shp",data:shp},{name:base+".shx",data:shx},{name:base+".dbf",data:dbf},{name:base+".prj",data:new TextEncoder().encode(PRJ_17N)}]);
   const blob=new Blob([zip],{type:"application/zip"}), url=URL.createObjectURL(blob), a=document.createElement("a");
-  a.href=url; a.download=base+".zip"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1500);
+  a.href=url; a.download=base+".zip"; document.body.appendChild(a); a.click(); a.remove();
+  driveSave_(blob,a.download,"shapefile"); setTimeout(()=>URL.revokeObjectURL(url),1500);
   toast(`Shapefile (UTM 17N) exported — ${routePts.length} pts`);
 }
 
@@ -5814,6 +5945,30 @@ function exportSelected(kind){
   toast(`Exported ${rows.length} selected plot${rows.length===1?"":"s"}`);
   closeInfoSheet_();
 }
+/* Every map export also goes to the shared Drive folder. A track log or a drawn compartment used to
+   live only in one phone's Downloads, which is no use to anyone else and gone when the phone is.
+   The download still happens exactly as before — this is in addition, never instead, and a failure
+   to reach the Sheet is silent so it can never cost someone their file. */
+function driveSave_(blob,name,kind){
+  try{
+    if(!connected || isOffline()) return;
+    const fr=new FileReader();
+    fr.onload=()=>{
+      try{
+        const b64=String(fr.result).split(",")[1]||"";
+        if(!b64) return;
+        if(b64.length > 8*1024*1024){ toast("Saved to this device only — too big for Drive",true); return; }
+        fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
+          body:JSON.stringify({_action:"mapfile", name:name, kind:kind||"export",
+            mime:(blob.type||"application/octet-stream"), data:b64,
+            cruiser:(cruiser||""), email:(cruiserEmail||"")})})
+          .then(()=>toast("Saved to Drive as well")).catch(()=>{});
+      }catch(e){}
+    };
+    fr.readAsDataURL(blob);
+  }catch(e){}
+}
+function dlShare_(blob,name,kind){ dl_(blob,name); driveSave_(blob,name,kind); }
 function dl_(blob,name){ const url=URL.createObjectURL(blob),a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1500); }
 function emailSelected(){
   const rows=selectedRows_(); if(!rows.length) return;
@@ -5872,13 +6027,25 @@ function allPointLayers_(){
   const layers=[];
   const mine=[]; saved.forEach(p=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X);
     if(isFinite(lat)&&isFinite(lon)) mine.push({lat,lon,stand:(p.STANDID||"").trim()||standOrPolyAt_(lat,lon)||"(unattributed)"}); });
-  if(mine.length) layers.push({layer:"My plots", pts:mine});
+  if(mine.length) layers.push({layer:"My plots (this device)", pts:mine});
   if(crewShown && crewData.length){ const crew=[]; crewData.forEach(r=>{ const lat=parseFloat(r.lat), lon=parseFloat(r.lon);
     if(isFinite(lat)&&isFinite(lon)) crew.push({lat,lon,stand:(r.stand||"").trim()||standOrPolyAt_(lat,lon)||"(unattributed)"}); });
-    if(crew.length) layers.push({layer:"Crew plots", pts:crew}); }
-  if(refLabels && refLabels.length){ const imp=refLabels.filter(r=>isFinite(r.lat)&&isFinite(r.lng))
+    if(crew.length) layers.push({layer:"Crew plots (from the Sheet)", pts:crew}); }
+  /* The imported plots loaded for completion — the blue pins. They were missing from the tally
+     entirely, while the reference points were labelled "Imported points", so the one layer you would
+     most want counted was absent and its name was taken by something else. */
+  if(typeof auditPlots!=="undefined" && auditPlots && auditPlots.length){
+    const imp=[], impDone=[];
+    auditPlots.forEach(p=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X);
+      if(!isFinite(lat)||!isFinite(lon)) return;
+      const rec={lat,lon,stand:(p.STANDID||"").trim()||standOrPolyAt_(lat,lon)||"(unattributed)"};
+      imp.push(rec); if(p._done) impDone.push(rec); });
+    if(imp.length) layers.push({layer:"Imported plots", pts:imp});
+    if(impDone.length) layers.push({layer:"Imported plots — completed", pts:impDone});
+  }
+  if(refLabels && refLabels.length){ const ref=refLabels.filter(r=>isFinite(r.lat)&&isFinite(r.lng))
       .map(r=>({lat:r.lat,lon:r.lng,stand:standOrPolyAt_(r.lat,r.lng)||"(outside compartments)"}));
-    if(imp.length) layers.push({layer:"Imported points", pts:imp}); }
+    if(ref.length) layers.push({layer:"Reference points (loaded layer)", pts:ref}); }
   return layers;
 }
 function countByStand_(pts){ const m={}; pts.forEach(p=>{ const s=p.stand||"(unattributed)"; m[s]=(m[s]||0)+1; }); return m; }
@@ -6034,7 +6201,8 @@ function exportPolyShp(){
   const base="FRIpolys_"+nowStr().replace(/[: ]/g,"-");
   const zip=zipStore_([{name:base+".shp",data:shp},{name:base+".shx",data:shx},{name:base+".dbf",data:dbf},{name:base+".prj",data:new TextEncoder().encode(PRJ_17N)}]);
   const blob=new Blob([zip],{type:"application/zip"}), url=URL.createObjectURL(blob), a=document.createElement("a");
-  a.href=url; a.download=base+".zip"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1500);
+  a.href=url; a.download=base+".zip"; document.body.appendChild(a); a.click(); a.remove();
+  driveSave_(blob,a.download,"shapefile"); setTimeout(()=>URL.revokeObjectURL(url),1500);
   toast(`${all.length} polygon${all.length==1?"":"s"} → shapefile (UTM 17N)`);
 }
 
@@ -6120,7 +6288,8 @@ function dlShp_(base,shp,shx,dbf){
   base=base+"_"+nowStr().replace(/[: ]/g,"-");
   const zip=zipStore_([{name:base+".shp",data:shp},{name:base+".shx",data:shx},{name:base+".dbf",data:dbf},{name:base+".prj",data:new TextEncoder().encode(PRJ_17N)}]);
   const blob=new Blob([zip],{type:"application/zip"}), url=URL.createObjectURL(blob), a=document.createElement("a");
-  a.href=url; a.download=base+".zip"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1500);
+  a.href=url; a.download=base+".zip"; document.body.appendChild(a); a.click(); a.remove();
+  driveSave_(blob,a.download,"shapefile"); setTimeout(()=>URL.revokeObjectURL(url),1500);
 }
 
 /* ---- import reference points / lines / polygons (shapefile, GeoJSON, GPX) ---- */
