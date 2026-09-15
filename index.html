@@ -476,7 +476,8 @@
         <div><label>Lat <span class="code">Y</span></label><input id="Y" type="number" inputmode="decimal" step="any"></div>
         <div><label>Elev <span class="code">Z</span></label><input id="Z" type="number" inputmode="decimal" step="any"></div>
       </div>
-      <button class="addbtn" type="button" onclick="captureGPS()" style="border-style:solid">📍 Capture GPS</button>
+      <button class="addbtn" type="button" onclick="captureGPS()" style="border-style:solid">📍 Capture GPS — where I am now</button>
+      <button class="addbtn" type="button" id="moveOnMapBtn" onclick="moveFromForm_()" style="border-style:solid;display:none">🗺 Move this plot on the map</button>
       <div class="hint" id="gpsHint">WGS84 decimal degrees (Lon→X, Lat→Y, Elev→Z). Convert to UTM NAD83 downstream if needed.</div>
     </div>
   </details>
@@ -1062,7 +1063,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v290";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v292";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1908,7 +1909,7 @@ function resend(i){ send(saved[i], false); }
 
 function editPlot(i){
   loadPlot(saved[i]); plotInAnalysis=String(saved[i].INANALYSIS||"Y").toUpperCase()==="N"?"N":"Y";
-  editingIndex=i; setEditMode(true);
+  editingIndex=i; setEditMode(true); updateMoveBtn_();
   window.scrollTo({top:0,behavior:"smooth"});
   toast("Editing plot — change it, then Update");
 }
@@ -1969,6 +1970,7 @@ function cancelPlot(){
 let editingAudit=null;
 function setEditMode(on,audit){
   $("editBanner").style.display = on?"block":"none";
+  { const b=$("moveOnMapBtn"); if(b) b.style.display = on ? "" : "none"; }
   if(on){ $("editBanner").innerHTML = audit
     ? '🔍 Editing an <b>imported plot</b> — changes stay in the imported plots. <a href="javascript:void(0)" onclick="cancelPlot()">Cancel</a>'
     : '✏️ Editing a saved plot — make changes, then tap <b>Update plot</b>. <a href="javascript:void(0)" onclick="cancelEdit()">Cancel</a>'; }
@@ -2401,7 +2403,7 @@ function nextPlot(){
   htSelect_($("HT"));                                              // refresh height order from latest usage
   defaultNoneFields_();   // pest / disease / SAR / invasive fields default to None
   plotInAnalysis="Y";   // a fresh plot starts included
-  setField($("PLOTNUM"), nextPlotFor(carryStand)); renderGround([]); currentPhotoNames=[]; clearPhotos(); setNow(); updateTally(); autoGPS(); updateHdrAt_();
+  setField($("PLOTNUM"), nextPlotFor(carryStand)); renderGround([]); currentPhotoNames=[]; clearPhotos(); setNow(); updateTally(); autoGPS(); updateHdrAt_(); updateMoveBtn_();
 }
 
 /* ---------- saved list ---------- */
@@ -5320,7 +5322,33 @@ function openAuditLabelPicker(){
   showInfoSheet_("Label imported plots by", `<div style="color:#a9c9b0;font-size:12px;margin-bottom:8px">Pick the field to show inside the blue imported-plot dots on the map.</div>${rows}`);
 }
 function setAuditLabel(k){ auditLabelField=k; try{ STORE&&STORE.setItem("fi_auditlabel",k); }catch(e){} closeInfoSheet_(); if(fmap) renderMapPins(); toast(`Audit plots labelled by ${k}`); }
-function plotPopupHtml_(p,i){ return `<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b><br>${(p.DATE||"").slice(0,16)}<br><a href="javascript:void(0)" onclick="editFromMap(${i})">✎ Edit this plot ›</a> &nbsp; <a href="javascript:void(0)" style="color:#b23b32" onclick="delFromMap(${i})">Delete ✕</a></div>`; }
+/* Tapping close to a pin lands here rather than on the pin itself, so this popup is hit at least as
+   often as the plot card — it needs the same actions. Move was only on the card, which is why it
+   looked missing. */
+function plotPopupHtml_(p,i){ return `<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b><br>${(p.DATE||"").slice(0,16)}<br>`+
+  `<a href="javascript:void(0)" onclick="plotCard(${i},false)">▤ Open plot ›</a><br>`+
+  `<a href="javascript:void(0)" onclick="editFromMap(${i})">✎ Edit this plot ›</a><br>`+
+  `<a href="javascript:void(0)" onclick="moveFromMap_(${i})">📍 Move this plot ›</a><br>`+
+  `<a href="javascript:void(0)" style="color:#b23b32" onclick="delFromMap(${i})">Delete ✕</a></div>`; }
+// the card's move flow, reachable from the pin popup too
+function moveFromMap_(i){
+  try{ fmap.closePopup(); }catch(e){}
+  _plotCardIdx=i; _plotCardAudit=false; plotCardMove();
+}
+/* Moving from inside the form, which is where anyone who tapped "Edit this plot" ends up. Capture GPS
+   already handles "I am standing at the right spot"; this is the other half — positioning it on the
+   map when you are not there. Only shown while editing an existing plot; on a new one the coordinates
+   are set by the GPS or the map crosshair already. */
+function moveFromForm_(){
+  if(editingIndex==null){ toast("Open a saved plot to move it",true); return; }
+  _plotCardIdx=editingIndex; _plotCardAudit=false;
+  closePlotCard();
+  moveOnMap_();          // straight to the draggable pin — the form is already the "this plot" context
+  openMap();
+}
+function updateMoveBtn_(){
+  const b=$("moveOnMapBtn"); if(b) b.style.display = (editingIndex!=null) ? "" : "none";
+}
 
 // ---- Plot data card: a readable, grouped view of everything in a plot, opened by tapping its pin ----
 let _plotCardIdx=null, _plotCardAudit=false;
