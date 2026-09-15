@@ -150,6 +150,10 @@
   .measure-bar{ position:absolute; left:10px; right:10px; bottom:120px; z-index:5400; display:flex; align-items:center; gap:8px; flex-wrap:wrap;
     background:rgba(15,30,13,.94); border:1px solid #33623a; border-radius:10px; padding:9px 11px; box-shadow:0 4px 16px rgba(0,0,0,.5); }
   body.measuring .map-chips, body.measuring .map-legend, body.measuring .map-drop{ display:none !important; }   /* clear the area readout */
+  /* While moving a plot the confirm buttons need the bottom of the screen to themselves — they used to
+     sit under the Me / Fit all / Search chips, which are drawn on top of them. */
+  body.moving .map-chips, body.moving .map-legend{ display:none !important; }
+  body.moving .map-drop{ bottom:10px; }
   .measure-bar #measureText{ font-family:var(--mono); font-size:12px; color:#e8b84b; white-space:normal; flex:1; min-width:0; line-height:1.3; }
   .measure-bar button{ flex:none; background:#16271a; border:1px solid var(--line2,#33623a); color:#cdebcf; font:inherit; font-size:11px; text-transform:uppercase; letter-spacing:.05em; padding:6px 10px; border-radius:7px; cursor:pointer; }
   .map-chips{ position:absolute; left:10px; right:60px; bottom:74px; z-index:5300; display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-start; }
@@ -188,6 +192,10 @@
   .live-legend .lr i{ width:11px; height:11px; border-radius:50%; flex:none; border:1px solid #fff8; }
   .live-legend .lr b{ font-weight:700; } .live-legend .lr span{ color:#9bb6a3; margin-left:auto; padding-left:8px; }
   .map-drop{ position:absolute; left:10px; right:60px; bottom:10px; z-index:5200; }
+  /* Cancel was dark text on the same amber as the confirm button — near-invisible and easy to hit by
+     mistake. It now reads as the secondary action it is. */
+  .dropbtn.cancel{ background:#20130f !important; border-color:#7a3a3a !important; color:#ffd9d2 !important;
+                   font-weight:600 !important; margin-top:8px; }
   .dropbtn{ width:100%; padding:15px; border-radius:10px; border:1px solid #f0c860; background:#f2a83d; color:#1a1000;
     font:inherit; font-size:15px; font-weight:800; letter-spacing:.03em; cursor:pointer; box-shadow:0 4px 18px rgba(0,0,0,.55), 0 0 0 2px rgba(242,168,61,.25); }
   .standlabel{ font-family:var(--mono); font-size:11px; font-weight:700; color:#fff; text-shadow:0 1px 3px #000,0 0 6px #000; white-space:nowrap; }
@@ -1063,7 +1071,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v292";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v293";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -4502,6 +4510,7 @@ function resumeSharing_(){
 }
 function closeMap(){ rememberMapView_(); $("mapView").style.display="none"; document.body.classList.remove("map-open"); stopMapGPS(); if(crewTimer){ clearInterval(crewTimer); crewTimer=null; } if(crewRoutesTimer){ clearInterval(crewRoutesTimer); crewRoutesTimer=null; }
   if(liveOn) pauseLive_();   // pause, don't switch off: resumeSharing_ picks it back up on reopen
+  if(typeof moveMode_!=="undefined" && moveMode_){ try{ moveCancel_(); }catch(e){} }
   if(typeof placeMode!=="undefined" && placeMode){ placeMode=false; if(placeMarker){ fmap.removeLayer(placeMarker); placeMarker=null; } const tp=$("toolPlace"); if(tp) tp.classList.remove("on"); resetDropBar(); }
   if(typeof captureMode!=="undefined" && captureMode){ captureMode=false; const ch=$("mapCrosshair"); if(ch) ch.style.display="none"; resetDropBar(); }
   if(typeof selectMode!=="undefined" && selectMode){ selectMode=false; const b=$("toolSelect"); if(b) b.classList.remove("on"); clearSelDraw_(); selPts=[]; resetDropBar(); }
@@ -4518,7 +4527,7 @@ function initMap(){
   fpins=L.layerGroup().addTo(fmap); fauditpins=L.layerGroup().addTo(fmap); fboundLayer=L.layerGroup().addTo(fmap); flabelLayer=L.layerGroup().addTo(fmap); refLayer=L.layerGroup().addTo(fmap); freflabelLayer=L.layerGroup().addTo(fmap); crewLayer=L.layerGroup().addTo(fmap); liveLayer=L.layerGroup().addTo(fmap); crewRouteLayer=L.layerGroup().addTo(fmap); photoLayer=L.layerGroup().addTo(fmap);
   applyLayerVis_();
   fmap.on("moveend zoomend",rememberMapView_);
-  fmap.on("click",e=>{ if(selectMode){ addSelPoint(e.latlng); return; } if(polyMode){ addPolyPoint(e.latlng); return; } if(routeMode){ addRoutePoint(e.latlng); return; } if(measureMode){ addMeasurePoint(e.latlng); return; } if(moveMode_){ moveTap_(e.latlng.lat,e.latlng.lng); return; }
+  fmap.on("click",e=>{ if(selectMode){ addSelPoint(e.latlng); return; } if(polyMode){ addPolyPoint(e.latlng); return; } if(routeMode){ addRoutePoint(e.latlng); return; } if(measureMode){ addMeasurePoint(e.latlng); return; } if(moveMode_) return;   // the crosshair is the target; taps must not open popups mid-move
     if(placeMode){ placeAt(e.latlng.lat,e.latlng.lng); return; }
     if(nearbyPlotPopup_(e.latlng)) return;                    // a plot pin near the tap wins over the boundary
     { const bf=boundaryFeatureAt(e.latlng.lat,e.latlng.lng); if(bf) showBoundPopup(e.latlng,bf); } });
@@ -5325,11 +5334,23 @@ function setAuditLabel(k){ auditLabelField=k; try{ STORE&&STORE.setItem("fi_audi
 /* Tapping close to a pin lands here rather than on the pin itself, so this popup is hit at least as
    often as the plot card — it needs the same actions. Move was only on the card, which is why it
    looked missing. */
-function plotPopupHtml_(p,i){ return `<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a"><b>${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b><br>${(p.DATE||"").slice(0,16)}<br>`+
-  `<a href="javascript:void(0)" onclick="plotCard(${i},false)">▤ Open plot ›</a><br>`+
-  `<a href="javascript:void(0)" onclick="editFromMap(${i})">✎ Edit this plot ›</a><br>`+
-  `<a href="javascript:void(0)" onclick="moveFromMap_(${i})">📍 Move this plot ›</a><br>`+
-  `<a href="javascript:void(0)" style="color:#b23b32" onclick="delFromMap(${i})">Delete ✕</a></div>`; }
+function plotPopupHtml_(p,i){
+  /* Proper buttons with space between them. Four links a few pixels apart is a mis-tap waiting to
+     happen, and one of them deletes the plot — so Delete is separated from the rest and coloured
+     for what it does. */
+  const b=(label,call,style)=>`<button type="button" onclick="${call}" style="display:block;width:100%;text-align:left;`+
+    `padding:11px 12px;margin:0 0 7px;border-radius:8px;border:1px solid #9fb8a4;background:#f4f8f2;`+
+    `color:#16271a;font:inherit;font-size:13px;${style||""}">${label}</button>`;
+  return `<div style="font-family:'Courier New',monospace;color:#16271a;min-width:190px">`+
+    `<b style="font-size:13px">${esc(p.STANDID||"—")} · plot ${esc(p.PLOTNUM||"?")}</b>`+
+    `<div style="font-size:11px;color:#5a7a62;margin:2px 0 8px">${(p.DATE||"").slice(0,16)}</div>`+
+    b("▤ Open plot",`plotCard(${i},false)`)+
+    b("✎ Edit this plot",`editFromMap(${i})`)+
+    b("📍 Move this plot",`moveFromMap_(${i})`)+
+    `<div style="height:6px"></div>`+
+    b("🗑 Delete",`delFromMap(${i})`,"border-color:#c9a09a;background:#fbf0ee;color:#8c2f26;margin-bottom:0")+
+    `</div>`;
+}
 // the card's move flow, reachable from the pin popup too
 function moveFromMap_(i){
   try{ fmap.closePopup(); }catch(e){}
@@ -5541,36 +5562,37 @@ function moveHere_(){
     pos=>moveApply_(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy),
     ()=>toast("Couldn't get a GPS fix",true), {enableHighAccuracy:true,timeout:15000,maximumAge:0});
 }
+/* The crosshair, not a draggable pin. A pin has to be found, grabbed and dragged under a fingertip
+   that hides it; the crosshair stays fixed in the centre and the map moves under it, which is how
+   the capture tool already works and is far steadier one-handed in the bush. */
 function moveOnMap_(){
   closeInfoSheet_();
   const p=(_moveAudit?auditPlots:saved)[_moveIdx]; if(!p) return;
   const lat=parseFloat(p.Y), lon=parseFloat(p.X);
   const c=(isFinite(lat)&&isFinite(lon))?[lat,lon]:(fmap?fmap.getCenter():null);
   if(!c){ toast("Open the map first",true); return; }
-  if(_moveMarker){ try{ fmap.removeLayer(_moveMarker); }catch(e){} }
-  _moveMarker=L.marker(c,{draggable:true,zIndexOffset:2000,icon:L.divIcon({className:"",
-    html:'<div style="width:28px;height:28px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#ff36c0;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.6)"></div>',
-    iconSize:[28,28],iconAnchor:[14,28]})}).addTo(fmap);
   fmap.setView(c, Math.max(fmap.getZoom(),18));
   moveMode_=true;
+  const ch=$("mapCrosshair"); if(ch) ch.style.display="";
+  document.body.classList.add("moving");     // clears the chip row out of the way of the buttons
   $("mapDrop").innerHTML='<button class="dropbtn" type="button" onclick="moveConfirm_()">✓ Move the plot here</button>'+
-    '<button class="dropbtn" type="button" style="background:#2a1212;border-color:#7a3a3a" onclick="moveCancel_()">✕ Cancel</button>';
-  toast("Drag the pink pin, or tap the map, then confirm");
+    '<button class="dropbtn cancel" type="button" onclick="moveCancel_()">✕ Cancel — leave it where it was</button>';
+  toast("Drag the map so the crosshair sits on the plot");
 }
 let moveMode_=false;
-function moveTap_(lat,lon){ if(_moveMarker) _moveMarker.setLatLng([lat,lon]); }
-function moveCancel_(){
+function moveEnd_(){
   moveMode_=false;
-  if(_moveMarker){ try{ fmap.removeLayer(_moveMarker); }catch(e){} _moveMarker=null; }
-  _moveIdx=null; resetDropBar(); toast("Move cancelled");
-}
-function moveConfirm_(){
-  if(!_moveMarker) return;
-  const ll=_moveMarker.getLatLng();
-  moveMode_=false;
-  try{ fmap.removeLayer(_moveMarker); }catch(e){} _moveMarker=null;
+  const ch=$("mapCrosshair");
+  if(ch && !(typeof captureMode!=="undefined" && captureMode)) ch.style.display="none";
+  document.body.classList.remove("moving");
   resetDropBar();
-  moveApply_(ll.lat, ll.lng, null);
+}
+function moveCancel_(){ moveEnd_(); _moveIdx=null; toast("Move cancelled — the plot has not been changed"); }
+function moveConfirm_(){
+  if(!fmap) return;
+  const c=fmap.getCenter();          // the crosshair is the centre of the map, by definition
+  moveEnd_();
+  moveApply_(c.lat, c.lng, null);
 }
 function moveApply_(lat,lon,acc){
   const list=_moveAudit?auditPlots:saved;
