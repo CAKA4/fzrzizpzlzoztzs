@@ -1050,7 +1050,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v273";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v277";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3257,8 +3257,11 @@ function ngBatch_(){
   };
   window[cb]=r=>{ clean(); done(r); };
   sc.onerror=()=>{ clean(); done(null); };
-  setTimeout(()=>{ if(window[cb]){ clean(); done(null); } },120000);
-  sc.src=SCRIPT_URL+sep+"action=gennotes&max=6&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
+  setTimeout(()=>{ if(window[cb]){ clean(); done(null); } },180000);
+  /* 3 per batch, not 6. Each call is ~6.5 s plus the model's own time, and one rate-limit backoff
+     adds up to 68 s — six of those outran the app's wait while the server carried on working, which
+     looked like a failure and was not one. */
+  sc.src=SCRIPT_URL+sep+"action=gennotes&max=3&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
   document.body.appendChild(sc);
 }
 /* Everything the crew has exported from the map, listed by who made it. The point is that a track
@@ -4774,12 +4777,20 @@ function sheetReachable_(then){
   document.body.appendChild(sc);
 }
 /* One sentence that says which of the two it is, and what to do about it. */
+/* Three possible answers, and the version has to be compared rather than assumed. This previously
+   announced "your script is too old" whenever the Sheet answered at all — so it confidently reported
+   v273 as older than v251, the one explanation that could not be true. */
 function backendFailMsg_(need,then){
   sheetReachable_(ok=>{
     if(!ok){ then("Couldn't reach the Sheet — check your connection and try again."); return; }
-    const b=_sheetBuild?("is "+_sheetBuild):"is older than this needs";
-    then(`The Sheet is reachable, but its script ${b} and this feature needs v${need} or newer. `+
-         `Paste the latest Code.gs into the Apps Script editor, then Deploy → Manage deployments → New version.`);
+    if(_sheetBuild && !sheetBuildAtLeast_(need)){
+      then(`The Sheet is reachable, but its script is ${esc(_sheetBuild)} and this needs v${need} or newer. `+
+           `Paste the latest Code.gs into the Apps Script editor, then Deploy → Manage deployments → New version.`);
+      return;
+    }
+    then(`The Sheet answered, but this request didn't finish in time — it is probably still working. `+
+         `Wait a moment and tap again: anything already written is kept, so it carries on where it stopped.`+
+         (_sheetBuild?` (Sheet script ${esc(_sheetBuild)}.)`:""));
   });
 }
 function staleBackendMsg_(need){
@@ -4885,10 +4896,19 @@ function genNote_(stand){
       const a=standAn[String(stand).trim().toLowerCase()];
       if(a){ a.notes=r.text; a.notesSrc=r.src||"gemini"; }
       renderBoundPopup_(); toast("Summary written");
-    } else { renderBoundPopup_(); toast((r&&r.error)?r.error:"Couldn't write the summary",true); } };
+      standAnAt=0;   // so the next map refresh picks it up rather than serving the stale feed
+    } else if(r && r.error){ renderBoundPopup_(); toast(r.error,true); }
+    else {
+      /* No reply is not the same as no summary — the free tier backs off up to 68 s on a rate limit,
+         which used to outrun the 45 s wait and leave this looking like a failure while the Sheet
+         finished the job. Say what is actually likely, and refresh in case it did land. */
+      renderBoundPopup_();
+      toast("No answer yet — it may still be writing. Reopen this compartment in a moment.",true);
+      standAnAt=0; setTimeout(()=>{ try{ standAnFetch_(true); }catch(e){} },8000);
+    } };
   window[cb]=r=>{ clean(); done(r); };
   sc.onerror=()=>{ clean(); done(null); };
-  setTimeout(()=>{ if(window[cb]){ clean(); done(null); } },45000);   // a Gemini call, not a page fetch
+  setTimeout(()=>{ if(window[cb]){ clean(); done(null); } },180000);   // a Gemini call with backoff, not a page fetch
   sc.src=SCRIPT_URL+sep+"action=gennote&stand="+encodeURIComponent(stand)+"&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
   document.body.appendChild(sc);
 }
@@ -4913,7 +4933,11 @@ function renderBoundPopup_(){
       rows+=row("Plots",a.nplots);
       STAND_AN_OPTS.forEach(([k,label])=>{ if(k==="nplots") return; const v=standAnVal_(a,k); if(v!=="") rows+=row(label,v); });
       // No summary yet: offer to write this one compartment's now — a single call, a few seconds.
-      if(!a.notes && a.nplots) note=noteGenPrompt_(a.stand||"");
+      if(!a.notes && a.nplots){
+        note=noteGenPrompt_(a.stand||"");
+        // the feed is cached for a minute; if it says "none" refresh once, in case one was just written
+        if(connected && !isOffline() && (Date.now()-standAnAt)>20000){ standAnAt=0; try{ standAnFetch_(true); }catch(e){} }
+      }
     } else {
       note=`<div style="color:#5a7a62;margin-top:3px;font-size:11px">No analysed plots in this compartment yet${(!connected||isOffline())?" (or you're offline)":""}.</div>`;
     }
