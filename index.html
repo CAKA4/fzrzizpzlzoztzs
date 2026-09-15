@@ -380,7 +380,7 @@
   .chip-tog{ border:1px solid var(--line2); background:var(--field); color:var(--muted); border-radius:999px;
     padding:9px 13px; font-size:13.5px; cursor:pointer; min-height:42px; line-height:1; -webkit-tap-highlight-color:transparent }
   .chip-tog.on{ background:#163322; border-color:var(--accent-dk); color:#cdebd6; font-weight:600 }
-  .chip-tog.on::before{ content:"✓ "; color:#7fd0a0 }
+  .chip-tog.on::before{ content:"" }   /* the tick is a span now, so it can sit beside the ✎ */
   /* Ground-species chips are tinted by first letter so the alphabetical run reads as coloured bands —
      easier to find a plant by eye in a long list. The hue is set inline per chip (see letterHue_);
      these rules just let the tint show through without touching the selected state. */
@@ -391,7 +391,7 @@
   /* Recorded elsewhere in this compartment but not on this plot: a hollow marker, clearly different
      from the solid ✓ of a species picked here. */
   .chip-tog.alpha.instand{ box-shadow:inset 0 0 0 1px #6f8f76 }
-  .chip-tog.alpha.instand::before{ content:"◦ "; color:#9ec3a6 }
+
   .modal{ position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50; display:flex; align-items:center; justify-content:center; padding:20px }
   body.map-open .modal{ z-index:6000; }   /* Tools & other menus opened from the map must sit above it (mapView is z-index 5000) */
   .modal-card{ background:var(--card); border:1px solid var(--line2); border-radius:14px; padding:18px; width:100%; max-width:380px; box-shadow:0 20px 60px rgba(0,0,0,.55); max-height:calc(100vh - 40px); overflow-y:auto; -webkit-overflow-scrolling:touch }
@@ -1062,7 +1062,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v286";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v287";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1480,11 +1480,23 @@ function renderGround(selected){
   const all=[...GROUND_SPECIES]; customGround.forEach(s=>{ if(!all.some(x=>x.toLowerCase()===s.toLowerCase())) all.push(s); });
   sel.forEach(s=>{ if(!all.some(x=>x.toLowerCase()===s.toLowerCase())) all.push(s); });
   all.sort((a,b)=>a.toLowerCase().localeCompare(b.toLowerCase()));   // added plants file in alphabetically on this and every later plot
-  const isCustom=n=>customGround.some(x=>x.toLowerCase()===String(n).toLowerCase());
+  /* The pencil marks a name the crew added, so it can be corrected. It used to test customGround —
+     but that list also holds every shared name synced down from the Sheet, so virtually every plant
+     wore a pencil. The real test is whether it is absent from the built-in list. */
+  const builtIn=new Set(GROUND_SPECIES.map(x=>String(x).toLowerCase()));
+  const isCustom=n=>!builtIn.has(String(n).toLowerCase());
   const inStand=standGroundSet_();
-  $("grndChips").innerHTML = all.map(n=>`<button type="button" class="chip-tog alpha${sel.has(n)?" on":""}${(!sel.has(n)&&inStand.has(String(n).toLowerCase()))?" instand":""}" style="${chipTint_(n)}" data-name="${esc(n)}" title="${inStand.has(String(n).toLowerCase())?"Already recorded elsewhere in this compartment":""}" onclick="toggleGround(this)">${esc(n)}`+
-    (isCustom(n)?`<span onclick="event.stopPropagation();editGround_('${esc(n).replace(/'/g,"&#39;")}')" style="margin-left:5px;opacity:.75">✎</span>`:"")+
-    `</button>`).join("");
+  /* Markers are spans, not CSS ::before. Two ::before rules on one chip fought each other, so the
+     "already in this compartment" mark never appeared beside anything. */
+  $("grndChips").innerHTML = all.map(n=>{
+    const picked=sel.has(n), known=!picked && inStand.has(String(n).toLowerCase());
+    const mark = picked ? `<span style="color:#7fd0a0;font-weight:700">✓ </span>`
+               : (known ? `<span style="color:#9ec3a6" title="Already recorded elsewhere in this compartment">◦ </span>` : "");
+    return `<button type="button" class="chip-tog alpha${picked?" on":""}${known?" instand":""}" style="${chipTint_(n)}" data-name="${esc(n)}" onclick="toggleGround(this)">`+
+      mark+esc(n)+
+      (isCustom(n)?`<span onclick="event.stopPropagation();editGround_('${esc(n).replace(/'/g,"&#39;")}')" style="margin-left:6px;opacity:.6">✎</span>`:"")+
+      `</button>`;
+  }).join("");
   updateGroundCount();
 }
 // One tap records a measured zero across the cover trio. Left blank they stay "not recorded".
@@ -1493,7 +1505,11 @@ function coverNone(){
     if([...el.options].some(o=>o.value==="0")){ el.value="0"; el.classList.remove("needs-entry"); el.dispatchEvent(new Event("change",{bubbles:true})); } });
   toast("Ground cover set to 0 %");
 }
-function toggleGround(btn){ btn.classList.toggle("on"); updateGroundCount(); }
+function toggleGround(btn){
+  btn.classList.toggle("on"); updateGroundCount();
+  // redraw so the ✓ / ◦ marker matches the new state (the marker is content, not a CSS pseudo-element)
+  renderGround(getGround());
+}
 function getGround(){ return [...$("grndChips").querySelectorAll(".chip-tog.on")].map(b=>b.getAttribute("data-name")); }
 function updateGroundCount(){ $("grndCount").textContent = getGround().length; }
 /* Keep the collapsed header bar honest: stand and plot, or an amber prompt when either is missing —
