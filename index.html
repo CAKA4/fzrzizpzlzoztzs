@@ -580,7 +580,8 @@
         <div><label>Disease observed <span class="code">DISEASE</span></label><select id="DISEASE"></select></div>
         <div><label>Disease severity <span class="code">DISEQUAN</span></label><select id="DISEQUAN"></select></div>
       </div>
-      <div class="full"><label>Red pine decline <span class="code">RPD</span></label><select id="RPD"></select></div>
+      <div class="full"><label>Red pine decline <span class="code">RPD</span></label><select id="RPD"></select>
+        <div class="hint">Percentage of red pine affected, judged by eye between the last plot and this one.</div></div>
     </div>
   </details>
 
@@ -1050,7 +1051,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v277";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v284";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1926,6 +1927,19 @@ function persist(){ if(STORE){ try{ STORE.setItem(PKEY, JSON.stringify(saved)); 
 const AUDITKEY="fi_auditplots";
 let auditPlots=[];
 if(STORE){ try{ const raw=STORE.getItem(AUDITKEY); if(raw) auditPlots=JSON.parse(raw)||[]; }catch(e){ auditPlots=[]; } }
+/* Devices that restored before this rule existed are still holding plots in the blue set that are
+   already in the Sheet. Move them across once, at load, so nobody has to clear and restore again. */
+(function migrateSentAudit_(){
+  try{
+    if(!auditPlots.length) return;
+    const done=auditPlots.filter(p=>p && p._sent && String(p._id||"").trim());
+    if(!done.length) return;
+    const have=new Set(saved.map(p=>String(p._id||"").trim()).filter(Boolean));
+    done.forEach(p=>{ if(!have.has(String(p._id).trim())) saved.push(p); });
+    auditPlots=auditPlots.filter(p=>!(p && p._sent));
+    persist(); persistAudit();
+  }catch(e){}
+})();
 function persistAudit(){ if(STORE){ try{ STORE.setItem(AUDITKEY, JSON.stringify(auditPlots)); }catch(e){} } }
 
 // The app's own plot field names — anything matching one of these (after normalizing) is kept.
@@ -2037,12 +2051,21 @@ function showImportSummary_(n,dups,matched,skipped,fname){
 function pushAuditToSheet(){
   if(!auditPlots.length){ toast("No imported plots to push",true); return; }
   if(!connected){ toast("Connect to a Sheet first",true); return; }
+  /* Never offer to send a plot that is already in the Sheet. Restored rows carry _sent, and pushing
+     them again would only overwrite themselves — which is what made it look as though the earlier
+     push had not worked. */
+  const already=auditPlots.filter(p=>p._sent).length;
+  if(already===auditPlots.length){
+    toast(`All ${already} are already in the Sheet — nothing to push`);
+    return;
+  }
   const dups=auditPlots.filter(p=>p._dup).length;
-  if(!confirm(`Send ${auditPlots.length} imported plot${auditPlots.length===1?"":"s"} to the Google Sheet for separate analysis?`+
+  if(!confirm(`Send ${auditPlots.length-already} imported plot${(auditPlots.length-already)===1?"":"s"} to the Google Sheet for separate analysis?`+
+    (already?`\n\n${already} of the ${auditPlots.length} are already in the Sheet and will be left alone.`:"")+
     (dups?`\n\n${dups} are flagged as possible duplicates of plots you already have — they'll be sent too.`:"")+
     `\n\nThey'll be kept as imported plots so you can analyze them apart from your own (and combine later).`)) return;
   // Build the batch: strip local-only flags, tag as IMPORTED, carry the DONE completion marker.
-  const batch=auditPlots.slice().map(p=>{ const q=Object.assign({},p); delete q._audit; delete q._dup; delete q._src; q._sent=false;
+  const batch=auditPlots.filter(p=>!p._sent).map(p=>{ const q=Object.assign({},p); delete q._audit; delete q._dup; delete q._src; q._sent=false;
     q.PLOTSRC="IMPORTED";
     if(p._done){ q.FLAG=(String(q.FLAG||"").replace(/\bDONE\b/g,"").trim()+" DONE").trim(); }
     return q; });
@@ -2058,7 +2081,12 @@ function pushAuditToSheet(){
           const added=(after>=0&&before>=0)?(after-before):-1;
           // move pushed plots into the local "saved/sent" set so they show as sent
           batch.forEach(q=>{ q._sent=true; saved.push(q); });
-          auditPlots=[]; persistAudit(); persist(); renderSaved(); netDot();
+          /* Everything now in the Sheet leaves the blue set. Keeping the already-sent ones there was
+             the same mistake in another place: blue must mean "not in the Sheet yet", or a plot stays
+             blue on that device for ever and keeps asking to be pushed. */
+          auditPlots.filter(p=>p._sent).forEach(p=>{ if(!batch.some(b=>b._id===p._id)) saved.push(p); });
+          auditPlots=auditPlots.filter(p=>!p._sent);
+          persistAudit(); persist(); renderSaved(); netDot();
           /* Ask the Sheet what it actually did, rather than inferring from a row count. A plot that
              matched an existing row on stand + date + coordinates is an update, not an addition —
              the count does not move and the plots look like they vanished. */
@@ -2419,7 +2447,8 @@ function captureGPS(auto){
   navigator.geolocation.getCurrentPosition(p=>{ const c=p.coords;
     $("X").value=c.longitude.toFixed(6); $("Y").value=c.latitude.toFixed(6); $("Z").value=(c.altitude!=null)?c.altitude.toFixed(1):"";
     $("gpsHint").textContent=`Captured ±${Math.round(c.accuracy)} m (WGS84)${auto?" automatically":""}.`; toast(auto?"GPS captured for new plot":"GPS captured"); },
-    e=>{ $("gpsHint").textContent="GPS unavailable — capture or enter manually. ("+e.message+")"; if(!auto) toast("GPS failed",true); },
+    e=>{ $("gpsHint").textContent="GPS unavailable — capture or enter manually. ("+e.message+")";
+         if(!auto){ toast("GPS failed",true); try{ if(e && e.code===1) gpsTrouble_(e); }catch(x){} } },
     {enableHighAccuracy:true,timeout:15000,maximumAge:0});
 }
 function autoGPS(){ captureGPS(true); }   // fresh plot only — never overwrites an edited plot's coords
@@ -2840,6 +2869,9 @@ function appStatus_(){
                         :(isOffline()?`<span style="color:#e8a33a">offline</span>`:`<span style="color:#7fd0a0">online</span>`)))+
       row("You", (cruiser||cruiserEmail)?esc((cruiser||"")+(cruiserEmail?" · "+cruiserEmail:"")) 
                  :`<span style="color:#e8a33a">not set — tap “Your name &amp; email”</span>`)+
+      row("Location", mePos?`<span style="color:#7fd0a0">fix acquired</span>`
+            :(navigator.geolocation?`<span style="color:#e8a33a">no fix — open the map to start it</span>`
+            :`<span style="color:#e8a33a">not available on this device</span>`))+
       row("Plots on device", nMine+(nImp?` <span style="color:#8fae95">· ${nImp} imported</span>`:""))+
       row("Storage used", kb+" KB ("+pct+"%)")+
       `</table>`+
@@ -3251,6 +3283,8 @@ function ngBatch_(){
       return; }
     _ngDone+=(r.done||0); _ngLeft=(r.remaining==null?null:r.remaining);
     if(r.error) _ngErr=r.error;
+    // a spent daily allowance stops the run outright; nothing after it can succeed today
+    if(r.quota){ _ngRun=false; ngRender_(); return; }
     if(_ngLeft>0 && (r.done||0)>0 && _ngRun && !r.error){ ngRender_(); setTimeout(ngBatch_,400); return; }
     _ngRun=false; ngRender_();
     if(_ngLeft===0){ toast(`${_ngDone} summar${_ngDone===1?"y":"ies"} written`); standAnAt=0; try{ standAnFetch_(true); }catch(e){} }
@@ -3701,13 +3735,17 @@ function restoreFromSheet(){
         let n=0; for(let i=1;i<=28;i++){ if(r["T"+i+"SP"]) n++; }
         r._id = r.PlotID || genId();      // KEEP the Sheet's PlotID so later edits update the row (not duplicate)
         r._sent=true; r._ts=r.DATE||nowStr(); r._trees=n;
-        const isImp = /^(imported|audit)$/i.test(String(r.PLOTSRC||"").trim());
+        /* Anything restored from the Sheet is, by definition, already in the Sheet. It used to be
+           sorted by PLOTSRC — so a plot pushed from one device came back on another as a blue
+           "imported" pin still asking to be pushed, which is what the crew were seeing. PLOTSRC is
+           permanent provenance, not a to-do state. The blue set means "loaded from a file and not yet
+           sent"; a restored row is neither. */
         if(/\bDONE\b/.test(String(r.FLAG||""))) r._done=true;
-        if(isImp){ r._audit=true; auditPlots.push(r); imp++; }   // imported plots go back into the imported (blue) set
-        else { saved.push(r); }
+        saved.push(r);
+        if(/^(imported|audit)$/i.test(String(r.PLOTSRC||"").trim())) imp++;
         if(rid) haveIds.add(rid); added++; });
       if(added){ persist(); persistAudit(); renderSaved(); netDot(); if(fmap) renderMapPins(); if(typeof renderLayerVis_==="function") renderLayerVis_(); if(typeof updateLayerStatus==="function") updateLayerStatus(); }
-      toast(added?`Restored ${added} plot${added>1?"s":""} from the Sheet`+(imp?` (${imp} imported)`:""):"No new plots in the Sheet");
+      toast(added?`Restored ${added} plot${added>1?"s":""} from the Sheet`+(imp?` (${imp} originally imported)`:""):"No new plots in the Sheet");
       /* Restore only ever adds, so a plot deleted in the Sheet stayed on the device for good. Offer to
          drop those too — but only plots that came from the Sheet in the first place (_sent, with a
          PlotID the Sheet no longer has). Anything collected here and not yet uploaded is never
@@ -4415,7 +4453,8 @@ function initMap(){
   fpins=L.layerGroup().addTo(fmap); fauditpins=L.layerGroup().addTo(fmap); fboundLayer=L.layerGroup().addTo(fmap); flabelLayer=L.layerGroup().addTo(fmap); refLayer=L.layerGroup().addTo(fmap); freflabelLayer=L.layerGroup().addTo(fmap); crewLayer=L.layerGroup().addTo(fmap); liveLayer=L.layerGroup().addTo(fmap); crewRouteLayer=L.layerGroup().addTo(fmap); photoLayer=L.layerGroup().addTo(fmap);
   applyLayerVis_();
   fmap.on("moveend zoomend",rememberMapView_);
-  fmap.on("click",e=>{ if(selectMode){ addSelPoint(e.latlng); return; } if(polyMode){ addPolyPoint(e.latlng); return; } if(routeMode){ addRoutePoint(e.latlng); return; } if(measureMode){ addMeasurePoint(e.latlng); return; } if(placeMode){ placeAt(e.latlng.lat,e.latlng.lng); return; }
+  fmap.on("click",e=>{ if(selectMode){ addSelPoint(e.latlng); return; } if(polyMode){ addPolyPoint(e.latlng); return; } if(routeMode){ addRoutePoint(e.latlng); return; } if(measureMode){ addMeasurePoint(e.latlng); return; } if(moveMode_){ moveTap_(e.latlng.lat,e.latlng.lng); return; }
+    if(placeMode){ placeAt(e.latlng.lat,e.latlng.lng); return; }
     if(nearbyPlotPopup_(e.latlng)) return;                    // a plot pin near the tap wins over the boundary
     { const bf=boundaryFeatureAt(e.latlng.lat,e.latlng.lng); if(bf) showBoundPopup(e.latlng,bf); } });
   // Keep taps on the on-map controls from also being treated as map clicks (which in draw modes would drop a stray point).
@@ -4997,7 +5036,31 @@ function startMapGPS(){ if(!navigator.geolocation) return; stopMapGPS();
       const cut=Date.now()-8000; meSamples=meSamples.filter(s=>s.t>=cut); if(meSamples.length>12) meSamples=meSamples.slice(-12);
       updateHeading_(c);
       drawMe(); if(trackActive) addTrackPt(mePos.lat,mePos.lon); },
-    ()=>{}, {enableHighAccuracy:true,maximumAge:2000,timeout:15000}); }
+    /* Errors used to be swallowed here, so a refused permission and a slow fix looked identical —
+       both just left "No GPS fix yet" forever with nothing to act on. Report the first one, in the
+       terms the person can actually do something about. */
+    err=>{ if(_gpsErrShown) return; _gpsErrShown=true; gpsTrouble_(err); },
+    {enableHighAccuracy:true,maximumAge:2000,timeout:15000}); }
+let _gpsErrShown=false;
+/* iOS Safari has three separate places location can be switched off, and the browser only ever says
+   "denied" — so name all three rather than leaving the crew guessing. */
+function gpsTrouble_(err){
+  const code=err&&err.code, msg=(err&&err.message)||"";
+  if(code===1){
+    showInfoSheet_("Location is blocked",
+      `<div style="color:#a9c9b0;font-size:13px;line-height:1.55">`+
+      `<p style="margin:0 0 8px">Safari isn't allowing this page to use your location. There are three separate settings on an iPhone and all of them have to be on:</p>`+
+      `<p style="margin:0 0 6px"><b>1.</b> In Safari, tap <b>ᴀA</b> in the address bar → <b>Website Settings</b> → <b>Location</b> → <b>Allow</b>. This one is per-website and is the usual culprit.</p>`+
+      `<p style="margin:0 0 6px"><b>2.</b> Settings → Privacy &amp; Security → Location Services → <b>Safari Websites</b> → While Using the App, and <b>Precise Location</b> on.</p>`+
+      `<p style="margin:0 0 6px"><b>3.</b> Not in a Private Browsing tab — permission isn't kept there.</p>`+
+      `<p style="margin:0">Then close the tab and reopen the app.</p></div>`);
+  } else if(code===3){
+    toast("GPS is taking a while — under heavy canopy the first fix can take a minute. Step into an opening if it persists.",true);
+    _gpsErrShown=false;   // a timeout is worth reporting again later
+  } else {
+    toast("Location unavailable"+(msg?": "+msg:""),true);
+  }
+}
 function stopMapGPS(){ if(fwatch!=null&&navigator.geolocation){ navigator.geolocation.clearWatch(fwatch); fwatch=null; } }
 // bearing a→b in degrees (0 = north, clockwise)
 function bearing_(a,b){ const toR=Math.PI/180;
@@ -5356,11 +5419,113 @@ function plotCard(i,isAudit){
   setTimeout(()=>{ pcFillPhotos_(p).catch(()=>{}); },0);
   $("plotCardBody").innerHTML=plotCardHtml_(p);
   $("plotCardActions").innerHTML = isAudit
-    ? `<button class="btn ghost" type="button" onclick="closePlotCard()">Close</button><button class="btn submit" type="button" onclick="plotCardEdit()">🔍 Review / edit</button>`
-    : `<button class="btn ghost" type="button" onclick="closePlotCard()">Close</button><button class="btn ghost" type="button" style="color:#e9a89f" onclick="plotCardDelete()">🗑 Delete</button><button class="btn submit" type="button" onclick="plotCardEdit()">✎ Edit</button>`;
+    ? `<button class="btn ghost" type="button" onclick="closePlotCard()">Close</button><button class="btn ghost" type="button" onclick="plotCardMove()">📍 Move</button><button class="btn submit" type="button" onclick="plotCardEdit()">🔍 Review / edit</button>`
+    : `<button class="btn ghost" type="button" onclick="closePlotCard()">Close</button><button class="btn ghost" type="button" style="color:#e9a89f" onclick="plotCardMove()">📍 Move</button><button class="btn ghost" type="button" style="color:#e9a89f" onclick="plotCardDelete()">🗑 Delete</button><button class="btn submit" type="button" onclick="plotCardEdit()">✎ Edit</button>`;
   $("plotCardModal").style.display="flex";
 }
 function closePlotCard(){ $("plotCardModal").style.display="none"; }
+/* ── Move a plot ───────────────────────────────────────────────────────────────
+   A plot recorded at the wrong spot — GPS drift under canopy, or a plot dropped from the truck and
+   walked to afterwards — could only be fixed by deleting and re-entering it, losing the tally. This
+   reuses the same draggable pin the "place a plot" tool uses: drag or tap to position, confirm, done.
+   Moving can change which compartment the plot falls in, so the stand and tract are offered too. */
+let _moveIdx=null, _moveAudit=false, _moveMarker=null;
+function plotCardMove(){
+  const i=_plotCardIdx, isA=_plotCardAudit;
+  const p=(isA?auditPlots:saved)[i]; if(!p) return;
+  closePlotCard();
+  _moveIdx=i; _moveAudit=isA;
+  const lat=parseFloat(p.Y), lon=parseFloat(p.X);
+  showInfoSheet_("Move plot "+(p.PLOTNUM||"")+(p.STANDID?" in "+p.STANDID:""),
+    `<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:10px">Where should this plot be?</div>`+
+    `<button type="button" onclick="moveHere_()" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">◎ Where I am standing now<div style="color:#8fae95;font-size:11px;margin-top:2px">Uses the current GPS fix</div></button>`+
+    `<button type="button" onclick="moveOnMap_()" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">📍 Point on the map<div style="color:#8fae95;font-size:11px;margin-top:2px">Drag the pin, then confirm</div></button>`+
+    `<div style="color:#5a7a62;font-size:11px;margin-top:8px;line-height:1.4">Currently ${isFinite(lat)?lat.toFixed(5)+", "+lon.toFixed(5):"no location recorded"}. The tally, notes and photos are untouched.</div>`);
+}
+function moveHere_(){
+  closeInfoSheet_();
+  if(!navigator.geolocation){ toast("No GPS on this device",true); return; }
+  toast("Getting a fix…");
+  navigator.geolocation.getCurrentPosition(
+    pos=>moveApply_(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy),
+    ()=>toast("Couldn't get a GPS fix",true), {enableHighAccuracy:true,timeout:15000,maximumAge:0});
+}
+function moveOnMap_(){
+  closeInfoSheet_();
+  const p=(_moveAudit?auditPlots:saved)[_moveIdx]; if(!p) return;
+  const lat=parseFloat(p.Y), lon=parseFloat(p.X);
+  const c=(isFinite(lat)&&isFinite(lon))?[lat,lon]:(fmap?fmap.getCenter():null);
+  if(!c){ toast("Open the map first",true); return; }
+  if(_moveMarker){ try{ fmap.removeLayer(_moveMarker); }catch(e){} }
+  _moveMarker=L.marker(c,{draggable:true,zIndexOffset:2000,icon:L.divIcon({className:"",
+    html:'<div style="width:28px;height:28px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#ff36c0;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.6)"></div>',
+    iconSize:[28,28],iconAnchor:[14,28]})}).addTo(fmap);
+  fmap.setView(c, Math.max(fmap.getZoom(),18));
+  moveMode_=true;
+  $("mapDrop").innerHTML='<button class="dropbtn" type="button" onclick="moveConfirm_()">✓ Move the plot here</button>'+
+    '<button class="dropbtn" type="button" style="background:#2a1212;border-color:#7a3a3a" onclick="moveCancel_()">✕ Cancel</button>';
+  toast("Drag the pink pin, or tap the map, then confirm");
+}
+let moveMode_=false;
+function moveTap_(lat,lon){ if(_moveMarker) _moveMarker.setLatLng([lat,lon]); }
+function moveCancel_(){
+  moveMode_=false;
+  if(_moveMarker){ try{ fmap.removeLayer(_moveMarker); }catch(e){} _moveMarker=null; }
+  _moveIdx=null; resetDropBar(); toast("Move cancelled");
+}
+function moveConfirm_(){
+  if(!_moveMarker) return;
+  const ll=_moveMarker.getLatLng();
+  moveMode_=false;
+  try{ fmap.removeLayer(_moveMarker); }catch(e){} _moveMarker=null;
+  resetDropBar();
+  moveApply_(ll.lat, ll.lng, null);
+}
+function moveApply_(lat,lon,acc){
+  const list=_moveAudit?auditPlots:saved;
+  const p=list[_moveIdx]; if(!p){ _moveIdx=null; return; }
+  const oldLat=parseFloat(p.Y), oldLon=parseFloat(p.X);
+  const moved=(isFinite(oldLat)&&isFinite(oldLon))?Math.round(haversine_(oldLat,oldLon,lat,lon)):null;
+  p.Y=lat.toFixed(6); p.X=lon.toFixed(6);
+  if(acc!=null && $("Z")) { /* accuracy is not stored on the plot; left as-is */ }
+  // a move can put the plot in a different compartment — offer that rather than leaving it wrong
+  let newStand=null, newTract=null;
+  try{
+    if(typeof standOrPolyAt_==="function") newStand=standOrPolyAt_(lat,lon);
+    if(typeof tractAt_==="function") newTract=tractAt_(lat,lon);
+  }catch(e){}
+  p._sent=false; p._ts=nowStr();
+  persist(); persistAudit(); renderSaved(); netDot();
+  if(fmap) renderMapPins();
+  const changed = newStand && String(newStand).trim() && String(newStand).trim()!==String(p.STANDID||"").trim();
+  if(changed){
+    showInfoSheet_("Moved — now in a different compartment",
+      `<div style="color:#a9c9b0;font-size:13px;line-height:1.55">`+
+      `<p style="margin:0 0 8px">Plot ${esc(String(p.PLOTNUM||""))} moved${moved!=null?" "+moved+" m":""}. It now falls inside <b>${esc(newStand)}</b>, but is still recorded as <b>${esc(String(p.STANDID||"—"))}</b>.</p>`+
+      `<p style="margin:0">Change it to match where it now sits?</p></div>`+
+      `<button type="button" onclick="moveRestand_('${String(newStand).replace(/'/g,"&#39;")}','${String(newTract||"").replace(/'/g,"&#39;")}')" style="display:block;width:100%;text-align:left;padding:12px;margin:8px 0 5px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">✓ Set the stand to ${esc(newStand)}</button>`+
+      `<button type="button" onclick="closeInfoSheet_();moveDone_()" style="display:block;width:100%;text-align:left;padding:12px;margin:0;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#a9c9b0;font:inherit;font-size:13px">Leave the stand as it is</button>`);
+    return;
+  }
+  moveDone_(moved);
+}
+function moveRestand_(stand,tract){
+  closeInfoSheet_();
+  const list=_moveAudit?auditPlots:saved, p=list[_moveIdx];
+  if(p){ p.STANDID=stand; if(tract) p.TRACT=tract; p._sent=false; persist(); persistAudit(); renderSaved(); if(fmap) renderMapPins(); }
+  moveDone_();
+}
+function moveDone_(moved){
+  _moveIdx=null;
+  toast(moved!=null?`Plot moved ${moved} m — sending the change`:"Plot moved — sending the change");
+  try{ flushQueue(); }catch(e){}
+}
+function haversine_(la1,lo1,la2,lo2){
+  const R=6371000, t=x=>x*Math.PI/180;
+  const dLa=t(la2-la1), dLo=t(lo2-lo1);
+  const a=Math.sin(dLa/2)**2+Math.cos(t(la1))*Math.cos(t(la2))*Math.sin(dLo/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+}
 function plotCardEdit(){ const i=_plotCardIdx, a=_plotCardAudit; closePlotCard(); if(a) editAuditFromMap(i); else editFromMap(i); }
 function plotCardDelete(){ const i=_plotCardIdx; closePlotCard(); delFromMap(i); }
 function editFromMap(i){ closeMap(); editPlot(i); }
