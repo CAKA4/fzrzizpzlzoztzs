@@ -191,6 +191,9 @@
   .dropbtn{ width:100%; padding:15px; border-radius:10px; border:1px solid #f0c860; background:#f2a83d; color:#1a1000;
     font:inherit; font-size:15px; font-weight:800; letter-spacing:.03em; cursor:pointer; box-shadow:0 4px 18px rgba(0,0,0,.55), 0 0 0 2px rgba(242,168,61,.25); }
   .standlabel{ font-family:var(--mono); font-size:11px; font-weight:700; color:#fff; text-shadow:0 1px 3px #000,0 0 6px #000; white-space:nowrap; }
+  /* Stand and plot shown on the collapsed header bar — the two things you would open it to check. */
+  .hdr-at{ font-family:var(--mono); font-size:11px; font-weight:600; color:#8fd18a; margin-left:8px; opacity:.95 }
+  .hdr-at.missing{ color:#e8a33a }
   /* Compartment popup: let the inner list do the scrolling so Leaflet doesn't grow the bubble to fit
      26 analysis rows and swallow the map. */
   .bpop .leaflet-popup-content{ margin:9px 11px; }
@@ -385,6 +388,10 @@
   /* The inline tint outranks .chip-tog.on's background, so selection is shown with a ring instead —
      the ✓ and the brighter text still read as before. */
   .chip-tog.alpha.on{ color:#fff; font-weight:700; box-shadow:inset 0 0 0 2px #7fd0a0 }
+  /* Recorded elsewhere in this compartment but not on this plot: a hollow marker, clearly different
+     from the solid ✓ of a species picked here. */
+  .chip-tog.alpha.instand{ box-shadow:inset 0 0 0 1px #6f8f76 }
+  .chip-tog.alpha.instand::before{ content:"◦ "; color:#9ec3a6 }
   .modal{ position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50; display:flex; align-items:center; justify-content:center; padding:20px }
   body.map-open .modal{ z-index:6000; }   /* Tools & other menus opened from the map must sit above it (mapView is z-index 5000) */
   .modal-card{ background:var(--card); border:1px solid var(--line2); border-radius:14px; padding:18px; width:100%; max-width:380px; box-shadow:0 20px 60px rgba(0,0,0,.55); max-height:calc(100vh - 40px); overflow-y:auto; -webkit-overflow-scrolling:touch }
@@ -445,8 +452,11 @@
 
   <div class="cruiserbar">👤 Entered by <b id="cruiserName">—</b><button class="btn-mini" type="button" onclick="openCruiser()">Change</button></div>
 
-  <details class="sec" open>
-    <summary><span class="ix">01</span>Plot header<span class="arw">▶</span></summary>
+  <details class="sec" id="secHeader">
+    <!-- Collapsed by default: the stand carries forward and the plot number increments, so there is
+         usually nothing to change here. The values show in the bar so you can check them without
+         opening it. -->
+    <summary><span class="ix">01</span>Plot header<span class="hdr-at" id="hdrAt"></span><span class="arw">▶</span></summary>
     <div class="secbody">
       <div class="prefill">
         <span class="lab">Prefill from a saved plot:</span>
@@ -531,6 +541,7 @@
       </div>
       <button class="addbtn" type="button" id="coverNoneBtn" onclick="coverNone()">None present — set herbs, moss and grass to 0</button>
       <div class="grouphd">Ground species <span class="code">GRNDSPEC</span> <span class="pill" id="grndCount">0</span></div>
+      <div class="hint">✓ recorded on this plot · ◦ already recorded elsewhere in this compartment</div>
       <div class="chips" id="grndChips"></div>
       <div class="row-inline" style="margin-top:9px">
         <input id="grndOther" placeholder="Add another species…">
@@ -1051,7 +1062,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v284";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v286";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1443,13 +1454,35 @@ function chipTint_(name){
   const h=letterHue_(name);
   return `background:hsl(${h} 34% 17%);border-color:hsl(${h} 40% 34%)`;
 }
+/* Which ground species have already been recorded elsewhere in this compartment. Marking them means
+   a cruiser can see at a glance what the stand is already known to carry, rather than trying to
+   remember across a dozen plots — and it makes a genuinely new record stand out. The plot being
+   edited is excluded, so its own entries don't mark themselves. */
+function standGroundSet_(){
+  const out=new Set();
+  try{
+    const stand=String(($("STANDID")||{}).value||"").trim().toLowerCase();
+    if(!stand || stand===ADD_STAND) return out;
+    const meId=(editingIndex!=null && saved[editingIndex]) ? String(saved[editingIndex]._id||"") : null;
+    const scan=p=>{
+      if(!p) return;
+      if(String(p.STANDID||"").trim().toLowerCase()!==stand) return;
+      if(meId && String(p._id||"")===meId) return;          // not the plot being edited
+      String(p.GRNDSPEC||"").split(/[;,]/).forEach(x=>{ const t=x.trim(); if(t) out.add(t.toLowerCase()); });
+    };
+    saved.forEach(scan);
+    if(typeof auditPlots!=="undefined" && auditPlots) auditPlots.forEach(scan);
+  }catch(e){}
+  return out;
+}
 function renderGround(selected){
   const sel=new Set((selected||[]).filter(Boolean));
   const all=[...GROUND_SPECIES]; customGround.forEach(s=>{ if(!all.some(x=>x.toLowerCase()===s.toLowerCase())) all.push(s); });
   sel.forEach(s=>{ if(!all.some(x=>x.toLowerCase()===s.toLowerCase())) all.push(s); });
   all.sort((a,b)=>a.toLowerCase().localeCompare(b.toLowerCase()));   // added plants file in alphabetically on this and every later plot
   const isCustom=n=>customGround.some(x=>x.toLowerCase()===String(n).toLowerCase());
-  $("grndChips").innerHTML = all.map(n=>`<button type="button" class="chip-tog alpha${sel.has(n)?" on":""}" style="${chipTint_(n)}" data-name="${esc(n)}" onclick="toggleGround(this)">${esc(n)}`+
+  const inStand=standGroundSet_();
+  $("grndChips").innerHTML = all.map(n=>`<button type="button" class="chip-tog alpha${sel.has(n)?" on":""}${(!sel.has(n)&&inStand.has(String(n).toLowerCase()))?" instand":""}" style="${chipTint_(n)}" data-name="${esc(n)}" title="${inStand.has(String(n).toLowerCase())?"Already recorded elsewhere in this compartment":""}" onclick="toggleGround(this)">${esc(n)}`+
     (isCustom(n)?`<span onclick="event.stopPropagation();editGround_('${esc(n).replace(/'/g,"&#39;")}')" style="margin-left:5px;opacity:.75">✎</span>`:"")+
     `</button>`).join("");
   updateGroundCount();
@@ -1463,6 +1496,15 @@ function coverNone(){
 function toggleGround(btn){ btn.classList.toggle("on"); updateGroundCount(); }
 function getGround(){ return [...$("grndChips").querySelectorAll(".chip-tog.on")].map(b=>b.getAttribute("data-name")); }
 function updateGroundCount(){ $("grndCount").textContent = getGround().length; }
+/* Keep the collapsed header bar honest: stand and plot, or an amber prompt when either is missing —
+   they are the two required fields and they live inside the section that is now shut. */
+function updateHdrAt_(){
+  const el=$("hdrAt"); if(!el) return;
+  const st=String(($("STANDID")||{}).value||"").trim(), pn=String(($("PLOTNUM")||{}).value||"").trim();
+  const stOk=st && st!==ADD_STAND;
+  if(stOk && pn){ el.textContent=st+" · plot "+pn; el.classList.remove("missing"); }
+  else { el.textContent = !stOk ? "tap to set the stand" : "tap to set the plot number"; el.classList.add("missing"); }
+}
 /* Correcting a plant someone added. A name nobody has recorded yet can be fixed or removed on the
    spot — that is the usual case, a typo spotted a minute after typing it. Once it is in collected
    data the rename has to rewrite those plots too, so the app hands it to FRI Tools rather than
@@ -1755,7 +1797,7 @@ function loadPlot(d){
   standSelect(); setSel($("STANDID"), (d.STANDID&&d.STANDID!==ADD_STAND)?d.STANDID:"");
   for(const id in ADDABLE){ if(d[id] && d[id]!==ADDABLE[id].sentinel) addableAdd(id,d[id]); addableBuild(id); setSel($(id), (d[id]&&d[id]!==ADDABLE[id].sentinel)?d[id]:""); }
   clearPhotos();
-  renderGround(parseGround(d.GRNDSPEC));
+  renderGround(parseGround(d.GRNDSPEC)); updateHdrAt_();
   treeRows.innerHTML="";
   for(let i=1;i<=28;i++){ const sp=d["T"+i+"SP"],s=d["T"+i+"S"],q=d["T"+i+"Q"],ql=d["T"+i+"QL"],logs=d["T"+i+"LOGS"];
     if(sp||s||q||ql||logs) addTree({sp:codeFor(sp),s,q,ql,logs}); }
@@ -2343,7 +2385,7 @@ function nextPlot(){
   htSelect_($("HT"));                                              // refresh height order from latest usage
   defaultNoneFields_();   // pest / disease / SAR / invasive fields default to None
   plotInAnalysis="Y";   // a fresh plot starts included
-  setField($("PLOTNUM"), nextPlotFor(carryStand)); renderGround([]); currentPhotoNames=[]; clearPhotos(); setNow(); updateTally(); autoGPS();
+  setField($("PLOTNUM"), nextPlotFor(carryStand)); renderGround([]); currentPhotoNames=[]; clearPhotos(); setNow(); updateTally(); autoGPS(); updateHdrAt_();
 }
 
 /* ---------- saved list ---------- */
@@ -4259,8 +4301,13 @@ $("TRACT").addEventListener("change", ()=>{ if($("TRACT").value===ADD_TRACT) ope
 $("STANDID").addEventListener("change", ()=>{
   if($("STANDID").value===ADD_STAND){ openAddStand(); return; }
   if(editingIndex==null) setField($("PLOTNUM"), nextPlotFor($("STANDID").value));
+  // the "already in this compartment" marks depend on the stand, so redraw them when it changes
+  try{ renderGround(getGround()); }catch(e){}
+  updateHdrAt_();
 });
-setNow(); renderGround([]); renderSaved(); updateTally(); netDot(); autoGPS();   // no auto first tree — the "＋ Add new tree" button starts the tally (matches the map-capture flow)
+$("PLOTNUM").addEventListener("change", updateHdrAt_);
+$("PLOTNUM").addEventListener("input", updateHdrAt_);
+setNow(); renderGround([]); renderSaved(); updateTally(); netDot(); autoGPS(); updateHdrAt_();   // no auto first tree — the "＋ Add new tree" button starts the tally (matches the map-capture flow)
 setField($("PLOTNUM"), nextPlotFor($("STANDID").value));
 // On a fresh open, go straight to the map (before first paint, so the form doesn't flash) — the user taps "＋ New plot" when ready.
 try{ requestAnimationFrame(()=>{ try{ openMap(); }catch(e){ setTimeout(()=>{ try{ openMap(); }catch(e2){} }, 200); } }); }catch(e){ setTimeout(()=>{ try{ openMap(); }catch(e2){} }, 200); }
