@@ -1062,7 +1062,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v287";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v290";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -5028,7 +5028,7 @@ function renderBoundPopup_(){
         // label it for what it is: written from notes, or from the measured data alone
         const tag = a.notesSrc==="gemini" ? "Crew notes — AI summary"
                   : (a.notesSrc==="gemini-stats" ? "Stand summary — from the measured data" : "Crew notes");
-        note=`<div style="margin-top:5px;padding:6px 8px;background:#eef4ea;border-left:3px solid #7aa77f;border-radius:4px">`+
+        note=`<div style="margin-top:10px;padding:6px 8px;background:#eef4ea;border-left:3px solid #7aa77f;border-radius:4px">`+
           `<div style="font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:#5a7a62">${esc(tag)}</div>`+
           `<div style="font-size:12px;color:#16271a;margin-top:2px">${esc(a.notes)}</div></div>`;
       }
@@ -5051,7 +5051,7 @@ function renderBoundPopup_(){
   const seg=(v,lab)=>`<span onclick="setBoundPopupView('${v}')" style="cursor:pointer;padding:2px 7px;border-radius:6px;font-size:11px;`+
     (_bpView===v?`background:#16271a;color:#eafae8`:`color:#5a7a62`)+`">${lab}</span>`;
   const table=rows?`<table style="border-collapse:collapse;font-size:12px;width:100%">${rows}</table>`:"";
-  const body=`<div style="max-height:38vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${note}${table}</div>`;
+  const body=`<div style="max-height:38vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${table}${note}</div>`;
   L.popup({maxWidth:280,autoPan:true,className:"bpop"}).setLatLng(_bpLatLng)
     .setContent(`<div style="font-family:'Courier New',monospace;color:#16271a;line-height:1.4">`+
       `<b style="font-size:13px">${esc(title)}</b>`+
