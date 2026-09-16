@@ -1085,7 +1085,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v305";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v306";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -5214,9 +5214,9 @@ function renderBoundPopup_(){
   const p=f.properties||{};
   const title=(standField&&p[standField]!=null&&String(p[standField]).trim()!=="")?String(p[standField]):"Stand";
   const row=(k,v)=>`<tr><td style="color:#5a7a62;padding:1px 10px 1px 0;vertical-align:top;white-space:nowrap">${esc(k)}</td><td style="padding:1px 0;vertical-align:top">${esc(String(v))}</td></tr>`;
-  let rows="", note="";
+  let rows="", note="", a=null;
   if(_bpView==="analysis"){
-    const a=standAnFor_(f);
+    a=standAnFor_(f);
     if(a){
       if(a.notes){
         // label it for what it is: written from notes, or from the measured data alone
