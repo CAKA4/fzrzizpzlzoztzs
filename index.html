@@ -1072,7 +1072,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v295";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v297";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3431,14 +3431,14 @@ function mfRender_(err){
 /* Compartment PDFs from the phone. The Sheet does the work; this asks for a scope, keeps asking for
    the next few until none are left, and hands back links. Batched because one request cannot carry a
    whole property, and each PDF takes a few seconds to render. */
-let _crRun=false, _crDone=0, _crLeft=null, _crErr="", _crWant="all", _crTracts=[], _crFiles=[], _crFolder="";
+let _crRun=false, _crDone=0, _crLeft=null, _crErr="", _crWant="all", _crTracts=[], _crComps=[], _crFiles=[], _crFolder="";
 function openCompRpt(){
   _crDone=0; _crLeft=null; _crErr=""; _crFiles=[]; _crRun=false;
   showDataSheet_("Compartment PDF reports",`<div id="crBody" style="font-size:13px;color:#cfe3d2">Loading…</div>`);
   if(!connected || isOffline()){ crRender_("Offline — the Sheet builds these, so this needs a connection."); return; }
   const cb="__cl"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
   const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
-  window[cb]=r=>{ clean(); _crTracts=((r&&r.tracts)||[]); crRender_(); };
+  window[cb]=r=>{ clean(); _crTracts=((r&&r.tracts)||[]); _crComps=((r&&r.compartments)||[]); crRender_(); };
   sc.onerror=()=>{ clean(); backendFailMsg_(294, m=>crRender_(m)); };
   setTimeout(()=>{ if(window[cb]){ clean(); backendFailMsg_(294, m=>crRender_(m)); } },15000);
   sc.src=SCRIPT_URL+sep+"action=comprptlist&callback="+cb;
@@ -3454,9 +3454,14 @@ function crRender_(err){
       `<button type="button" onclick="crStop_()" style="display:block;width:100%;margin-top:10px;padding:12px;border-radius:8px;border:1px solid #7a5a2f;background:#2a1f12;color:#e8f0e6;font:inherit;font-size:13px">■ Stop after this one</button>`;
     return;
   }
-  const opts=[`<option value="all">Every compartment</option>`]
-    .concat(_crTracts.filter(t=>t.tract!=="(whole inventory)")
-      .map(t=>`<option value="${esc(t.tract)}"${_crWant===t.tract?" selected":""}>${esc(t.tract)} — ${t.ncomp} compartments</option>`));
+  /* Tracts and individual compartments both listed — picking one compartment was missing entirely,
+     which is the commonest case when you just want the one you are standing in. */
+  const tOpts=_crTracts.filter(t=>t.tract!=="(whole inventory)")
+    .map(t=>`<option value="${esc(t.tract)}"${_crWant===t.tract?" selected":""}>${esc(t.tract)} — ${t.ncomp} compartments</option>`).join("");
+  const cOpts=_crComps.map(c=>`<option value="${esc(c.stand)}"${_crWant===c.stand?" selected":""}>${esc(c.stand)}${c.tract?" · "+esc(c.tract):""} — ${c.nplots} plots</option>`).join("");
+  const opts=[`<option value="all"${_crWant==="all"?" selected":""}>Every compartment</option>`,
+    tOpts?`<optgroup label="A whole tract">${tOpts}</optgroup>`:"",
+    cOpts?`<optgroup label="One compartment">${cOpts}</optgroup>`:""];
   const files=_crFiles.length
     ? `<div style="margin-top:12px;color:#8fae95;font-size:11px">Written</div>`+
       `<div style="max-height:30vh;overflow-y:auto">`+_crFiles.map(f=>
@@ -3482,9 +3487,13 @@ function crBatch_(){
     _crDone+=((r.made||[]).length); _crLeft=(r.remaining==null?null:r.remaining);
     if(r.folder) _crFolder=r.folder;
     if(r.error) _crErr=r.error;
+    if(r.upToDate && !_crDone){ _crRun=false; _crErr="Already built today — open the folder below, or use the Sheet menu to rebuild."; crRender_(); return; }
+    // only continue while progress is actually being made; otherwise stop rather than loop
     if(_crLeft>0 && (r.made||[]).length>0 && _crRun){ crRender_(); setTimeout(crBatch_,400); return; }
     _crRun=false; crRender_();
-    if(_crLeft===0) toast(`${_crDone} report${_crDone===1?"":"s"} written`);
+    if(_crLeft===0 && _crDone) toast(`${_crDone} report${_crDone===1?"":"s"} written`);
+    else if(_crLeft>0) _crErr="Stopped with "+_crLeft+" still to do — tap Build more to continue.";
+    crRender_();
   };
   window[cb]=r=>{ clean(); done(r); };
   sc.onerror=()=>{ clean(); done(null); };
@@ -5106,7 +5115,7 @@ function compRptOne_(stand){
     else toast((r&&r.error)||"Couldn't build the report",true); };
   sc.onerror=()=>{ clean(); toast("Couldn't reach the Sheet",true); };
   setTimeout(()=>{ if(window[cb]){ clean(); toast("Timed out — it may still be building",true); } },90000);
-  sc.src=SCRIPT_URL+sep+"action=comprpt&max=1&want="+encodeURIComponent(stand)+"&callback="+cb;
+  sc.src=SCRIPT_URL+sep+"action=comprpt&max=1&force=1&want="+encodeURIComponent(stand)+"&callback="+cb;
   document.body.appendChild(sc);
 }
 function setBoundPopupView(v){ _bpView=v; if(v==="analysis") standAnFetch_(false); renderBoundPopup_(); }
