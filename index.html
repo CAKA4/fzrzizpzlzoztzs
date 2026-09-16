@@ -790,6 +790,7 @@
     <span><i style="background:#4caf50"></i>You</span>
     <span><i style="background:#e8b84b;border-radius:50%"></i>Plot</span>
     <span><i style="background:#ffffff;border:1.5px solid #1c2b1e;border-radius:50%"></i>Reference</span>
+    <span id="lgWho" style="display:none"></span>
     <span><i style="background:transparent;border:1px solid #8fd18a"></i>Stand</span>
     <span id="legImported" style="display:none"><i style="background:#4aa3e0;border-radius:50%"></i>Imported</span>
     <span id="liveState" style="margin-top:2px"></span>
@@ -948,6 +949,10 @@
         <button type="button" class="seg-btn" onclick="setSumSource('both')">Both</button>
       </div>
     </div>
+    <div id="sumFresh" style="display:flex;align-items:center;gap:8px;font-size:11px;line-height:1.4;margin:0 0 8px">
+      <div id="sumFreshTxt" style="flex:1"></div>
+      <button type="button" onclick="refreshSummaryFromSheet_()" style="padding:6px 10px;border-radius:7px;border:1px solid #33623a;background:#10240f;color:#cfe3d2;font:inherit;font-size:11px;white-space:nowrap">↻ Refresh</button>
+    </div>
     <select id="summaryCollector" onchange="setSumCollector(this.value)" style="width:100%;margin-bottom:8px"></select>
     <select id="summaryTract" onchange="setSumTract(this.value)" style="width:100%;margin-bottom:8px"></select>
     <select id="summaryStand" onchange="renderSummary()" style="width:100%;margin-bottom:10px"></select>
@@ -1074,7 +1079,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v301";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v302";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3854,7 +3859,7 @@ function restoreDropGone_(){
   try{ if(typeof updateLayerStatus==="function") updateLayerStatus(); }catch(e){}
   toast(`${n} plot${n>1?"s":""} removed from this device`);
 }
-function restoreFromSheet(){
+function restoreFromSheet(quiet){
   if(!connected){ toast("Not connected to a Sheet",true); return; }
   if(isOffline()){ toast("Need internet to restore from the Sheet",true); return; }
   toast("Fetching plots from the Sheet…");
@@ -3889,7 +3894,10 @@ function restoreFromSheet(){
         if(/^(imported|audit)$/i.test(String(r.PLOTSRC||"").trim())) imp++;
         if(rid) haveIds.add(rid); added++; });
       if(added){ persist(); persistAudit(); renderSaved(); netDot(); if(fmap) renderMapPins(); if(typeof renderLayerVis_==="function") renderLayerVis_(); if(typeof updateLayerStatus==="function") updateLayerStatus(); }
+      noteSheetPull_();
       toast(added?`Restored ${added} plot${added>1?"s":""} from the Sheet`+(imp?` (${imp} originally imported)`:""):"No new plots in the Sheet");
+      // if the summary is open, redraw it against what just arrived
+      try{ if($("standSummary") && $("standSummary").style.display!=="none"){ populateSummaryCollectors_(); populateSummaryTracts_(); populateSummaryStands_(); renderSummary(); } }catch(e){}
       /* Restore only ever adds, so a plot deleted in the Sheet stayed on the device for good. Offer to
          drop those too — but only plots that came from the Sheet in the first place (_sent, with a
          PlotID the Sheet no longer has). Anything collected here and not yet uploaded is never
@@ -4301,6 +4309,23 @@ function populateSummaryStands_(){
     stands.map(s=>`<option value="${esc(s)}">${esc(s)} (${base.filter(p=>p.STANDID===s).length})</option>`).join("");
   sel.value = stands.includes(cur)?cur:"__all__";
 }
+/* When the device last took a copy of the Sheet. The quick summary works from what is on the phone,
+   which can be hours behind if the crew have been submitting — so say how old it is, and offer to
+   catch up in one tap rather than leaving someone to read stale totals as current. */
+let _lastSheetPull = (function(){ try{ return +(STORE&&STORE.getItem("fi_lastpull"))||0; }catch(e){ return 0; } })();
+function noteSheetPull_(){ _lastSheetPull=Date.now(); try{ if(STORE) STORE.setItem("fi_lastpull",String(_lastSheetPull)); }catch(e){} }
+function freshnessLine_(){
+  if(!_lastSheetPull) return `<span style="color:#e8a33a">Not yet synced with the Sheet — these are this device's plots only.</span>`;
+  const mins=Math.round((Date.now()-_lastSheetPull)/60000);
+  const age = mins<2 ? "just now" : (mins<60 ? mins+" min ago" : (mins<1440 ? Math.round(mins/60)+" h ago" : Math.round(mins/1440)+" days ago"));
+  const stale = mins>30;
+  return `<span style="color:${stale?"#e8a33a":"#8fae95"}">From the Sheet as of ${age}${stale?" — may be out of date":""}.</span>`;
+}
+function refreshSummaryFromSheet_(){
+  if(!connected || isOffline()){ toast("Need a connection to refresh from the Sheet",true); return; }
+  toast("Pulling the latest from the Sheet…");
+  try{ restoreFromSheet(true); }catch(e){ toast("Couldn't refresh",true); }
+}
 function openSummary(){
   if(!saved.length && !auditPlots.length){ toast("No plots yet",true); return; }
   // sensible default: if you only have audit plots loaded, start there
@@ -4318,6 +4343,7 @@ function setSumThreshold(small){
   renderSummary();
 }
 function renderSummary(){
+  { const t=$("sumFreshTxt"); if(t) t.innerHTML=freshnessLine_(); }
   const inclSmall=summaryInclSmall;
   const base=sumPlots_();
   const v=$("summaryStand").value, plots = v==="__all__"?base.slice():base.filter(p=>p.STANDID===v), s=computeStand(plots, inclSmall);
@@ -5342,24 +5368,54 @@ function schedulePinRender_(){
 }
 let _pinCanvas=null;
 function pinCanvas_(){ if(!_pinCanvas) _pinCanvas=L.canvas({padding:0.5}); return _pinCanvas; }
+/* Amber for your own plots; each other collector gets their colour from the same palette the Crew
+   layer uses, so one person is one colour wherever they appear. */
+/* Who is which colour, in the map legend — a colour scheme nobody can read is not worth having. */
+function renderWhoLegend_(){
+  const el=$("lgWho"); if(!el) return;
+  const me=String(cruiser||"").trim().toLowerCase(), myMail=String(cruiserEmail||"").trim().toLowerCase();
+  const seen={};
+  (saved||[]).forEach(p=>{
+    const who=String((p&&(p.CRUISER||p.EMAIL))||"").trim(); if(!who) return;
+    const k=who.toLowerCase(); if(k===me||k===myMail) return;
+    seen[shortEmail_(who)]=1;
+  });
+  const names=Object.keys(seen).sort().slice(0,6);
+  if(!names.length){ el.style.display="none"; el.innerHTML=""; return; }
+  el.style.display="";
+  el.innerHTML=names.map(n=>`<span style="display:inline-flex;align-items:center;margin-right:6px"><i style="background:${crewColorFor(n)};border-radius:50%"></i>${esc(n)}</span>`).join("");
+}
+function plotFill_(p){
+  const who=String((p&&(p.CRUISER||p.EMAIL))||"").trim();
+  if(!who) return "#e8b84b";
+  const me=String(cruiser||"").trim(), myMail=String(cruiserEmail||"").trim();
+  if(!me && !myMail) return "#e8b84b";
+  if(who.toLowerCase()===me.toLowerCase() || who.toLowerCase()===myMail.toLowerCase()) return "#e8b84b";
+  try{ return crewColorFor(shortEmail_(who)); }catch(e){ return "#e8b84b"; }
+}
 function canvasDot_(lat,lon,layer,fill,stroke,onClick,r){
   L.circleMarker([lat,lon],{renderer:pinCanvas_(),radius:(r||5),weight:2.5,color:stroke,fillColor:fill,fillOpacity:1})
     .addTo(layer).on("click",onClick);
 }
-function renderMapPins(){ if(!fpins) return; fpins.clearLayers(); if(fauditpins) fauditpins.clearLayers(); _pinEls=[];
+function renderMapPins(){
+  try{ renderWhoLegend_(); }catch(e){} if(!fpins) return; fpins.clearLayers(); if(fauditpins) fauditpins.clearLayers(); _pinEls=[];
   const z = fmap ? fmap.getZoom() : 0;
   const detail = z >= LABEL_ZOOM_MIN;                      // labels and full markers only up close
   const view = (detail && fmap) ? fmap.getBounds().pad(0.25) : null;
   saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)) return;
     const hit=_findHit_(p); const needs=plotNeedsWork_(p,false);
     // a plot you have done is the thing that matters here — draw it bigger than everything else
-    if(!detail){ canvasDot_(lat,lon,fpins,"#e8b84b",hit?"#ff36c0":(needs?"#ff8c1a":"#ffffff"),()=>plotCard(i,false),10); return; }
+    /* Colour by who collected it. After a restore the device holds the whole crew's work, and drawing
+       it all in one amber told you nothing about who did what — the same information the Crew layer
+       has always shown for live plots. Your own stay amber, so your work still reads as yours. */
+    const fill = plotFill_(p);
+    if(!detail){ canvasDot_(lat,lon,fpins,fill,hit?"#ff36c0":(needs?"#ff8c1a":"#ffffff"),()=>plotCard(i,false),10); return; }
     if(view && !view.contains([lat,lon])) return;          // off screen — don't build it
     const lbl=myDotLabel_(p);   // both label states are built now; declutterLabels_ picks which shows
     const ring=hit?"border:3px solid #ff36c0;box-shadow:0 0 0 3px rgba(255,54,192,.45),0 2px 6px rgba(0,0,0,.6)"
               :(needs?"border:3px dashed #ff8c1a;box-shadow:0 0 0 3px rgba(255,140,26,.4),0 2px 6px rgba(0,0,0,.6)"
               :"border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6)");
-    const icon=L.divIcon({className:"",html:`<div class="pdot min" style="${ring}"><span class="lf">${lbl}</span><span class="lm">${esc(p.PLOTNUM||"?")}</span></div>`,iconSize:null,iconAnchor:[12,12]});
+    const icon=L.divIcon({className:"",html:`<div class="pdot min" style="background:${fill};${ring}"><span class="lf">${lbl}</span><span class="lm">${esc(p.PLOTNUM||"?")}</span></div>`,iconSize:null,iconAnchor:[12,12]});
     const mk=L.marker([lat,lon],{icon}).addTo(fpins).on("click",()=>plotCard(i,false));
     _pinEls.push({mk:mk,lat:lat,lon:lon});
   });
