@@ -899,6 +899,7 @@
         <button type="button" onclick="closeMore();exportPlotsAnalysisShp('main')">📍 Plots + analysis → shapefile (ArcGIS)</button>
         <button type="button" onclick="closeMore();exportCompartmentsAnalysisShp('main')">⬠ Compartments + analysis → shapefile</button>
         <button type="button" onclick="closeMore();openMapFiles()">🗂 Map files on Drive — tracks, routes, areas</button>
+        <button type="button" onclick="closeMore();openCompRpt()">📄 Compartment PDF reports — one, a tract, or all</button>
       </details>
 
       <details class="mgroup"><summary>🗂 Plots &amp; stands</summary>
@@ -1071,7 +1072,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v293";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v295";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3427,6 +3428,70 @@ function mfRender_(err){
     (_mfFolder?`<a href="${esc(_mfFolder)}" target="_blank" rel="noopener" style="display:block;margin-top:10px;padding:11px;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#a9c9b0;text-decoration:none;text-align:center;font-size:12px">📁 Open the folder in Drive <span style="color:#5a7a62">— needs a Google account with access</span></a>`:"")+
     `<div style="color:#5a7a62;font-size:11px;margin-top:8px;line-height:1.4">Get saves the file to this device. It works without a Google account — the Sheet fetches it for you.</div>`;
 }
+/* Compartment PDFs from the phone. The Sheet does the work; this asks for a scope, keeps asking for
+   the next few until none are left, and hands back links. Batched because one request cannot carry a
+   whole property, and each PDF takes a few seconds to render. */
+let _crRun=false, _crDone=0, _crLeft=null, _crErr="", _crWant="all", _crTracts=[], _crFiles=[], _crFolder="";
+function openCompRpt(){
+  _crDone=0; _crLeft=null; _crErr=""; _crFiles=[]; _crRun=false;
+  showDataSheet_("Compartment PDF reports",`<div id="crBody" style="font-size:13px;color:#cfe3d2">Loading…</div>`);
+  if(!connected || isOffline()){ crRender_("Offline — the Sheet builds these, so this needs a connection."); return; }
+  const cb="__cl"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  window[cb]=r=>{ clean(); _crTracts=((r&&r.tracts)||[]); crRender_(); };
+  sc.onerror=()=>{ clean(); backendFailMsg_(294, m=>crRender_(m)); };
+  setTimeout(()=>{ if(window[cb]){ clean(); backendFailMsg_(294, m=>crRender_(m)); } },15000);
+  sc.src=SCRIPT_URL+sep+"action=comprptlist&callback="+cb;
+  document.body.appendChild(sc);
+}
+function setCrWant(v){ _crWant=v; }
+function crRender_(err){
+  const box=$("crBody"); if(!box) return;
+  if(err){ box.innerHTML=`<div style="color:#e8a33a;line-height:1.5">${esc(err)}</div>`; return; }
+  if(_crRun){
+    box.innerHTML=`<div style="line-height:1.5">Building reports…<br><b>${_crDone}</b> done${_crLeft!=null?` · <b>${_crLeft}</b> to go`:""}`+
+      `<div style="color:#8fae95;font-size:12px;margin-top:6px">A few seconds each. Keep this screen open.</div></div>`+
+      `<button type="button" onclick="crStop_()" style="display:block;width:100%;margin-top:10px;padding:12px;border-radius:8px;border:1px solid #7a5a2f;background:#2a1f12;color:#e8f0e6;font:inherit;font-size:13px">■ Stop after this one</button>`;
+    return;
+  }
+  const opts=[`<option value="all">Every compartment</option>`]
+    .concat(_crTracts.filter(t=>t.tract!=="(whole inventory)")
+      .map(t=>`<option value="${esc(t.tract)}"${_crWant===t.tract?" selected":""}>${esc(t.tract)} — ${t.ncomp} compartments</option>`));
+  const files=_crFiles.length
+    ? `<div style="margin-top:12px;color:#8fae95;font-size:11px">Written</div>`+
+      `<div style="max-height:30vh;overflow-y:auto">`+_crFiles.map(f=>
+        `<a href="${esc(f.url)}" target="_blank" rel="noopener" style="display:block;padding:8px 0;border-bottom:1px solid #1d3320;color:#eafae8;text-decoration:none;font-size:13px">📄 ${esc(f.stand)} <span style="color:#8fae95;font-size:11px">${esc(f.tract||"")}</span></a>`).join("")+`</div>`
+    : "";
+  box.innerHTML=
+    `<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:10px">A page per compartment: the stand summary, the crew-note summary, a photo taken there, and a map of the compartment with its plots.</div>`+
+    `<select onchange="setCrWant(this.value)" style="width:100%;padding:9px;border-radius:8px;background:#0f1e0d;color:#e8f0e6;border:1px solid #33623a;font:inherit">${opts.join("")}</select>`+
+    (_crErr?`<div style="color:#e8a33a;font-size:12px;margin-top:8px;line-height:1.4">${esc(_crErr)}</div>`:"")+
+    `<button type="button" onclick="crStart_()" style="display:block;width:100%;margin-top:10px;padding:12px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">📄 ${_crDone?"Build more":"Build the reports"}</button>`+
+    files+
+    (_crFolder?`<a href="${esc(_crFolder)}" target="_blank" rel="noopener" style="display:block;margin-top:10px;padding:10px;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#a9c9b0;text-decoration:none;text-align:center;font-size:12px">📁 Open the reports folder in Drive</a>`:"");
+}
+function crStop_(){ _crRun=false; crRender_(); }
+function crStart_(){ _crRun=true; _crErr=""; crRender_(); crBatch_(); }
+function crBatch_(){
+  if(!_crRun) return;
+  const cb="__cr"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  const done=r=>{
+    if(!r || !r.ok){ _crRun=false; _crErr=(r&&r.error)||"The Sheet didn't answer in time — tap again to carry on."; crRender_(); return; }
+    (r.made||[]).forEach(f=>_crFiles.push(f));
+    _crDone+=((r.made||[]).length); _crLeft=(r.remaining==null?null:r.remaining);
+    if(r.folder) _crFolder=r.folder;
+    if(r.error) _crErr=r.error;
+    if(_crLeft>0 && (r.made||[]).length>0 && _crRun){ crRender_(); setTimeout(crBatch_,400); return; }
+    _crRun=false; crRender_();
+    if(_crLeft===0) toast(`${_crDone} report${_crDone===1?"":"s"} written`);
+  };
+  window[cb]=r=>{ clean(); done(r); };
+  sc.onerror=()=>{ clean(); done(null); };
+  setTimeout(()=>{ if(window[cb]){ clean(); done(null); } },150000);
+  sc.src=SCRIPT_URL+sep+"action=comprpt&max=2&want="+encodeURIComponent(_crWant)+"&callback="+cb;
+  document.body.appendChild(sc);
+}
 function openPlotFinder(){
   showDataSheet_("Who did what, and when",
     `<div id="pfBody" style="font-size:13px;color:#cfe3d2">Loading plots…</div>`);
@@ -5025,6 +5090,25 @@ function genNote_(stand){
   sc.src=SCRIPT_URL+sep+"action=gennote&stand="+encodeURIComponent(stand)+"&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
   document.body.appendChild(sc);
 }
+/* One compartment's report, from its popup. Same builder as the Tools panel and the Sheet menu. */
+function compRptOne_(stand){
+  if(!stand) return;
+  if(!connected || isOffline()){ toast("Need a connection — the Sheet builds the report",true); return; }
+  toast("Building the report for "+stand+"…");
+  const cb="__c1"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  window[cb]=r=>{ clean();
+    const f=(r&&r.made&&r.made[0]);
+    if(f){ showInfoSheet_("Report ready",
+        `<div style="color:#a9c9b0;font-size:13px;line-height:1.55;margin-bottom:10px">${esc(f.name)}</div>`+
+        `<a href="${esc(f.url)}" target="_blank" rel="noopener" style="display:block;padding:12px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;text-decoration:none;text-align:center;font-size:13px">📄 Open the PDF</a>`+
+        `<div style="color:#5a7a62;font-size:11px;margin-top:8px;line-height:1.4">Saved in the FRI Reports folder in Drive.</div>`); }
+    else toast((r&&r.error)||"Couldn't build the report",true); };
+  sc.onerror=()=>{ clean(); toast("Couldn't reach the Sheet",true); };
+  setTimeout(()=>{ if(window[cb]){ clean(); toast("Timed out — it may still be building",true); } },90000);
+  sc.src=SCRIPT_URL+sep+"action=comprpt&max=1&want="+encodeURIComponent(stand)+"&callback="+cb;
+  document.body.appendChild(sc);
+}
 function setBoundPopupView(v){ _bpView=v; if(v==="analysis") standAnFetch_(false); renderBoundPopup_(); }
 function renderBoundPopup_(){
   const f=_bpFeat; if(!f) return;
@@ -5062,7 +5146,11 @@ function renderBoundPopup_(){
   const seg=(v,lab)=>`<span onclick="setBoundPopupView('${v}')" style="cursor:pointer;padding:2px 7px;border-radius:6px;font-size:11px;`+
     (_bpView===v?`background:#16271a;color:#eafae8`:`color:#5a7a62`)+`">${lab}</span>`;
   const table=rows?`<table style="border-collapse:collapse;font-size:12px;width:100%">${rows}</table>`:"";
-  const body=`<div style="max-height:38vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${table}${note}</div>`;
+  // a report for the compartment you are looking at, without going via the Tools menu
+  const rpt = (_bpView==="analysis" && a && a.nplots)
+    ? `<button type="button" onclick="compRptOne_('${String(a.stand||"").replace(/'/g,"&#39;")}')" style="display:block;width:100%;margin-top:10px;padding:10px;border-radius:8px;border:1px solid #9fb8a4;background:#f4f8f2;color:#16271a;font:inherit;font-size:12px">📄 PDF report for this compartment</button>`
+    : "";
+  const body=`<div style="max-height:38vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${table}${note}${rpt}</div>`;
   L.popup({maxWidth:280,autoPan:true,className:"bpop"}).setLatLng(_bpLatLng)
     .setContent(`<div style="font-family:'Courier New',monospace;color:#16271a;line-height:1.4">`+
       `<b style="font-size:13px">${esc(title)}</b>`+
