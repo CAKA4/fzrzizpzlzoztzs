@@ -406,7 +406,14 @@
   .modal-card{ background:var(--card); border:1px solid var(--line2); border-radius:14px; padding:18px; width:100%; max-width:380px; box-shadow:0 20px 60px rgba(0,0,0,.55); max-height:calc(100vh - 40px); overflow-y:auto; -webkit-overflow-scrolling:touch }
   .modal-title{ font-weight:700; font-size:15px; margin-bottom:12px; color:var(--text) }
   .modal-card input{ margin-bottom:14px }
-  .modal-actions{ display:flex; gap:10px; justify-content:flex-end }
+  /* Four buttons right-aligned in a row that could not wrap pushed the first one off the left edge
+     of a phone. Let them wrap, and let each shrink to its text rather than overflowing. */
+  .modal-actions{ display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; }
+  .modal-actions .btn{ flex:0 1 auto; min-width:0; white-space:nowrap; padding-left:12px; padding-right:12px; }
+  @media (max-width:420px){
+    .modal-actions{ gap:7px }
+    .modal-actions .btn{ flex:1 1 calc(50% - 4px); }   /* two per row, nothing clipped */
+  }
   .prefill{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px }
   .prefill .lab{ font-size:12px; color:#86a08c }
   .picklist{ max-height:48vh; overflow-y:auto; margin:6px 0 12px; display:flex; flex-direction:column; gap:7px }
@@ -1078,7 +1085,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v304";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v305";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1155,15 +1162,14 @@ function defaultNoneFields_(){ ["PESTS","PESTQUAN","DISEASE","DISEQUAN","RPD","S
 function numRangeSelect(s,max){ if(!s) return; let h=`<option value="">—</option>`; for(let i=1;i<=max;i++) h+=`<option value="${i}">${i}</option>`; s.innerHTML=h; }
 // Height list ordered so the most-used heights sit at the top. Seeds a sensible forestry default order,
 // then real usage from prior plots takes over (×10 so a few entries outweigh the seed).
+/* Plain 1 to 50, in order. Sorting by what gets picked most put 18 at the top and 1 somewhere in the
+   middle, so the list no longer matched what a thumb expects — a height is a number, and a number
+   list should count. */
 function htSelect_(s){ if(!s) return;
-  const counts={}; const add=p=>{ const v=String((p&&p.HT)||"").trim(); if(v) counts[v]=(counts[v]||0)+1; };
-  try{ if(typeof saved!=="undefined") saved.forEach(add); if(typeof auditPlots!=="undefined") auditPlots.forEach(add); }catch(e){}
-  const seed={"18":9,"20":8,"16":7,"22":6,"14":5,"24":4,"12":3,"26":2,"10":1};
   const all=[]; for(let i=1;i<=50;i++) all.push(String(i));
-  const score=v=>((counts[v]||0)*10)+(seed[v]||0);
-  all.sort((a,b)=> score(b)-score(a) || (parseInt(a,10)-parseInt(b,10)));
   s.innerHTML=`<option value="">—</option>`+all.map(v=>`<option value="${v}">${v}</option>`).join("");
 }
+
 /* Cavity trees, snags and coarse woody debris are tallied constantly, so they sit at the top
    of the tree-tally list ahead of the species. */
 const HABITAT_TOP=["CAV","Sng","CWD"];
