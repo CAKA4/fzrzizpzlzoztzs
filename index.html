@@ -212,7 +212,8 @@
   .pdot .lf{ display:none; } .pdot .lm{ display:block; }
   .pdot.full .lf{ display:block; } .pdot.full .lm{ display:none; }
   .pdot.min{ display:flex; align-items:center; justify-content:center;
-             width:24px; height:24px; border-radius:50%; padding:0; white-space:nowrap; }
+             width:30px; height:30px; border-radius:50%; padding:0; white-space:nowrap;
+             font-size:11px; box-shadow:0 2px 7px rgba(0,0,0,.7); }
   /* The full label must size itself to its widest line. An inline-block with nowrap does that in
      every engine; width:max-content on a flex container does not survive iOS Safari, and a bare
      min-width collapses the box so every word wraps onto its own row. Breaks come only from the
@@ -1072,7 +1073,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v298";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v300";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2862,7 +2863,7 @@ function closeMore(){ $("moreMenu").style.display="none"; }
    so. Plots are listed but never offered for deletion here — that is what "Start over" is for. */
 const STORE_LABELS_=[
   ["fi_pdf",      "Georeferenced PDF map", true,  "The PDF overlay stored on this device."],
-  ["fi_reffiles", "Reference points / lines", true, "Loaded reference layers."],
+  ["fi_reffiles", "Reference points / lines (old copy)", true, "Left over from an older version — safe to clear."],
   ["fi_track",    "Track log", true,  "Where you have walked since it was last cleared."],
   ["fi_route",    "Cruise route", true, "The planned route line."],
   ["fi_polys",    "Drawn compartments", true, "Areas outlined on this device."],
@@ -5338,8 +5339,8 @@ function schedulePinRender_(){
 }
 let _pinCanvas=null;
 function pinCanvas_(){ if(!_pinCanvas) _pinCanvas=L.canvas({padding:0.5}); return _pinCanvas; }
-function canvasDot_(lat,lon,layer,fill,stroke,onClick){
-  L.circleMarker([lat,lon],{renderer:pinCanvas_(),radius:5,weight:2,color:stroke,fillColor:fill,fillOpacity:1})
+function canvasDot_(lat,lon,layer,fill,stroke,onClick,r){
+  L.circleMarker([lat,lon],{renderer:pinCanvas_(),radius:(r||5),weight:2.5,color:stroke,fillColor:fill,fillOpacity:1})
     .addTo(layer).on("click",onClick);
 }
 function renderMapPins(){ if(!fpins) return; fpins.clearLayers(); if(fauditpins) fauditpins.clearLayers(); _pinEls=[];
@@ -5348,7 +5349,8 @@ function renderMapPins(){ if(!fpins) return; fpins.clearLayers(); if(fauditpins)
   const view = (detail && fmap) ? fmap.getBounds().pad(0.25) : null;
   saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)) return;
     const hit=_findHit_(p); const needs=plotNeedsWork_(p,false);
-    if(!detail){ canvasDot_(lat,lon,fpins,"#e8b84b",hit?"#ff36c0":(needs?"#ff8c1a":"#ffffff"),()=>plotCard(i,false)); return; }
+    // a plot you have done is the thing that matters here — draw it bigger than everything else
+    if(!detail){ canvasDot_(lat,lon,fpins,"#e8b84b",hit?"#ff36c0":(needs?"#ff8c1a":"#ffffff"),()=>plotCard(i,false),8); return; }
     if(view && !view.contains([lat,lon])) return;          // off screen — don't build it
     const lbl=myDotLabel_(p);   // both label states are built now; declutterLabels_ picks which shows
     const ring=hit?"border:3px solid #ff36c0;box-shadow:0 0 0 3px rgba(255,54,192,.45),0 2px 6px rgba(0,0,0,.6)"
@@ -6980,21 +6982,68 @@ function importRefFile(file){
   else if(lower.endsWith(".shp")||lower.endsWith(".zip")) file.arrayBuffer().then(b=>shp(b)).then(ensureWGS84).then(done).catch(e=>toast("Shapefile error",true));
   else toast("Use a .gpx, .geojson, .json, .shp or .zip file",true);
 }
-// Keep imported reference layers across app restarts (stored as WGS84 GeoJSON, like boundaries).
-function cacheRefFile_(gj){ try{ if(!STORE) return;
-  const cols=Array.isArray(gj)?gj:[gj]; let saved=[]; try{ saved=JSON.parse(STORE.getItem("fi_reffiles"))||[]; }catch(e){}
-  cols.forEach(fc=>{ if(fc&&fc.features&&fc.features.length) saved.push(fc); });
-  STORE.setItem("fi_reffiles",JSON.stringify(saved));
-}catch(e){} }
-function loadCachedRefFiles_(){ try{ if(!STORE) return;
-  const saved=JSON.parse(STORE.getItem("fi_reffiles")||"[]"); if(!Array.isArray(saved)||!saved.length) return;
-  saved.forEach(fc=>renderRef(fc));   // re-draw without re-caching (they're already stored)
-}catch(e){} }
+/* Reference layers are kept across restarts, but two things made 3,000 points expensive:
+
+     · every attribute of every feature was stored, when the map only ever shows one label field
+     · it all went into localStorage, whose 5 MB is shared with the plots themselves
+
+   Now the features are trimmed to the label and the geometry, coordinates are rounded to about a
+   metre, and the whole thing lives in IndexedDB — which is orders of magnitude larger and does not
+   compete with the field data. Typically a tenth of the space, and the plots get their room back. */
+function trimRefFc_(fc){
+  if(!fc || !fc.features) return fc;
+  const round=c=>Array.isArray(c[0]) ? c.map(round) : [ +Number(c[0]).toFixed(5), +Number(c[1]).toFixed(5) ];
+  const keep = refLabelField || null;
+  return { type:"FeatureCollection", _lbl:keep,
+    features: fc.features.map(f=>{
+      const pr={};
+      if(keep && f.properties && f.properties[keep]!=null) pr[keep]=f.properties[keep];
+      let g=f.geometry;
+      if(g && g.coordinates) g={ type:g.type, coordinates:round(g.coordinates) };
+      return { type:"Feature", properties:pr, geometry:g };
+    })
+  };
+}
+function cacheRefFile_(gj){
+  try{
+    const cols=Array.isArray(gj)?gj:[gj];
+    ldbGet("reffiles").then(saved=>{
+      const list=Array.isArray(saved)?saved:[];
+      cols.forEach(fc=>{ if(fc&&fc.features&&fc.features.length) list.push(trimRefFc_(fc)); });
+      ldbPut("reffiles", list).catch(()=>toast("Couldn't save the reference layer to this device",true));
+      try{ STORE&&STORE.removeItem("fi_reffiles"); }catch(e){}   // retire the old localStorage copy
+    }).catch(()=>{});
+  }catch(e){}
+}
+function loadCachedRefFiles_(){
+  // migrate anything still in localStorage from an older build, then drop it
+  try{
+    const old=STORE&&STORE.getItem("fi_reffiles");
+    if(old){
+      const arr=JSON.parse(old)||[];
+      if(arr.length){
+        ldbGet("reffiles").then(cur=>{
+          const list=Array.isArray(cur)?cur:[];
+          arr.forEach(fc=>list.push(trimRefFc_(fc)));
+          ldbPut("reffiles",list).then(()=>{ try{ STORE.removeItem("fi_reffiles"); }catch(e){} }).catch(()=>{});
+        }).catch(()=>{});
+        arr.forEach(fc=>renderRef(fc));
+        return;
+      }
+      try{ STORE.removeItem("fi_reffiles"); }catch(e){}
+    }
+  }catch(e){}
+  try{ ldbGet("reffiles").then(list=>{ (Array.isArray(list)?list:[]).forEach(fc=>{
+    if(fc && fc._lbl && !refLabelField) refLabelField=fc._lbl;
+    renderRef(fc);
+  }); }).catch(()=>{}); }catch(e){}
+}
 function clearRefFiles(){
   if(refLabels.length && !confirm("Remove all imported reference points/lines from the map and device?")) return;
   if(refLayer) refLayer.clearLayers(); if(freflabelLayer) freflabelLayer.clearLayers();
   refLabels=[]; refFeatCount=0; refLabelField=null;
   try{ STORE&&STORE.removeItem("fi_reffiles"); }catch(e){}
+  try{ ldbPut("reffiles",[]).catch(()=>{}); }catch(e){}
   updateLayerStatus(); renderLayerVis_(); toast("Reference layers removed");
 }
 // Find a plot-number value on an imported reference point (the point grid usually carries one).
@@ -7015,7 +7064,9 @@ function renderRef(gj){
       const label=Object.values(pr).filter(v=>v!=null&&v!=="").slice(0,2).join(" — ")||"feature";
       const pn=refPlotNum_(pr).replace(/'/g,"\\'");
       const addPt=(lon,lat)=>{ if(!isFinite(lat)||!isFinite(lon)) return;
-        L.circleMarker([lat,lon],{radius:6,color:"#fff",weight:1.5,fillColor:"#ff7043",fillOpacity:.95}).addTo(refLayer)
+        /* Smaller, flatter and ringed in dark: a reference point is somewhere to go, not work done.
+           At radius 6 on white they were indistinguishable from a collected plot. */
+        L.circleMarker([lat,lon],{radius:4,color:"#7a2f1c",weight:1,fillColor:"#ff7043",fillOpacity:.85}).addTo(refLayer)
          .bindPopup(`<div style="font-family:monospace;font-size:11px;color:#16271a"><b>${esc(label)}</b><br>${lat.toFixed(5)}, ${lon.toFixed(5)}${pn?`<br>plot ${esc(pn)}`:""}<br><a href="javascript:void(0)" onclick="placeFromRef(${lat},${lon},'${pn}')">Place plot here ›</a></div>`);
         refLabels.push({lat:lat,lng:lon,props:pr});
         b.push([lat,lon]); n++; };
