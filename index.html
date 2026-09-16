@@ -1072,7 +1072,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v297";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v298";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -6340,8 +6340,27 @@ function pushCompartmentAreas_(silent){
   const {areas,srcs}=compartmentAreas_(); const names=Object.keys(areas);
   if(!names.length){ if(!silent) toast("No named compartments in the layer — check the Stand name field",true); return; }
   const rounded={}; names.forEach(k=>{ const v=+areas[k].toFixed(4); if(v>0) rounded[k]=v; });
+  /* Send the outlines too, not just the hectares. Compartments loaded from a boundary file had no
+     geometry anywhere server-side, so the PDF reports could only ever say "no outline recorded" —
+     the shape existed on the phone and nowhere else. Coordinates are thinned and rounded to about a
+     metre, which is ample for a report map and keeps the payload sane. */
+  const rings=[];
+  try{
+    const thin=(pts,max)=>{ if(pts.length<=max) return pts; const step=pts.length/max, out=[];
+      for(let i=0;i<max;i++) out.push(pts[Math.floor(i*step)]); out.push(pts[pts.length-1]); return out; };
+    BOUND.features.forEach(f=>{
+      const nm=String((f.properties&&f.properties[standField])||"").trim(); if(!nm) return;
+      const g=f.geometry; if(!g) return;
+      const polys = g.type==="Polygon" ? [g.coordinates] : (g.type==="MultiPolygon" ? g.coordinates : []);
+      polys.forEach(rings0=>{
+        const outer=rings0 && rings0[0]; if(!outer || outer.length<4) return;
+        const pts=thin(outer,140).map(c=>[ +Number(c[1]).toFixed(5), +Number(c[0]).toFixed(5) ]);
+        rings.push({name:nm, pts:pts, tract:(tractField&&f.properties?String(f.properties[tractField]||""):"")||manualTract||""});
+      });
+    });
+  }catch(e){}
   fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
-    body:JSON.stringify({_action:"standareas",areas:rounded,srcs:srcs})})
+    body:JSON.stringify({_action:"standareas",areas:rounded,srcs:srcs,rings:rings})})
     .then(()=>{ if(!silent){ const off=Object.values(srcs).filter(s=>/official/.test(s)).length; toast(`Sent ${Object.keys(rounded).length} compartment area${Object.keys(rounded).length===1?"":"s"} to the Sheet${off?` · ${off} from the official field`:""}`); } })
     .catch(()=>{ if(!silent) toast("Couldn't reach the Sheet to send areas",true); });
 }
