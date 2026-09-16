@@ -788,7 +788,6 @@
   </div>
   <div class="map-legend" id="mapLegend">
     <span><i style="background:#4caf50"></i>You</span>
-    <span><i style="background:#e8b84b;border-radius:50%"></i>Plot</span>
     <span><i style="background:#ffffff;border:1.5px solid #1c2b1e;border-radius:50%"></i>Reference</span>
     <span id="lgWho" style="display:none"></span>
     <span><i style="background:transparent;border:1px solid #8fd18a"></i>Stand</span>
@@ -1079,7 +1078,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v302";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v304";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2973,10 +2972,65 @@ function saveCruiser(){
 }
 
 /* ---------- recover plots that already reached the Google Sheet (e.g. after the browser cleared local storage) ---------- */
+/* One radius for every plot, whichever layer draws it. Your own were 10, imported 7 and the crew
+   feed 7 — so the same plot appeared to shrink when it arrived from the Sheet, and a plot you had
+   just placed looked different from its neighbours. Source should change the colour, never the size. */
+const PLOT_DOT_R = 9;
 /* ---------- show other crews' completed (submitted) plots from the Sheet ---------- */
 const CREW_REFRESH_MS = 60000;   // auto-refresh interval while the layer is shown
 function shortEmail_(e){ e=String(e||""); const at=e.indexOf("@"); return at>0?e.slice(0,at):e; }
-function crewColorFor(name){ if(crewColors[name]) return crewColors[name]; const i=Object.keys(crewColors).length % CREW_PALETTE.length; return (crewColors[name]=CREW_PALETTE[i]); }
+/* Derive the colour from the name itself. It used to be handed out in the order a device first saw
+   each person, so the same crew member was red on one phone and blue on another — useless for
+   talking about the map ("the blue plots" meant nothing shared). A hash of the name gives every
+   device the same answer with nothing to sync. */
+/* Colour per collector, identical on every device and free of collisions.
+
+   Two approaches failed first. Handing colours out in the order a device met people made the same
+   person red on one phone and blue on another. Hashing the name to a hue looked device-independent
+   but collided badly — Hs and kcarr landed 2 degrees apart, which is no different from being the
+   same colour.
+
+   This takes the roster every device can see — the collectors present in the data — sorts it, and
+   walks it in order. Each name prefers the bucket its hash points at, and takes the next free one if
+   that is taken. Same roster in, same colours out, and 24 buckets 15 degrees apart are all clearly
+   distinct. A new collector only disturbs the others if they land on an occupied bucket. */
+const CREW_HUES = 24;
+let _crewRoster = "";
+function crewRoster_(){
+  const set = {};
+  try{
+    (saved||[]).forEach(p=>{ const w=String((p&&(p.CRUISER||p.EMAIL))||"").trim(); if(w) set[shortEmail_(w).toLowerCase()]=1; });
+    (crewData||[]).forEach(p=>{ const w=String((p&&(p.cruiser||p.email))||"").trim(); if(w) set[shortEmail_(w).toLowerCase()]=1; });
+    const me=String(cruiser||"").trim()||shortEmail_(String(cruiserEmail||"").trim());
+    if(me) set[me.toLowerCase()]=1;
+  }catch(e){}
+  return Object.keys(set).sort();
+}
+function rebuildCrewColors_(){
+  const names=crewRoster_();
+  const sig=names.join("|");
+  if(sig===_crewRoster) return;        // unchanged — keep what is already assigned
+  _crewRoster=sig;
+  const taken={}, out={};
+  names.forEach(n=>{
+    let h=0; for(let i=0;i<n.length;i++){ h=((h<<5)-h)+n.charCodeAt(i); h|=0; }
+    let b=Math.abs(h)%CREW_HUES, tries=0;
+    while(taken[b] && tries++<CREW_HUES) b=(b+1)%CREW_HUES;
+    taken[b]=1;
+    out[n]="hsl("+Math.round(b*(360/CREW_HUES))+",72%,56%)";
+  });
+  crewColors=out;
+}
+function crewColorFor(name){
+  const key=String(name||"").trim().toLowerCase();
+  if(!key) return "hsl(0,72%,56%)";
+  if(!crewColors[key]) rebuildCrewColors_();
+  if(crewColors[key]) return crewColors[key];
+  // someone not in the roster yet — give them their preferred bucket rather than nothing
+  let h=0; for(let i=0;i<key.length;i++){ h=((h<<5)-h)+key.charCodeAt(i); h|=0; }
+  return "hsl("+Math.round((Math.abs(h)%CREW_HUES)*(360/CREW_HUES))+",72%,56%)";
+}
+
 function setCrewBtn(){ const b=$("crewBtn"); if(b) b.textContent = "👥 Crew plots" + (crewData.length?" ("+crewData.length+")":"") + " — always on · tap to refresh";
   const row=$("plotLabelRow"); if(row) row.style.display = crewShown ? "block" : "none";
   const sel=$("plotLabelSel"); if(sel) sel.value=plotLabelField; }
@@ -3670,7 +3724,7 @@ function renderCrewPlots(rows, silent){
   const bounds=[];
   // pass 1: ordinary plots (small dots) — get an analyzed label when a field is chosen
   pts.forEach(p=>{ if(latest[p.who]===p) return; const col=crewColorFor(p.who);
-    const mk=L.circleMarker([p.lat,p.lon],{radius:7,color:"#fff",weight:2,fillColor:col,fillOpacity:.9}).bindPopup(plotPopHtml_(p)).addTo(crewLayer);
+    const mk=L.circleMarker([p.lat,p.lon],{radius:PLOT_DOT_R,color:"#fff",weight:2.5,fillColor:col,fillOpacity:.95}).bindPopup(plotPopHtml_(p)).addTo(crewLayer);
     if(labelled){ const t=plotLabelText_(p); if(t) mk.bindTooltip(t,{permanent:true,direction:"top",offset:[0,-8],className:"plot-tip"}); }
     bounds.push([p.lat,p.lon]); });
   // pass 2: each cruiser's latest plot (halo + larger dot) on top
@@ -5373,32 +5427,35 @@ function pinCanvas_(){ if(!_pinCanvas) _pinCanvas=L.canvas({padding:0.5}); retur
 /* Who is which colour, in the map legend — a colour scheme nobody can read is not worth having. */
 function renderWhoLegend_(){
   const el=$("lgWho"); if(!el) return;
-  const me=String(cruiser||"").trim().toLowerCase(), myMail=String(cruiserEmail||"").trim().toLowerCase();
+  const mine=String(cruiser||"").trim() || shortEmail_(String(cruiserEmail||"").trim());
   const seen={};
+  if(mine) seen[mine]=1;                 // you are in the key too, in your own colour
   (saved||[]).forEach(p=>{
     const who=String((p&&(p.CRUISER||p.EMAIL))||"").trim(); if(!who) return;
-    const k=who.toLowerCase(); if(k===me||k===myMail) return;
     seen[shortEmail_(who)]=1;
   });
-  const names=Object.keys(seen).sort().slice(0,6);
+  const names=Object.keys(seen).sort((a,b)=>(a===mine?-1:b===mine?1:a.localeCompare(b))).slice(0,6);
   if(!names.length){ el.style.display="none"; el.innerHTML=""; return; }
   el.style.display="";
-  el.innerHTML=names.map(n=>`<span style="display:inline-flex;align-items:center;margin-right:6px"><i style="background:${crewColorFor(n)};border-radius:50%"></i>${esc(n)}</span>`).join("");
+  el.innerHTML=names.map(n=>`<span style="display:inline-flex;align-items:center;margin-right:6px"><i style="background:${crewColorFor(n)};border-radius:50%"></i>${esc(n)}${n===mine?" (you)":""}</span>`).join("");
+}
+/* Everyone's plots carry their own colour, including yours. Treating your own as a special amber
+   meant your plots changed colour depending on whose phone was looking at them. */
+function myColor_(){
+  const who=String(cruiser||"").trim() || shortEmail_(String(cruiserEmail||"").trim());
+  return who ? crewColorFor(who) : "#e8b84b";
 }
 function plotFill_(p){
   const who=String((p&&(p.CRUISER||p.EMAIL))||"").trim();
-  if(!who) return "#e8b84b";
-  const me=String(cruiser||"").trim(), myMail=String(cruiserEmail||"").trim();
-  if(!me && !myMail) return "#e8b84b";
-  if(who.toLowerCase()===me.toLowerCase() || who.toLowerCase()===myMail.toLowerCase()) return "#e8b84b";
-  try{ return crewColorFor(shortEmail_(who)); }catch(e){ return "#e8b84b"; }
+  if(!who) return myColor_();          // collected here before a name was set
+  try{ return crewColorFor(shortEmail_(who)); }catch(e){ return myColor_(); }
 }
 function canvasDot_(lat,lon,layer,fill,stroke,onClick,r){
   L.circleMarker([lat,lon],{renderer:pinCanvas_(),radius:(r||5),weight:2.5,color:stroke,fillColor:fill,fillOpacity:1})
     .addTo(layer).on("click",onClick);
 }
 function renderMapPins(){
-  try{ renderWhoLegend_(); }catch(e){} if(!fpins) return; fpins.clearLayers(); if(fauditpins) fauditpins.clearLayers(); _pinEls=[];
+  try{ rebuildCrewColors_(); renderWhoLegend_(); }catch(e){} if(!fpins) return; fpins.clearLayers(); if(fauditpins) fauditpins.clearLayers(); _pinEls=[];
   const z = fmap ? fmap.getZoom() : 0;
   const detail = z >= LABEL_ZOOM_MIN;                      // labels and full markers only up close
   const view = (detail && fmap) ? fmap.getBounds().pad(0.25) : null;
@@ -5409,7 +5466,7 @@ function renderMapPins(){
        it all in one amber told you nothing about who did what — the same information the Crew layer
        has always shown for live plots. Your own stay amber, so your work still reads as yours. */
     const fill = plotFill_(p);
-    if(!detail){ canvasDot_(lat,lon,fpins,fill,hit?"#ff36c0":(needs?"#ff8c1a":"#ffffff"),()=>plotCard(i,false),10); return; }
+    if(!detail){ canvasDot_(lat,lon,fpins,fill,hit?"#ff36c0":(needs?"#ff8c1a":"#ffffff"),()=>plotCard(i,false),PLOT_DOT_R); return; }
     if(view && !view.contains([lat,lon])) return;          // off screen — don't build it
     const lbl=myDotLabel_(p);   // both label states are built now; declutterLabels_ picks which shows
     const ring=hit?"border:3px solid #ff36c0;box-shadow:0 0 0 3px rgba(255,54,192,.45),0 2px 6px rgba(0,0,0,.6)"
@@ -5425,7 +5482,7 @@ function renderMapPins(){
     const done=!!p._done;
     const col = done ? "#37c26b" : (p._dup ? "#e8b84b" : "#4aa3e0");
     const hit=_findHit_(p); const needs=plotNeedsWork_(p,true);
-    if(!detail){ canvasDot_(lat,lon,fauditpins||fpins,col,hit?"#ff36c0":(needs?"#ff8c1a":(done?"#eafff0":"#ffffff")),()=>plotCard(i,true),7); return; }
+    if(!detail){ canvasDot_(lat,lon,fauditpins||fpins,col,hit?"#ff36c0":(needs?"#ff8c1a":(done?"#eafff0":"#ffffff")),()=>plotCard(i,true),PLOT_DOT_R); return; }
     if(view && !view.contains([lat,lon])) return;
     const lbl = auditDotLabel_(p);
     const ring = hit ? "border:3px solid #ff36c0;box-shadow:0 0 0 3px rgba(255,54,192,.45),0 2px 7px rgba(0,0,0,.6)"
@@ -5746,11 +5803,29 @@ function moveEnd_(){
   resetDropBar();
 }
 function moveCancel_(){ moveEnd_(); _moveIdx=null; toast("Move cancelled — the plot has not been changed"); }
+/* Where the crosshair actually is. It is positioned at 50% of the screen, but the map starts 52 px
+   below the top of it — so the crosshair sits about 26 px above the map's true centre, and using
+   getCenter() dropped the plot that far south of where it was aimed. Convert the crosshair's own
+   screen position instead, which is right whatever the layout does. */
+function crosshairLatLng_(){
+  if(!fmap) return null;
+  try{
+    const ch=$("mapCrosshair"), mc=fmap.getContainer();
+    if(ch && mc){
+      const a=ch.getBoundingClientRect(), b=mc.getBoundingClientRect();
+      if(a.width && b.width){
+        const pt=L.point((a.left + a.width/2) - b.left, (a.top + a.height/2) - b.top);
+        return fmap.containerPointToLatLng(pt);
+      }
+    }
+  }catch(e){}
+  return fmap.getCenter();
+}
 function moveConfirm_(){
   if(!fmap) return;
-  const c=fmap.getCenter();          // the crosshair is the centre of the map, by definition
+  const c=crosshairLatLng_();
   moveEnd_();
-  moveApply_(c.lat, c.lng, null);
+  if(c) moveApply_(c.lat, c.lng, null);
 }
 function moveApply_(lat,lon,acc){
   const list=_moveAudit?auditPlots:saved;
@@ -6200,7 +6275,8 @@ function startCapture(){
 }
 function endCapture_(){ captureMode=false; $("mapCrosshair").style.display="none"; resetDropBar(); }
 function captureAtCrosshair(){
-  const c=fmap.getCenter(); fillPlace(c.lat,c.lng);
+  // same correction as the move: the crosshair is not the map centre
+  const c=crosshairLatLng_() || fmap.getCenter(); fillPlace(c.lat,c.lng);
   endCapture_(); closeMap(); window.scrollTo({top:0,behavior:"smooth"});   // return to the top of the form for data entry
   toast("Location set — enter your plot data");
 }
