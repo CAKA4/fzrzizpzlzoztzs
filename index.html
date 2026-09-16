@@ -789,6 +789,7 @@
   <div class="map-legend" id="mapLegend">
     <span><i style="background:#4caf50"></i>You</span>
     <span><i style="background:#e8b84b;border-radius:50%"></i>Plot</span>
+    <span><i style="background:#ffffff;border:1.5px solid #1c2b1e;border-radius:50%"></i>Reference</span>
     <span><i style="background:transparent;border:1px solid #8fd18a"></i>Stand</span>
     <span id="legImported" style="display:none"><i style="background:#4aa3e0;border-radius:50%"></i>Imported</span>
     <span id="liveState" style="margin-top:2px"></span>
@@ -1073,7 +1074,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v300";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v301";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3664,7 +3665,7 @@ function renderCrewPlots(rows, silent){
   const bounds=[];
   // pass 1: ordinary plots (small dots) — get an analyzed label when a field is chosen
   pts.forEach(p=>{ if(latest[p.who]===p) return; const col=crewColorFor(p.who);
-    const mk=L.circleMarker([p.lat,p.lon],{radius:5,color:"#fff",weight:1.4,fillColor:col,fillOpacity:.8}).bindPopup(plotPopHtml_(p)).addTo(crewLayer);
+    const mk=L.circleMarker([p.lat,p.lon],{radius:7,color:"#fff",weight:2,fillColor:col,fillOpacity:.9}).bindPopup(plotPopHtml_(p)).addTo(crewLayer);
     if(labelled){ const t=plotLabelText_(p); if(t) mk.bindTooltip(t,{permanent:true,direction:"top",offset:[0,-8],className:"plot-tip"}); }
     bounds.push([p.lat,p.lon]); });
   // pass 2: each cruiser's latest plot (halo + larger dot) on top
@@ -4496,7 +4497,9 @@ let crewRouteLayer=null, crewRoutesShown=false, crewRoutesTimer=null;
 let photoLayer=null;   // markers for on-device photo locations
 const LIVE_MS=60000;   // share + poll interval (battery-friendly; map GPS already running so no extra fix cost)
 const LIVE_FRESH_MS=5*60*1000;   // within this = "live" (pulsing); older but still today = "last known"
-const CREW_PALETTE=["#ff5252","#4d8bff","#ffb300","#26c281","#b56cff","#26c6da","#ff7043","#9ccc65","#ec407a","#5c6bc0"];
+/* #ff7043 has gone: it was the reference-point colour too, so the seventh crew member's plots were
+   indistinguishable from navigation targets. Replaced with a teal that nothing else uses. */
+const CREW_PALETTE=["#ff5252","#4d8bff","#ffb300","#26c281","#b56cff","#26c6da","#00897b","#9ccc65","#ec407a","#5c6bc0"];
 let mePos=null, meSamples=[], meHeading=null, BOUND=null, standField=null, ageField=null, tractField=null, areaField=null, popupFields=[], mapLibsLoaded=false, boundFiles=[];
 function rebuildBound(){ BOUND = boundFiles.length ? {type:"FeatureCollection", features:[].concat(...boundFiles.map(f=>f.features||[]))} : null; }
 // Small layer settings stay in localStorage (tiny). Boundary files now load from IndexedDB (async),
@@ -5350,7 +5353,7 @@ function renderMapPins(){ if(!fpins) return; fpins.clearLayers(); if(fauditpins)
   saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)) return;
     const hit=_findHit_(p); const needs=plotNeedsWork_(p,false);
     // a plot you have done is the thing that matters here — draw it bigger than everything else
-    if(!detail){ canvasDot_(lat,lon,fpins,"#e8b84b",hit?"#ff36c0":(needs?"#ff8c1a":"#ffffff"),()=>plotCard(i,false),8); return; }
+    if(!detail){ canvasDot_(lat,lon,fpins,"#e8b84b",hit?"#ff36c0":(needs?"#ff8c1a":"#ffffff"),()=>plotCard(i,false),10); return; }
     if(view && !view.contains([lat,lon])) return;          // off screen — don't build it
     const lbl=myDotLabel_(p);   // both label states are built now; declutterLabels_ picks which shows
     const ring=hit?"border:3px solid #ff36c0;box-shadow:0 0 0 3px rgba(255,54,192,.45),0 2px 6px rgba(0,0,0,.6)"
@@ -5366,7 +5369,7 @@ function renderMapPins(){ if(!fpins) return; fpins.clearLayers(); if(fauditpins)
     const done=!!p._done;
     const col = done ? "#37c26b" : (p._dup ? "#e8b84b" : "#4aa3e0");
     const hit=_findHit_(p); const needs=plotNeedsWork_(p,true);
-    if(!detail){ canvasDot_(lat,lon,fauditpins||fpins,col,hit?"#ff36c0":(needs?"#ff8c1a":(done?"#eafff0":"#ffffff")),()=>plotCard(i,true)); return; }
+    if(!detail){ canvasDot_(lat,lon,fauditpins||fpins,col,hit?"#ff36c0":(needs?"#ff8c1a":(done?"#eafff0":"#ffffff")),()=>plotCard(i,true),7); return; }
     if(view && !view.contains([lat,lon])) return;
     const lbl = auditDotLabel_(p);
     const ring = hit ? "border:3px solid #ff36c0;box-shadow:0 0 0 3px rgba(255,54,192,.45),0 2px 7px rgba(0,0,0,.6)"
@@ -5983,7 +5986,7 @@ function updateLayerStatus(){
     `${dot("#e8b84b")}<span>My plots: <b>${nMine}</b> ${nMine==1?"plot":"plots"}</span>`,
   ].concat(nImp?[`${dot("#4aa3e0")}<span>Imported plots: <b>${nImp}</b> ${nImp==1?"plot":"plots"}</span>`]:[]).concat([
     `${dot("#8fd18a")}<span>Stand boundaries: <b>${nb}</b> ${nb==1?"file":"files"} <span class="ls-muted">· ${plural(npoly,"polygon")}</span></span>`,
-    `${dot("#ff7043")}<span>Reference: <b>${nref}</b> ${nref==1?"feature":"features"} <span class="ls-muted">· ${plural(npt,"point")}</span></span>`,
+    `${dot("#ffffff")}<span>Reference: <b>${nref}</b> ${nref==1?"feature":"features"} <span class="ls-muted">· ${plural(npt,"point")}</span></span>`,
     `${dot("#90caf9")}<span>PDF map: <b>${pdfOverlay?"1":"0"}</b>${pdfOverlay&&pdfName?` <span class="ls-muted">· ${esc(pdfName)}</span>`:""}</span>`,
     `${dot("#e8b84b")}<span>Track log: <b>${trackLog.length}</b> ${trackLog.length==1?"point":"points"}</span>`,
     `${dot("#3fb7ff")}<span>Cruise route: <b>${routePts.length}</b> ${routePts.length==1?"point":"points"}${routePts.length>1?` <span class="ls-muted">· ${fmtDist_(routeLen())}</span>`:""}</span>`,
@@ -7066,7 +7069,11 @@ function renderRef(gj){
       const addPt=(lon,lat)=>{ if(!isFinite(lat)||!isFinite(lon)) return;
         /* Smaller, flatter and ringed in dark: a reference point is somewhere to go, not work done.
            At radius 6 on white they were indistinguishable from a collected plot. */
-        L.circleMarker([lat,lon],{radius:4,color:"#7a2f1c",weight:1,fillColor:"#ff7043",fillOpacity:.85}).addTo(refLayer)
+        /* White with a dark ring — deliberately colourless. Every warm colour is spoken for, and the
+           crew palette contained this exact orange, so a seventh crew member's plots and the
+           reference points were the same dot. A target to walk to should not compete with recorded
+           work, and white reads on both canopy and open field. */
+        L.circleMarker([lat,lon],{radius:4,color:"#1c2b1e",weight:1.5,fillColor:"#ffffff",fillOpacity:.9}).addTo(refLayer)
          .bindPopup(`<div style="font-family:monospace;font-size:11px;color:#16271a"><b>${esc(label)}</b><br>${lat.toFixed(5)}, ${lon.toFixed(5)}${pn?`<br>plot ${esc(pn)}`:""}<br><a href="javascript:void(0)" onclick="placeFromRef(${lat},${lon},'${pn}')">Place plot here ›</a></div>`);
         refLabels.push({lat:lat,lng:lon,props:pr});
         b.push([lat,lon]); n++; };
