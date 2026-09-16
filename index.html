@@ -163,10 +163,16 @@
   body.layers-open .map-chips, body.layers-open .map-legend, body.layers-open .map-drop{ display:none !important; }   /* keep the Layers checklist tappable */
   .map-chips button{ background:rgba(15,30,13,.9); border:1px solid #33623a; color:#cdebcf; font-family:var(--mono); font-size:11px; padding:6px 10px; border-radius:16px; cursor:pointer; box-shadow:0 1px 4px rgba(0,0,0,.4); }
   .map-chips button:active{ background:#123a1c; }
+  /* The legend is pointer-events:none so taps pass through to the map beneath it. That also made the
+     KEY header untappable — it has to opt back in, which is what .map-legend #lgToggle does below. */
   .map-legend{ position:absolute; left:10px; bottom:150px; z-index:5150; pointer-events:none; font-family:var(--mono); font-size:10px;
     color:#9ab; background:rgba(15,30,13,.82); border:1px solid #284a2c; border-radius:7px; padding:6px 9px;
     display:flex; flex-direction:column; gap:3px; }
   .map-legend i{ display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; vertical-align:middle; }
+  /* the one part of the legend that accepts a tap, with a target big enough to hit with a thumb */
+  .map-legend #lgToggle{ pointer-events:auto; cursor:pointer; margin:-4px -6px 1px; padding:5px 8px;
+    border-radius:5px; background:rgba(40,74,44,.55); align-self:flex-start; }
+  .map-legend #lgToggle:active{ background:rgba(60,110,66,.75); }
   .map-field{ display:flex; flex-direction:column; align-items:stretch; gap:6px;
     background:#16271a; border:1px solid #284a2c; border-radius:8px; padding:9px 10px; }
   .map-field label{ font-size:10px; color:#7a9a76; font-family:var(--mono); letter-spacing:.06em; line-height:1.35; }
@@ -1091,7 +1097,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v307";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v308";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
