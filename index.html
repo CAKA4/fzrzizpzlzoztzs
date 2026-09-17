@@ -193,6 +193,11 @@
   .crew-tip.stale{ opacity:.78; font-weight:400; color:#d7e4d9; }
   .plot-tip{ background:rgba(20,33,52,.92); color:#eaf1fb; border:1px solid #3a5a86; border-radius:5px; padding:1px 6px; font-family:var(--mono); font-size:11px; font-weight:700; box-shadow:0 2px 8px rgba(0,0,0,.4); }
   .plot-tip::before{ display:none; }
+  /* The row you last changed, called out plainly — several trees look identical on a small screen. */
+  .rep.tree.just-edited{ box-shadow:0 0 0 2px #f2a83d, 0 4px 14px rgba(0,0,0,.45); border-radius:10px; }
+  .rep.tree.just-edited::after{ content:attr(data-t); position:absolute; right:8px; top:-9px;
+    background:#f2a83d; color:#1a1000; font:700 10px var(--mono); padding:1px 7px; border-radius:8px; }
+  .rep.tree{ position:relative; }
   select.t_s.needs-dbh, select.needs-entry{ border-color:#c0392b !important; background:#3a1c19 !important; color:#ffd7d0 !important; box-shadow:0 0 0 2px rgba(192,57,43,.35); }
   .live-legend .lr-old{ opacity:.7; } .live-legend .lr-old b{ font-weight:400; }
   .live-legend{ position:absolute; top:calc(env(safe-area-inset-top) + 92px); left:10px; z-index:5200; background:rgba(15,30,13,.92); border:1px solid #33623a; border-radius:8px; padding:7px 9px; font-family:var(--mono); font-size:11.5px; color:#eafae8; max-width:46vw; box-shadow:0 3px 12px rgba(0,0,0,.5); }
@@ -408,7 +413,16 @@
   .chip-tog.alpha.on{ color:#fff; font-weight:700; box-shadow:inset 0 0 0 2px #7fd0a0 }
   /* Recorded elsewhere in this compartment but not on this plot: a hollow marker, clearly different
      from the solid ✓ of a species picked here. */
-  .chip-tog.alpha.instand{ box-shadow:inset 0 0 0 1px #6f8f76 }
+  /* "Already recorded in this compartment" has to be readable at a glance in daylight, on a phone,
+     at arm's length. A one-pixel inset ring was not — this is a filled teal chip with a solid border,
+     clearly different from both an untouched chip and the green of one ticked here. */
+  .chip-tog.alpha.instand{
+    background:#0d3b3a !important;
+    border-color:#3fb8ad !important;
+    box-shadow:inset 0 0 0 2px rgba(63,184,173,.45), 0 0 0 1px rgba(63,184,173,.25) !important;
+    color:#b8f2ea !important;
+  }
+  .chip-tog.alpha.instand .mk{ color:#5fe6d6; font-weight:700 }
 
   .modal{ position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50; display:flex; align-items:center; justify-content:center; padding:20px }
   body.map-open .modal{ z-index:6000; }   /* Tools & other menus opened from the map must sit above it (mapView is z-index 5000) */
@@ -555,6 +569,7 @@
   <details class="sec">
     <summary><span class="ix">04</span>Ground vegetation<span class="arw">▶</span></summary>
     <div class="secbody">
+      <div class="hint" style="margin:0 0 9px">Everything in this section is recorded inside the regeneration sub-plot — 1.79 m radius (10 m²) from plot centre — not the whole prism plot.</div>
       <div class="grouphd">Shrubs <span class="pill">SHRUB 1–5</span></div>
       <div class="hint" style="margin:-2px 0 8px">Sub-plot: 1.79 m radius (10 m²).</div>
       <div class="rows" id="shrubRows"></div>
@@ -567,7 +582,7 @@
       </div>
       <button class="addbtn" type="button" id="coverNoneBtn" onclick="coverNone()">None present — set herbs, moss and grass to 0</button>
       <div class="grouphd">Ground species <span class="code">GRNDSPEC</span> <span class="pill" id="grndCount">0</span></div>
-      <div class="hint">✓ recorded on this plot · ◦ already recorded elsewhere in this compartment</div>
+      <div class="hint"><span style="color:#7fd0a0;font-weight:700">✓</span> recorded on this plot · <span style="color:#5fe6d6;font-weight:700">◆</span> <span style="color:#b8f2ea">already recorded elsewhere in this compartment</span> <span id="grndInStandN" style="color:#5a7a62"></span></div>
       <div class="chips" id="grndChips"></div>
       <div class="row-inline" style="margin-top:9px">
         <input id="grndOther" placeholder="Add another species…">
@@ -580,7 +595,7 @@
   <details class="sec">
     <summary><span class="ix">05</span>SAR &amp; invasives<span class="arw">▶</span></summary>
     <div class="secbody"><div class="grid">
-      <div class="full" style="grid-column:1/-1"><div class="hint">Abundance by patch size: Few ≈2×2 m · Small ≈4×4 m · Medium ≈10×10 m · Large &gt;10×10 m.</div></div>
+      <div class="full" style="grid-column:1/-1"><div class="hint">Recorded by eye from plot centre — what you can see from where you are standing, not a search of the stand.<br>Abundance by patch size: Few ≈2×2 m · Small ≈4×4 m · Medium ≈10×10 m · Large &gt;10×10 m.</div></div>
       <div class="full"><label>Species at risk <span class="code">SAROSPEC</span></label><select id="SAROSPEC"></select></div>
       <div><label>Dog-strangling vine <span class="code">DSV</span></label><select id="DSV" class="abund"></select></div>
       <div><label>European buckthorn <span class="code">EUROBUCK</span></label><select id="EUROBUCK" class="abund"></select></div>
@@ -1097,7 +1112,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v308";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v315";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1520,12 +1535,21 @@ function renderGround(selected){
   const builtIn=new Set(GROUND_SPECIES.map(x=>String(x).toLowerCase()));
   const isCustom=n=>!builtIn.has(String(n).toLowerCase());
   const inStand=standGroundSet_();
+  // a count, so "none are marked" can be told apart from "the marking is not working"
+  try{
+    const el=$("grndInStandN");
+    if(el){
+      const st=String(($("STANDID")||{}).value||"").trim();
+      el.textContent = !st ? "· no stand set yet"
+        : (inStand.size ? `· ${inStand.size} so far in ${st}` : `· none yet in ${st}`);
+    }
+  }catch(e){}
   /* Markers are spans, not CSS ::before. Two ::before rules on one chip fought each other, so the
      "already in this compartment" mark never appeared beside anything. */
   $("grndChips").innerHTML = all.map(n=>{
     const picked=sel.has(n), known=!picked && inStand.has(String(n).toLowerCase());
-    const mark = picked ? `<span style="color:#7fd0a0;font-weight:700">✓ </span>`
-               : (known ? `<span style="color:#9ec3a6" title="Already recorded elsewhere in this compartment">◦ </span>` : "");
+    const mark = picked ? `<span class="mk" style="color:#7fd0a0;font-weight:700">✓ </span>`
+               : (known ? `<span class="mk" title="Already recorded elsewhere in this compartment">◆ </span>` : "");
     return `<button type="button" class="chip-tog alpha${picked?" on":""}${known?" instand":""}" style="${chipTint_(n)}" data-name="${esc(n)}" onclick="toggleGround(this)">`+
       mark+esc(n)+
       (isCustom(n)?`<span onclick="event.stopPropagation();editGround_('${esc(n).replace(/'/g,"&#39;")}')" style="margin-left:6px;opacity:.6">✎</span>`:"")+
@@ -1737,6 +1761,14 @@ function addTree(v,scroll){
   opts(div.querySelector(".t_ql"),DOM.TREEQL); opts(div.querySelector(".t_logs"),DOM.LOGS);
   const dbhSel=div.querySelector(".t_s"), spSel=div.querySelector(".t_sp");
   dbhSel.addEventListener("change",()=>dbhSel.classList.remove("needs-dbh"));   // clears the red once DBH is set
+  /* Android reports the page jumping several trees after a DBH is picked. Choosing from a native
+     select there closes a full-screen picker, the visual viewport resizes, and Chrome restores the
+     scroll to a position that no longer means the same thing — so the crew end up looking at a
+     different tree, see the previous tree's DBH carried forward into it, and conclude their pick did
+     not take. Re-anchor on the row that was actually edited, and mark it so there is no doubt which
+     one it is. iOS does not resize the viewport this way, which is why it never happened there. */
+  [dbhSel, spSel, div.querySelector(".t_q"), div.querySelector(".t_ql"), div.querySelector(".t_logs")]
+    .forEach(el=>{ if(el) el.addEventListener("change",()=>markTreeRow_(div)); });
   // species: clear on change, and also on blur — re-picking the SAME species fires no change event
   const clearSp=()=>{ if(spSel.value && spSel.value!==ADD_SENTINEL) spSel.classList.remove("needs-entry"); };
   spSel.addEventListener("change",clearSp); spSel.addEventListener("blur",clearSp);
@@ -1785,6 +1817,60 @@ function addPair(kind,v,scroll){
   [spEl,nEl].forEach(el=>el.addEventListener("change",()=>{ if(el.value && el.value!==ADD_SENTINEL) el.classList.remove("needs-entry"); }));
   div.querySelector(".del").onclick=()=>{ div.remove(); renumPair(kind); };
   if(scroll) scrollRowIntoView(div);
+}
+/* Keep the row you just touched under your eyes, and say which one it is. The timeout lets Android
+   finish resizing the viewport before we decide where to scroll — doing it immediately just gets
+   overridden by the browser's own restore. */
+/* The Android jump is not a tree-row problem — it happens at every native select in the form, so the
+   cure belongs at the form, not at one section. Chrome resizes the visual viewport when its picker
+   closes and restores the scroll to a position that no longer holds; anything below the fold appears
+   to leap. One listener covers every dropdown there is now and any added later.
+
+   Deliberately conservative: it only scrolls when the control has actually left the screen, so a
+   phone that behaved correctly is never moved, and it waits for the resize to finish rather than
+   fighting the browser's own restore. */
+(function keepFieldInView_(){
+  let t=null, pending=null;
+  const anchor=el=>{
+    if(!el || !el.getBoundingClientRect) return;
+    const r=el.getBoundingClientRect();
+    const top=90, bottom=window.innerHeight-70;
+    if(r.top>=top && r.bottom<=bottom) return;          // still visible — leave the page alone
+    const row=el.closest(".rep")||el.closest(".map-field")||el.closest("div");
+    try{ (typeof scrollRowIntoView==="function") ? scrollRowIntoView(row||el)
+        : el.scrollIntoView({block:"center",behavior:"smooth"}); }catch(e){}
+  };
+  const schedule=el=>{ pending=el; clearTimeout(t); t=setTimeout(()=>{ anchor(pending); pending=null; }, 280); };
+  document.addEventListener("change", e=>{
+    const el=e.target;
+    if(!el || !el.tagName) return;
+    if(!/^(SELECT|INPUT|TEXTAREA)$/.test(el.tagName)) return;
+    if(el.closest("#fmap")) return;                      // map controls scroll themselves
+    schedule(el);
+  }, true);
+  // the resize itself is the signal on Android; re-anchor whatever was last touched
+  if(window.visualViewport){
+    window.visualViewport.addEventListener("resize", ()=>{ if(pending) schedule(pending); });
+  }
+})();
+let _treeMarkT=null;
+function markTreeRow_(row){
+  if(!row) return;
+  try{
+    [...treeRows.children].forEach(r=>r.classList.remove("just-edited"));
+    row.classList.add("just-edited");
+    const lab=row.querySelector("label.n");
+    if(lab) row.setAttribute("data-t", lab.textContent.split("·")[0].trim());
+    clearTimeout(_treeMarkT);
+    _treeMarkT=setTimeout(()=>{ try{ row.classList.remove("just-edited"); }catch(e){} }, 6000);
+    setTimeout(()=>{
+      try{
+        const r=row.getBoundingClientRect();
+        // only move if the row has actually drifted off, so a steady phone is left alone
+        if(r.top < 90 || r.bottom > (window.innerHeight - 40)) scrollRowIntoView(row);
+      }catch(e){}
+    }, 260);
+  }catch(e){}
 }
 function scrollRowIntoView(el){
   try{
@@ -3653,7 +3739,13 @@ function pfShowOnMap_(){
       if(!pfLayer_) pfLayer_=L.layerGroup().addTo(fmap); else pfLayer_.clearLayers();
       const pts=[];
       hits.forEach(r=>{ const la=parseFloat(r.lat), lo=parseFloat(r.lon);
-        L.circleMarker([la,lo],{renderer:pinCanvas_(),radius:9,color:"#ff36c0",weight:3,fill:false,opacity:.95}).addTo(pfLayer_);
+          /* The ring must sit outside the dot it marks. It was radius 9 and plot dots are now
+             radius 9 too, so the dot covered it exactly and the highlight looked like it had
+             not worked. Size it off PLOT_DOT_R so they can never collide again, with a dark
+             outer edge so it reads against a bright dot and against the imagery. */
+          const R=PLOT_DOT_R+8;
+          L.circleMarker([la,lo],{renderer:pinCanvas_(),radius:R+2,color:"#2a0420",weight:5,fill:false,opacity:.8}).addTo(pfLayer_);
+          L.circleMarker([la,lo],{renderer:pinCanvas_(),radius:R,color:"#ff36c0",weight:3.5,fill:false,opacity:1}).addTo(pfLayer_);
         pts.push([la,lo]); });
       if(pts.length) fmap.fitBounds(L.latLngBounds(pts).pad(0.2),{maxZoom:17});
       pfChip_(true);
@@ -3947,6 +4039,31 @@ function restoreFromSheet(quiet){
       const fullKey=r=>[r.STANDID||"",r.PLOTNUM||"",r.DATE||"",r.X||"",r.Y||""].join("|");
       const haveIds=new Set(saved.concat(auditPlots).map(idOf).filter(Boolean));
       const sheetIds=new Set(rows.map(r=>String(r.PlotID||"").trim()).filter(Boolean));
+      /* Restore used to add missing plots and nothing else, so a change made in the Sheet to a plot
+         the device already held never arrived. Marking a plot out of the analysis there left this
+         phone still counting it — 109g read 30.4 m²/ha against the Sheet's 38.0, because the device
+         averaged over five plots and the Sheet over four.
+
+         Only a few fields are the Sheet's to decide, and only plots with nothing unsent are touched,
+         so a crew member's own pending edits can never be overwritten by this. */
+      const SHEET_OWNED=["INANALYSIS","STANDID","TRACT","PLOTSRC","AGE","AGECLASS"];
+      const byId={}; saved.concat(auditPlots).forEach(p=>{ const k=String(p._id||"").trim(); if(k) byId[k]=p; });
+      let changed=0, changedFields={};
+      rows.forEach(r=>{
+        const id=String(r.PlotID||"").trim(); if(!id) return;
+        const mine=byId[id]; if(!mine || !mine._sent) return;      // unsent local work is left alone
+        SHEET_OWNED.forEach(f=>{
+          if(!(f in r)) return;
+          const now=String(r[f]==null?"":r[f]).trim(), was=String(mine[f]==null?"":mine[f]).trim();
+          if(now===was) return;
+          mine[f]=r[f]; changed++; changedFields[f]=(changedFields[f]||0)+1;
+        });
+      });
+      if(changed){
+        persist(); persistAudit();
+        const what=Object.keys(changedFields).map(f=>`${changedFields[f]} × ${f}`).join(", ");
+        setTimeout(()=>toast(`Updated ${changed} field${changed>1?"s":""} changed in the Sheet (${what})`),1200);
+      }
       const seen=new Set();
       rows.forEach(r=>{
         const rid=String(r.PlotID||"").trim();
@@ -5491,7 +5608,9 @@ function canvasDot_(lat,lon,layer,fill,stroke,onClick,r){
     .addTo(layer).on("click",onClick);
 }
 function renderMapPins(){
-  try{ rebuildCrewColors_(); renderWhoLegend_(); applyLegendPref_(); }catch(e){} if(!fpins) return; fpins.clearLayers(); if(fauditpins) fauditpins.clearLayers(); _pinEls=[];
+  try{ rebuildCrewColors_(); renderWhoLegend_(); applyLegendPref_(); }catch(e){}
+  // redrawing the pins puts them above the highlight, so lift it again afterwards
+  try{ if(pfLayer_) setTimeout(()=>{ try{ pfLayer_.eachLayer(l=>l.bringToFront&&l.bringToFront()); }catch(e){} },0); }catch(e){} if(!fpins) return; fpins.clearLayers(); if(fauditpins) fauditpins.clearLayers(); _pinEls=[];
   const z = fmap ? fmap.getZoom() : 0;
   const detail = z >= LABEL_ZOOM_MIN;                      // labels and full markers only up close
   const view = (detail && fmap) ? fmap.getBounds().pad(0.25) : null;
@@ -5700,7 +5819,7 @@ function plotCardHtml_(p){
     ${pcSection_("Regeneration", regen)}
     ${pcSection_("Shrubs & ground", ground)}
     ${pcSection_("Sample / site tree", sample)}
-    ${pcSection_("SAR & invasives observed", sar)}
+    ${pcSection_("SAR & invasives observed — seen from plot centre", sar)}
     ${pcSection_("Pest / disease", pest)}
     ${pcSection_("Site, soil & management", site)}
     ${pcSection_("Other recorded fields", other)}
@@ -6968,8 +7087,8 @@ function showFormHelp(){
   h+=row("01","<b>Plot header</b> — Stand/compartment, Tract/property, plot number, date, and GPS. Stand & tract carry forward to the next plot. Most-used species rise to the top of every species list.");
   h+=row("02","<b>Tree tally</b> — one row per prism (BAF 2) tree: species, DBH, quality (AGS/UGS), logs. Species & DBH start red on a new tree.");
   h+=row("03","<b>Regeneration</b> — Advance (&gt; 1.3 m) and Early (&lt; 1.3 m) in the 10 m² sub-plot. Buckthorn is counted but never toward stocking.");
-  h+=row("04","<b>Ground vegetation</b> — tap plants present; add your own (they're remembered and synced).");
-  h+=row("05","<b>SAR &amp; invasives</b> — species at risk and invasive species observed.");
+  h+=row("04","<b>Ground vegetation</b> — recorded inside the 1.79 m regeneration sub-plot (10 m²). Tap plants present; add your own (they're remembered and synced).");
+  h+=row("05","<b>SAR &amp; invasives</b> — species at risk and invasive species seen from plot centre, not from searching the stand.");
   h+=row("06","<b>Sample / site tree</b> — the height/age tree (species, DBH, height, cored age, CAI). Carries over with 'copy site fields'.");
   h+=row("07","<b>Pest / disease</b> — agent, severity and quantity.");
   h+=row("08","<b>Site, soil &amp; management</b> — texture, moisture, access, canopy, plus a <b>Copy site fields from…</b> a prior plot shortcut.");
