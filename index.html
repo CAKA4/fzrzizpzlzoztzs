@@ -1112,7 +1112,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v316";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-08 · v317";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3630,7 +3630,7 @@ function crRender_(err){
   const files=_crFiles.length
     ? `<div style="margin-top:12px;color:#8fae95;font-size:11px">Written</div>`+
       `<div style="max-height:30vh;overflow-y:auto">`+_crFiles.map(f=>
-        `<a href="${esc(f.url)}" target="_blank" rel="noopener" style="display:block;padding:8px 0;border-bottom:1px solid #1d3320;color:#eafae8;text-decoration:none;font-size:13px">📄 ${esc(f.stand)} <span style="color:#8fae95;font-size:11px">${esc(f.tract||"")}</span></a>`).join("")+`</div>`
+        `<button type="button" onclick="rptReady_(${esc(JSON.stringify(f)).replace(/"/g,"&quot;")})" style="display:block;width:100%;text-align:left;padding:9px 0;border:0;border-bottom:1px solid #1d3320;background:none;color:#eafae8;font:inherit;font-size:13px">📄 ${esc(f.stand)} <span style="color:#8fae95;font-size:11px">${esc(f.tract||"")}</span></button>`).join("")+`</div>`
     : "";
   box.innerHTML=
     `<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:10px">A page per compartment: the stand summary, the crew-note summary, a photo taken there, and a map of the compartment with its plots.</div>`+
@@ -5319,6 +5319,54 @@ function genNote_(stand){
   document.body.appendChild(sc);
 }
 /* One compartment's report, from its popup. Same builder as the Tools panel and the Sheet menu. */
+/* What to do with a finished report. Opening it in Drive demands a Google account, which the crew
+   phones do not have — so the two routes that need nothing are offered first, and the Drive link is
+   kept but labelled for what it costs. */
+function rptReady_(f){
+  const mail=String(cruiserEmail||"").trim();
+  showInfoSheet_("Report ready",
+    `<div style="color:#a9c9b0;font-size:13px;line-height:1.55;margin-bottom:10px">${esc(f.name)}</div>`+
+    `<button type="button" onclick="rptSave_('${esc(f.id)}')" style="display:block;width:100%;text-align:left;padding:12px;margin:0 0 7px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">⬇ Save to this device<div style="color:#8fae95;font-size:11px;margin-top:2px">No account needed</div></button>`+
+    (mail
+      ? `<button type="button" onclick="rptMail_('${esc(f.id)}')" style="display:block;width:100%;text-align:left;padding:12px;margin:0 0 7px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">✉️ Email it to me<div style="color:#8fae95;font-size:11px;margin-top:2px">${esc(mail)}</div></button>`
+      : `<div style="color:#e8a33a;font-size:11px;line-height:1.4;margin:0 0 7px">Set your email in Tools → This device to have reports sent to you.</div>`)+
+    `<a href="${esc(f.url)}" target="_blank" rel="noopener" style="display:block;padding:11px;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#a9c9b0;text-decoration:none;text-align:center;font-size:12px">📄 Open in Drive <span style="color:#5a7a62">— needs a Google account</span></a>`);
+}
+function rptSave_(id){
+  if(!id) return;
+  toast("Fetching the PDF…");
+  jsonp_("action=layerget&id="+encodeURIComponent(id), r=>{
+    if(!r || !r.ok || !r.data){ toast((r&&r.error)||"Couldn't fetch the PDF",true); return; }
+    try{
+      const bin=atob(r.data), n=bin.length, buf=new Uint8Array(n);
+      for(let j=0;j<n;j++) buf[j]=bin.charCodeAt(j);
+      dl_(new Blob([buf],{type:r.mime||"application/pdf"}), r.name||"report.pdf");
+      toast("Saved to this device");
+    }catch(e){ toast("That file couldn't be read",true); }
+  }, 90000);
+}
+function rptMail_(id){
+  const to=String(cruiserEmail||"").trim();
+  if(!to){ toast("Set your email in Tools first",true); return; }
+  toast("Sending…");
+  jsonp_("action=comprptmail&id="+encodeURIComponent(id)+"&to="+encodeURIComponent(to), r=>{
+    if(r && r.ok) toast("Sent to "+to);
+    else toast((r&&r.error)||"Couldn't send it",true);
+  }, 60000);
+}
+/* One JSONP helper — this pattern was written out longhand at a dozen call sites. */
+function jsonp_(query, done, ms){
+  if(!connected || isOffline()){ done(null); return; }
+  const cb="__j"+Date.now()+Math.floor(Math.random()*999), sep=SCRIPT_URL.includes("?")?"&":"?";
+  const sc=document.createElement("script");
+  let settled=false;
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  window[cb]=r=>{ if(settled) return; settled=true; clean(); done(r); };
+  sc.onerror=()=>{ if(settled) return; settled=true; clean(); done(null); };
+  setTimeout(()=>{ if(!settled){ settled=true; clean(); done(null); } }, ms||30000);
+  sc.src=SCRIPT_URL+sep+query+"&callback="+cb;
+  document.body.appendChild(sc);
+}
 function compRptOne_(stand){
   if(!stand) return;
   if(!connected || isOffline()){ toast("Need a connection — the Sheet builds the report",true); return; }
@@ -5327,10 +5375,7 @@ function compRptOne_(stand){
   const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
   window[cb]=r=>{ clean();
     const f=(r&&r.made&&r.made[0]);
-    if(f){ showInfoSheet_("Report ready",
-        `<div style="color:#a9c9b0;font-size:13px;line-height:1.55;margin-bottom:10px">${esc(f.name)}</div>`+
-        `<a href="${esc(f.url)}" target="_blank" rel="noopener" style="display:block;padding:12px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;text-decoration:none;text-align:center;font-size:13px">📄 Open the PDF</a>`+
-        `<div style="color:#5a7a62;font-size:11px;margin-top:8px;line-height:1.4">Saved in the FRI Reports folder in Drive.</div>`); }
+    if(f){ rptReady_(f); }
     else toast((r&&r.error)||"Couldn't build the report",true); };
   sc.onerror=()=>{ clean(); toast("Couldn't reach the Sheet",true); };
   setTimeout(()=>{ if(window[cb]){ clean(); toast("Timed out — it may still be building",true); } },90000);
