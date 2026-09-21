@@ -1112,7 +1112,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-08 · v317";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-20 · v319";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2889,7 +2889,9 @@ function buildPlotShapefileZip(rows, cols){
     let n=String(c).toUpperCase().replace(/[^A-Z0-9_]/g,"").slice(0,10) || "F";
     if(used[n]){ const base=n.slice(0,8); let k=1; do{ n=(base+k).slice(0,10); k++; }while(used[n]); }
     used[n]=1;
-    let w=1; for(const r of rows){ const v=(r[c]==null?"":String(r[c])); if(v.length>w) w=v.length; }
+    // width in BYTES of the UTF-8 encoding, not characters — a value with accented or curly
+    // punctuation needs more bytes than it has characters, and a char-based width would truncate it.
+    let w=1; for(const r of rows){ const b=dbfWidth_(r[c]); if(b>w) w=b; }
     return { col:c, name:n, width:Math.min(Math.max(w,1),254) };
   });
   const N=rows.length, REC=28;                       // point record = 8-byte header + 20-byte content
@@ -2911,17 +2913,21 @@ function buildPlotShapefileZip(rows, cols){
   const dbf=new Uint8Array(hLen+N*rLen+1), dv=new DataView(dbf.buffer);
   dbf[0]=0x03; const d=new Date(); dbf[1]=d.getFullYear()-1900; dbf[2]=d.getMonth()+1; dbf[3]=d.getDate();
   dv.setUint32(4,N,true); dv.setUint16(8,hLen,true); dv.setUint16(10,rLen,true);
-  let p=32; fields.forEach(f=>{ for(let k=0;k<f.name.length;k++) dbf[p+k]=f.name.charCodeAt(k); dbf[p+11]=0x43; dbf[p+16]=f.width; p+=32; });
+  let p=32; fields.forEach(f=>{ for(let k=0;k<f.name.length;k++) dbf[p+k]=f.name.charCodeAt(k)&0x7f; dbf[p+11]=0x43; dbf[p+16]=f.width; p+=32; });
   dbf[p++]=0x0D;
-  rows.forEach(r=>{ dbf[p++]=0x20; fields.forEach(f=>{ const v=(r[f.col]==null?"":String(r[f.col]));
-    for(let k=0;k<f.width;k++){ let ch=k<v.length?v.charCodeAt(k):0x20; if(ch>255)ch=0x3F; dbf[p+k]=ch; } p+=f.width; }); });
+  /* UTF-8, truncated on a character boundary, declared by the .cpg below. This used to write
+     `charCodeAt(k)`, substituting "?" above 255 — so an em dash or a curly quote from a dictated
+     comment was lost outright and accented letters became undeclared Latin-1 that no reader could
+     identify. dbfCell_ handles the encoding; f.width is already a byte count (see above). */
+  rows.forEach(r=>{ dbf[p++]=0x20; fields.forEach(f=>{ dbf.set(dbfCell_(r[f.col],f.width,"C"),p); p+=f.width; }); });
   dbf[p]=0x1A;
   const prj='GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137.0,298.257223563]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]]';
   return zipStore([
     {name:"FRIplots.shp",data:new Uint8Array(shp.buffer)},
     {name:"FRIplots.shx",data:new Uint8Array(shx.buffer)},
     {name:"FRIplots.dbf",data:dbf},
-    {name:"FRIplots.prj",data:strBytes(prj)}
+    {name:"FRIplots.prj",data:strBytes(prj)},
+    {name:"FRIplots.cpg",data:strBytes(CPG_UTF8)}
   ]);
 }
 function strBytes(s){ const a=new Uint8Array(s.length); for(let i=0;i<s.length;i++){ const c=s.charCodeAt(i); a[i]=c>255?0x3F:c; } return a; }
@@ -3782,6 +3788,17 @@ function plotLabelText_(p){
     default:      return "";
   }
 }
+/* Why an Age row is missing from a popup. The analysis declines to date a stand when its basal area
+   lands on the flat part of the Plonski curve, where a fraction of a square metre moves the answer by
+   decades — see AGE_EST_MAX_SLOPE_ in Code.gs. Without this line a blank age is indistinguishable from
+   a field the popup simply skipped, and the crew can't tell that coring a tree is what would fix it.
+   The text comes from the standanalysis / plotanalysis feeds; older backends don't send it, so the
+   absence of ageNote just means no line. */
+function ageNoteHtml_(a){
+  const n=(a&&a.ageNote)||""; if(!n) return "";
+  return `<div style="color:#8a7a3a;background:#fbf6e4;border-left:3px solid #e0c86a;border-radius:3px;`+
+    `margin-top:5px;padding:4px 6px;font-size:11px;line-height:1.35">Age: ${esc(n)}</div>`;
+}
 // analyzed popup for a plot
 function plotPopHtml_(p){
   const row=(k,v)=> (v===""||v==null)?"":`<tr><td style="color:#5a7a62;padding-right:8px;white-space:nowrap">${k}</td><td><b>${esc(String(v))}</b></td></tr>`;
@@ -3792,6 +3809,7 @@ function plotPopHtml_(p){
     row("Type",p.ft)+row("Comp",p.comp)+row("BA m²/ha",p.ba)+row("QMD cm",p.qmd)+row("Stems/ha",p.stems)+
     row("Age",age)+row("Ht m",p.ht)+row("% AGS",p.ags)+row("Vol m³/ha",p.vol)+row("Plonski Vol",p.plonVol)+row("Stocking",p.stk)+
     `</table>`+ (p.ageEst?`<div style="color:#5a7a62;margin-top:3px">* age estimated</div>`:"")+
+    ageNoteHtml_(p)+
     crewPhotoHtml_(p)+`</div>`;
 }
 /* Thumbnails of the photos taken at someone else's plot, so you can see the stand without walking to
@@ -4403,18 +4421,34 @@ function importBackup(file){
 const PETT={"Ap":[3.001,-7.643,0.634,134.264,0.0043336],"Ab":[3.001,-7.643,0.634,134.264,0.0043336],"Ag":[3.001,-7.643,0.634,134.264,0.0043336],"Aw":[3.001,-7.643,0.634,134.264,0.0043336],"Bb":[3.28,-9.964,1.877,101.376,0.0043336],"Bd":[3.128,-8.648,0.948,122.377,0.0043336],"Be":[3.071,-7.073,0.959,102.047,0.0043336],"Bf":[3.152,-10.924,2.139,91.9277,0.004331],"Bn":[3.31,-10.764,1.046,117.043,0.0043336],"Bt":[3.001,-7.643,0.634,134.264,0.0043336],"Bw":[3.1,-9.964,2.222,91.5619,0.0043218],"By":[3.262,-13.837,1.449,105.075,0.0043119],"Cb":[3.31,-10.764,1,100,0.0043336],"Ce":[3.075,-13.299,4.167,74.6455,0.0043298],"Cp":[3.28,-9.964,1.877,101.376,0.0043336],"El":[3.28,-9.964,0.634,134.264,0.0043336],"Ff":[3.513,-17.376,1.44,104.303,0.0043218],"He":[2.705,-5.454,1.112,106.71,0.0043298],"Hi":[3.31,-10.764,1.046,117.043,0.0043336],"Iw":[3.28,-9.964,1.877,101.376,0.0043336],"La":[2.95,-7.182,1.588,101.62,0.004331],"Lb":[3.28,-9.964,1,100,0.0043336],"Mh":[3.2,-10.764,1.046,117.043,0.0043336],"Mm":[3.2,-10.764,1.046,117.043,0.0043336],"Mr":[3.2,-10.764,1.046,117.043,0.0043336],"Ms":[3.2,-10.764,1.046,117.043,0.0043336],"Ob":[3.055,-9.569,1.512,102.565,0.0043336],"Or":[3.055,-9.569,1.512,102.565,0.0043336],"Pj":[3.209,-11.758,0.897,106.223,0.0043313],"Po":[3.1,-9.341,-0.312,133.106,0.0043405],"Pr":[3.395,-13.281,0.71,108.387,0.0043313],"Ps":[3.209,-11.758,0.897,106.223,0.0043313],"Pw":[3.5,-15.125,0.691,110.856,0.0043188],"Sblu":[3.25,-17.376,1.44,104.303,0.0043218],"Sw":[3.2,-17.376,1.44,104.303,0.0043218],"Sn":[3.25,-17.376,1.44,104.303,0.0043218],"Ta":[2.991,-7.182,1.588,101.62,0.0043264],"Wi":[3.2,-9.341,-0.312,133.106,0.0043405],"Wn":[3.31,-10.764,1.046,117.043,0.0043336],"Pa":[3.395,-13.281,0.71,108.387,0.0043313],"Pt":[3.1,-9.341,-0.312,133.106,0.0043405],"Pb":[3.1,-9.341,-0.312,133.106,0.0043405],"Pg":[3.1,-9.341,-0.312,133.106,0.0043405]};
 const PETT_SOFT=new Set(["Pw","Pr","Pj","Ps","Pa","Sw","Sb","Sn","Bf","He","Ce","La","Ta"]); // conifers, for defaulting
 const PETT_SKIP=new Set(["Sng","CWD","CAV"]);   // habitat features — no merchantable volume
+/* Mirrors isStruct_() + the bucketing in summarizeStand_ (Code.gs). Matching MUST be
+   case-insensitive over all five codes: the field data carries "Cav", and imported files can carry
+   "SNAG"/"CAVITY" in any case (handleImportedFC_ copies TxSP through verbatim). A case-sensitive
+   three-code test here counted cavity trees as live sugar maples and read ~33% high on BA against
+   the Sheet. Returns the canonical bucket key, or null for a live tree. Keep in step with Code.gs. */
+function structBucket_(sp){
+  const u=String(sp==null?"":sp).trim().toUpperCase();
+  if(!u) return null;
+  if(u==="CWD") return "CWD";
+  if(u==="CAV"||u==="CAVITY") return "CAV";
+  if(u==="SNG"||u==="SNAG") return "Sng";
+  return null;
+}
 /* Selectable species with no Bonnor & Magnussen set of their own — mapped to the nearest
    congener that does have one, so the app and the Sheet agree. Sb/Ow/Cc are placeholders:
    replace with true coefficients when the Petawawa workbook is to hand. Mn is the app's
    dropdown code for Manitoba maple; the authoritative Ontario code is Mm. */
 const PETT_ALIAS={"Sb":"Sw","Ow":"Or","Cc":"Cb","Mn":"Mm"};
 const M3_TO_CORDS=1/5.929;
-function pettCoef(sp){ if(PETT[sp]) return PETT[sp]; if(!sp||PETT_SKIP.has(sp)) return null;
+function pettCoef(sp){ if(PETT[sp]) return PETT[sp]; if(!sp||structBucket_(sp)) return null;
   if(PETT_ALIAS[sp]&&PETT[PETT_ALIAS[sp]]) return PETT[PETT_ALIAS[sp]];
   return PETT_SOFT.has(sp)?PETT["Pr"]:PETT["Mh"]; }   // still not in list → Pr (conifer) / Mh (hardwood)
 function pettVol(sp,dbh){ if(!isFinite(dbh)||dbh<=0) return 0; const c=pettCoef(sp); if(!c) return 0;
   const H=1.3*Math.exp(c[0]+c[1]/dbh); return c[4]*dbh*dbh/(c[2]+c[3]/H); }   // m³, one tree
-function plotTrees(p){ const t=[]; for(let i=1;i<=28;i++){ const sp=p["T"+i+"SP"]||"", s=parseFloat(p["T"+i+"S"]);
+/* Species codes are trimmed here, matching summarizeStand_ in Code.gs, which does
+   String(...).trim() before every comparison. Imported files can carry padded codes; without this a
+   " Cav " reads as a live tree on the phone and as habitat in the Sheet. */
+function plotTrees(p){ const t=[]; for(let i=1;i<=28;i++){ const sp=String(p["T"+i+"SP"]==null?"":p["T"+i+"SP"]).trim(), s=parseFloat(p["T"+i+"S"]);
   if(p["T"+i+"SP"]||p["T"+i+"S"]) t.push({sp,dbh:isFinite(s)?s:null}); } return t; }
 function treeBA(dbh){ return Math.PI/4*Math.pow(dbh/100,2); }   // m² per tree
 const HAB_LABEL={Sng:"Snags",CWD:"Coarse woody debris",CAV:"Cavity trees"};
@@ -4426,17 +4460,24 @@ function ageValue_(v){
   const n=parseFloat(m[0]); return (isFinite(n)&&n>0)?n:null;
 }
 function computeStand(plots, includeSmall){
-  let baSum=0,stemsSum=0,dbh2=0,dbhN=0,ageSum=0,ageN=0,htSum=0,htN=0,volSum=0; const spBA={};
+  let baSum=0,stemsSum=0,ageSum=0,ageN=0,htSum=0,htN=0,volSum=0; const spBA={};
   const hab={}; PETT_SKIP.forEach(h=>hab[h]={count:0,baSum:0,stemsSum:0});
   plots.forEach(p=>{ plotTrees(p).forEach(t=>{
-      if(PETT_SKIP.has(t.sp)){ const H=hab[t.sp]; H.count++; H.baSum+=BAF; if(t.dbh) H.stemsSum+=BAF/treeBA(t.dbh); }   // habitat — kept out of live metrics
+      const hb=structBucket_(t.sp);   // case-insensitive over all five codes, same as the Sheet
+      if(hb){ const H=hab[hb]; H.count++; H.baSum+=BAF; if(t.dbh) H.stemsSum+=BAF/treeBA(t.dbh); }   // habitat — kept out of live metrics
       else { if(!includeSmall && !(t.dbh && t.dbh>=10)) return;   // default: live metrics use trees ≥10 cm DBH only
-        baSum+=BAF; if(t.dbh){ const ef=BAF/treeBA(t.dbh); stemsSum+=ef; dbh2+=t.dbh*t.dbh; dbhN++; if(t.dbh>=10) volSum+=pettVol(t.sp,t.dbh)*ef; } if(t.sp) spBA[t.sp]=(spBA[t.sp]||0)+BAF; }   // volume always trees ≥10 cm
+        baSum+=BAF; if(t.dbh){ const ef=BAF/treeBA(t.dbh); stemsSum+=ef; if(t.dbh>=10) volSum+=pettVol(t.sp,t.dbh)*ef; } if(t.sp) spBA[t.sp]=(spBA[t.sp]||0)+BAF; }   // volume always trees ≥10 cm
     });
     // same rule as the Sheet: the entered age wins, tolerant of "80 yrs" and the like
     let a=ageValue_(p.AGECORED); if(a==null) a=ageValue_(p.AGE); if(a==null) a=ageValue_(p.AGECLASS);
     if(a!=null){ ageSum+=a; ageN++; } const ht=parseFloat(p.HT); if(isFinite(ht)){ htSum+=ht; htN++; } });
-  const np=plots.length, baHa=np?baSum/np:0, stemsHa=np?stemsSum/np:0, qmd=dbhN?Math.sqrt(dbh2/dbhN):0;
+  const np=plots.length, baHa=np?baSum/np:0, stemsHa=np?stemsSum/np:0;
+  /* QMD from BA and stems, NOT the root-mean-square of the raw tally. In a prism cruise every tree is
+     sampled with probability proportional to its basal area, so the tally is already BA-weighted and an
+     unweighted RMS over it double-counts the big stems. This is qmdFrom_() in Code.gs, character for
+     character — the two must agree or the phone and the Sheet report different stands. The old RMS form
+     read +64% on uneven-aged tolerant hardwood and +167% on post-harvest residual. */
+  const qmd=(baHa>0&&stemsHa>0)?100*Math.sqrt(baHa/(Math.PI/4*stemsHa)):0;
   const meanAge=ageN?ageSum/ageN:null, meanHt=htN?htSum/htN:null, volHa=np?volSum/np:0;
   const tot=Object.values(spBA).reduce((a,b)=>a+b,0);
   const comp=Object.entries(spBA).map(([sp,ba])=>({sp,pct:tot?ba/tot*100:0})).sort((a,b)=>b.pct-a.pct);
@@ -4560,9 +4601,15 @@ function renderSummary(){
 }
 function closeSummary(){ $("standSummary").style.display="none"; }
 function exportSummaryCSV(){
-  if(!saved.length){ toast("No saved plots yet",true); return; }
-  const stands=[...new Set(saved.map(p=>p.STANDID).filter(Boolean))].sort();
-  const groups=[["All plots",saved.slice()]].concat(stands.map(s=>[s,saved.filter(p=>p.STANDID===s)]));
+  /* Export exactly what is on screen. This used to build from saved.slice(), which (a) skipped the
+     INANALYSIS filter, so a plot the crew marked "no data collected" was averaged in — 48/5 instead of
+     48/4, a 20% understatement of BA, the same arithmetic as the compartment-popup bug — and (b)
+     ignored the source / collector / tract selectors, so the file did not match the panel it came from.
+     sumPlots_() applies all four and sets _sumExcluded as a side effect. */
+  const base=sumPlots_();
+  if(!base.length){ toast("No plots in the current selection",true); return; }
+  const stands=[...new Set(base.map(p=>p.STANDID).filter(Boolean))].sort();
+  const groups=[["All plots",base.slice()]].concat(stands.map(s=>[s,base.filter(p=>p.STANDID===s)]));
   const inclSmall=summaryInclSmall;
   const head=["Scope","LiveDBHmin_cm","Plots","BA_m2_per_ha","Stems_per_ha","QMD_cm","MeanAge_yr","MeanHt_m","TotalVol_m3_per_ha","Cords_per_ha","Species_by_BA","HabitatFeatures"];
   const f=(x,d)=>x==null?"":x.toFixed(d);
@@ -4572,10 +4619,19 @@ function exportSummaryCSV(){
     const hab=(s.hab||[]).map(h=>`${h.label} ${h.perHa.toFixed(0)}/ha (${h.count})`).join("; ");
     rows.push([name,inclSmall?6:10,s.nplots,f(s.baHa,1),f(s.stemsHa,0),f(s.qmd,1),f(s.meanAge,0),f(s.meanHt,1),f(s.vol,0),f(s.vol*M3_TO_CORDS,1),comp,hab]);
   });
-  const csv=rows.map(r=>r.map(csvCell).join(",")).join("\n");
+  /* Say on the face of the file which plots it covers, so a CSV that has been emailed on still
+     explains itself. Whoever opens it should not have to guess what was filtered out. */
+  const srcName={mine:"my plots",audit:"imported plots",both:"my plots + imported"}[summarySource]||summarySource;
+  const scope=[`Source: ${srcName}`,
+    `Collector: ${summaryCollector==="__all__"?"all":summaryCollector}`,
+    `Tract: ${summaryTract==="__all__"?"all":summaryTract}`,
+    `Plots in analysis: ${base.length}`,
+    `Excluded (INANALYSIS=N): ${_sumExcluded}`].join(" | ");
+  const csv=[["# "+scope],[]].concat(rows).map(r=>r.map(csvCell).join(",")).join("\n");
   const blob=new Blob([csv],{type:"text/csv"}), url=URL.createObjectURL(blob), a=document.createElement("a");
   a.href=url; a.download=`FRIstand-summary_${nowStr().replace(/[: ]/g,"-")}.csv`; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=>URL.revokeObjectURL(url),1500); toast("Stand summary exported");
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+  toast(`Stand summary exported — ${base.length} plot${base.length===1?"":"s"}`+(_sumExcluded?` · ${_sumExcluded} excluded`:""));
 }
 
 /* ---------- quick tap-to-tally ---------- */
@@ -5388,7 +5444,9 @@ function renderBoundPopup_(){
   const p=f.properties||{};
   const title=(standField&&p[standField]!=null&&String(p[standField]).trim()!=="")?String(p[standField]):"Stand";
   const row=(k,v)=>`<tr><td style="color:#5a7a62;padding:1px 10px 1px 0;vertical-align:top;white-space:nowrap">${esc(k)}</td><td style="padding:1px 0;vertical-align:top">${esc(String(v))}</td></tr>`;
-  let rows="", note="", a=null;
+  // declared at function scope, not inside the analysis branch — the body template below reads it, and
+  // a block-scoped const used outside its block is exactly the ReferenceError that killed this popup once
+  let rows="", note="", ageMsg="", a=null;
   if(_bpView==="analysis"){
     a=standAnFor_(f);
     if(a){
@@ -5402,6 +5460,8 @@ function renderBoundPopup_(){
       }
       rows+=row("Plots",a.nplots);
       STAND_AN_OPTS.forEach(([k,label])=>{ if(k==="nplots") return; const v=standAnVal_(a,k); if(v!=="") rows+=row(label,v); });
+      // a blank Age drops out of the loop above, so say why it is not there
+      ageMsg=ageNoteHtml_(a);
       // No summary yet: offer to write this one compartment's now — a single call, a few seconds.
       if(!a.notes && a.nplots){
         note=noteGenPrompt_(a.stand||"");
@@ -5423,7 +5483,7 @@ function renderBoundPopup_(){
   const rpt = (_bpView==="analysis" && a && a.nplots)
     ? `<button type="button" onclick="compRptOne_('${String(a.stand||"").replace(/'/g,"&#39;")}')" style="display:block;width:100%;margin-top:10px;padding:10px;border-radius:8px;border:1px solid #9fb8a4;background:#f4f8f2;color:#16271a;font:inherit;font-size:12px">📄 PDF report for this compartment</button>`
     : "";
-  const body=`<div style="max-height:38vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${table}${note}${rpt}</div>`;
+  const body=`<div style="max-height:38vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${table}${ageMsg}${note}${rpt}</div>`;
   L.popup({maxWidth:280,autoPan:true,className:"bpop"}).setLatLng(_bpLatLng)
     .setContent(`<div style="font-family:'Courier New',monospace;color:#16271a;line-height:1.4">`+
       `<b style="font-size:13px">${esc(title)}</b>`+
@@ -6292,7 +6352,7 @@ function exportTrackShp(){
   const shp=buildShp_(pts,box), shx=buildShx_(pts.length,box),
         dbf=buildDbf_([{name:"ID",type:"N",len:8,dec:0},{name:"NAME",type:"C",len:30},{name:"POINTS",type:"N",len:8,dec:0},{name:"LENGTH_M",type:"N",len:12,dec:1}],[1,"Track log",trackLog.length,len.toFixed(1)]);
   const base="FRItrack_"+nowStr().replace(/[: ]/g,"-");
-  const zip=zipStore_([{name:base+".shp",data:shp},{name:base+".shx",data:shx},{name:base+".dbf",data:dbf},{name:base+".prj",data:new TextEncoder().encode(PRJ_17N)}]);
+  const zip=zipStore_([{name:base+".shp",data:shp},{name:base+".shx",data:shx},{name:base+".dbf",data:dbf},{name:base+".prj",data:new TextEncoder().encode(PRJ_17N)},dbfCpgFile_(base)]);
   const blob=new Blob([zip],{type:"application/zip"}), url=URL.createObjectURL(blob), a=document.createElement("a");
   a.href=url; a.download=base+".zip"; document.body.appendChild(a); a.click(); a.remove();
   driveSave_(blob,a.download,"shapefile"); setTimeout(()=>URL.revokeObjectURL(url),1500);
@@ -6579,14 +6639,39 @@ function buildShp_(pts,box,st){ st=st||3; const N=pts.length,content=48+N*16,tot
   dv.setInt32(o,1,true);o+=4; dv.setInt32(o,N,true);o+=4; dv.setInt32(o,0,true);o+=4;
   for(const p of pts){ dv.setFloat64(o,p.x,true);o+=8; dv.setFloat64(o,p.y,true);o+=8; } return new Uint8Array(buf); }
 function buildShx_(N,box,st){ const total=108,content=48+N*16,buf=new ArrayBuffer(total); shpHdr_(buf,total/2,box,st||3); const dv=new DataView(buf); dv.setInt32(100,50,false); dv.setInt32(104,content/2,false); return new Uint8Array(buf); }
+/* DBF text is written as UTF-8, and every shapefile zip ships a .cpg saying so (CPG_UTF8 /
+   dbfCpgFile_ below). This used to be `charCodeAt(k) & 0xff`, one byte per UTF-16 code unit, which
+   silently destroyed anything above U+00FF and wrote everything from U+0080 up as undeclared Latin-1:
+   a curly quote became 0x1C, an em dash 0x14, and an accented letter produced bytes that are not
+   valid UTF-8. Voice transcription produces curly quotes and em dashes constantly, so this hit real
+   comments; pyshp on default settings refused to read the record at all. Field widths must therefore
+   be counted in BYTES, not characters — see dbfWidth_ and the width calculation in
+   buildPlotShapefileZip. */
+const DBF_ENC_=new TextEncoder();
+function dbfWidth_(v){ return DBF_ENC_.encode(v==null?"":String(v)).length; }   // bytes, not characters
+/* UTF-8 bytes for one DBF cell, truncated to `len` on a character boundary (never mid-sequence, which
+   would make the file invalid UTF-8) and padded with spaces. Numbers stay right-aligned. */
+function dbfCell_(v,len,type){
+  let b=DBF_ENC_.encode(v==null?"":String(v));
+  if(b.length>len){ let cut=len; while(cut>0 && (b[cut]&0xC0)===0x80) cut--; b=b.subarray(0,cut); }
+  const out=new Uint8Array(len).fill(0x20);
+  out.set(b, type==="N" ? len-b.length : 0);
+  return out;
+}
 function buildDbf_(fields,records){ if(!Array.isArray(records[0])) records=[records];   // accept one record or many
   const headerLen=32+32*fields.length+1,recLen=1+fields.reduce((a,f)=>a+f.len,0),total=headerLen+records.length*recLen+1;
   const buf=new ArrayBuffer(total),dv=new DataView(buf),u=new Uint8Array(buf); u[0]=0x03; const d=new Date(); u[1]=d.getFullYear()-1900; u[2]=d.getMonth()+1; u[3]=d.getDate();
   dv.setInt32(4,records.length,true); dv.setInt16(8,headerLen,true); dv.setInt16(10,recLen,true);
-  let o=32; fields.forEach(f=>{ for(let i=0;i<f.name.length&&i<11;i++) u[o+i]=f.name.charCodeAt(i); u[o+11]=f.type.charCodeAt(0); u[o+16]=f.len; u[o+17]=f.dec||0; o+=32; });
+  // byte 29 stays 0x00 ("not specified"); the .cpg sidecar is what declares UTF-8, which is the
+  // convention ArcGIS Pro and QGIS both follow. Field names are ASCII by construction.
+  let o=32; fields.forEach(f=>{ for(let i=0;i<f.name.length&&i<11;i++) u[o+i]=f.name.charCodeAt(i)&0x7f; u[o+11]=f.type.charCodeAt(0); u[o+16]=f.len; u[o+17]=f.dec||0; o+=32; });
   u[o++]=0x0D;
-  records.forEach(rec=>{ u[o++]=0x20; fields.forEach((f,i)=>{ let s=String(rec[i]); s=f.type==="N"?s.slice(0,f.len).padStart(f.len," "):s.slice(0,f.len).padEnd(f.len," "); for(let k=0;k<f.len;k++) u[o+k]=s.charCodeAt(k)&0xff; o+=f.len; }); });
+  records.forEach(rec=>{ u[o++]=0x20; fields.forEach((f,i)=>{ u.set(dbfCell_(rec[i],f.len,f.type),o); o+=f.len; }); });
   u[o]=0x1A; return u; }
+/* Declares the .dbf text encoding to the reader. Without it ArcGIS Pro guesses and pyshp assumes
+   UTF-8 but errors rather than falling back, so the sidecar is not optional. */
+const CPG_UTF8="UTF-8";
+function dbfCpgFile_(base){ return {name:base+".cpg",data:new TextEncoder().encode(CPG_UTF8)}; }
 /* multi-feature shp/shx (each feature = one part). feats=[{pts:[{x,y}], box}] -> {shp,shx} */
 function buildShpSet_(feats,st){
   let X0=1/0,Y0=1/0,X1=-1/0,Y1=-1/0; feats.forEach(f=>{ X0=Math.min(X0,f.box.xmin); Y0=Math.min(Y0,f.box.ymin); X1=Math.max(X1,f.box.xmax); Y1=Math.max(Y1,f.box.ymax); });
@@ -6622,7 +6707,7 @@ function exportRouteShp(){
   const shp=buildShp_(pts,box), shx=buildShx_(pts.length,box),
         dbf=buildDbf_([{name:"ID",type:"N",len:8,dec:0},{name:"NAME",type:"C",len:30},{name:"POINTS",type:"N",len:8,dec:0},{name:"LENGTH_M",type:"N",len:12,dec:1}],[1,"Cruise route",routePts.length,routeLen().toFixed(1)]);
   const base="FRIroute_"+nowStr().replace(/[: ]/g,"-");
-  const zip=zipStore_([{name:base+".shp",data:shp},{name:base+".shx",data:shx},{name:base+".dbf",data:dbf},{name:base+".prj",data:new TextEncoder().encode(PRJ_17N)}]);
+  const zip=zipStore_([{name:base+".shp",data:shp},{name:base+".shx",data:shx},{name:base+".dbf",data:dbf},{name:base+".prj",data:new TextEncoder().encode(PRJ_17N)},dbfCpgFile_(base)]);
   const blob=new Blob([zip],{type:"application/zip"}), url=URL.createObjectURL(blob), a=document.createElement("a");
   a.href=url; a.download=base+".zip"; document.body.appendChild(a); a.click(); a.remove();
   driveSave_(blob,a.download,"shapefile"); setTimeout(()=>URL.revokeObjectURL(url),1500);
@@ -7215,7 +7300,7 @@ function exportPolyShp(){
   const {shp,shx}=buildShpSet_(feats,5);
   const dbf=buildDbf_([{name:"ID",type:"N",len:8,dec:0},{name:"NAME",type:"C",len:30},{name:"AREA_HA",type:"N",len:14,dec:4},{name:"AREA_M2",type:"N",len:14,dec:0},{name:"PERIM_M",type:"N",len:12,dec:1}], recs);
   const base="FRIpolys_"+nowStr().replace(/[: ]/g,"-");
-  const zip=zipStore_([{name:base+".shp",data:shp},{name:base+".shx",data:shx},{name:base+".dbf",data:dbf},{name:base+".prj",data:new TextEncoder().encode(PRJ_17N)}]);
+  const zip=zipStore_([{name:base+".shp",data:shp},{name:base+".shx",data:shx},{name:base+".dbf",data:dbf},{name:base+".prj",data:new TextEncoder().encode(PRJ_17N)},dbfCpgFile_(base)]);
   const blob=new Blob([zip],{type:"application/zip"}), url=URL.createObjectURL(blob), a=document.createElement("a");
   a.href=url; a.download=base+".zip"; document.body.appendChild(a); a.click(); a.remove();
   driveSave_(blob,a.download,"shapefile"); setTimeout(()=>URL.revokeObjectURL(url),1500);
@@ -7302,7 +7387,7 @@ function featureRings_(f){
 }
 function dlShp_(base,shp,shx,dbf){
   base=base+"_"+nowStr().replace(/[: ]/g,"-");
-  const zip=zipStore_([{name:base+".shp",data:shp},{name:base+".shx",data:shx},{name:base+".dbf",data:dbf},{name:base+".prj",data:new TextEncoder().encode(PRJ_17N)}]);
+  const zip=zipStore_([{name:base+".shp",data:shp},{name:base+".shx",data:shx},{name:base+".dbf",data:dbf},{name:base+".prj",data:new TextEncoder().encode(PRJ_17N)},dbfCpgFile_(base)]);
   const blob=new Blob([zip],{type:"application/zip"}), url=URL.createObjectURL(blob), a=document.createElement("a");
   a.href=url; a.download=base+".zip"; document.body.appendChild(a); a.click(); a.remove();
   driveSave_(blob,a.download,"shapefile"); setTimeout(()=>URL.revokeObjectURL(url),1500);
