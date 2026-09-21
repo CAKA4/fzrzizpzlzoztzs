@@ -1112,7 +1112,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-20 · v319";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-21 · v326";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1507,6 +1507,21 @@ function chipTint_(name){
    a cruiser can see at a glance what the stand is already known to carry, rather than trying to
    remember across a dozen plots — and it makes a genuinely new record stand out. The plot being
    edited is excluded, so its own entries don't mark themselves. */
+/* Everything that has to follow a change of compartment, in one place.
+   The STANDID "change" listener fires only when a person picks from the dropdown. setSel() assigns
+   el.value directly and dispatches nothing, so every path that sets the stand IN CODE has to call
+   this or the stand-dependent parts of the form keep showing the previous compartment. Placing a plot
+   on the map (autoStandTract_) skipped it, which left the ground-vegetation "already in this
+   compartment" marks and the "N so far in X" counter reading the PREVIOUS compartment's flora on
+   every map-placed plot — the marks were pointing at the wrong stand exactly when they matter most.
+   Prefill-from-a-saved-plot and the add-a-stand dialog had the same gap. */
+function standChanged_(){
+  try{
+    if(typeof editingIndex==="undefined" || editingIndex==null) setField($("PLOTNUM"), nextPlotFor($("STANDID").value));
+    renderGround(getGround());   // redraw the "already in this compartment" marks against the NEW stand
+    updateHdrAt_();
+  }catch(e){}
+}
 function standGroundSet_(){
   const out=new Set();
   try{
@@ -1685,7 +1700,7 @@ function confirmAddSpecies(){
   const name=$("addModalInput").value.trim();
   if(name){
     if(pendingAddable){ addableAdd(pendingAddable,name); addableBuild(pendingAddable); setSel($(pendingAddable),name); toast(`Added ${name}`); }
-    else if(pendingStand){ addStand(name); standSelect(); setSel($("STANDID"),name); if(editingIndex==null) setField($("PLOTNUM"), nextPlotFor(name)); toast(`Added ${name}`); }
+    else if(pendingStand){ addStand(name); standSelect(); setSel($("STANDID"),name); standChanged_(); toast(`Added ${name}`); }
     else if(pendingTract){ addTract(name); queueTract(name); tractSelect(); setSel($("TRACT"),name); toast(`Added ${name}`); }
     else {
       const code = pendingShrub ? "" : ($("addModalCode").value.trim().replace(/[^A-Za-z]/g,"") || suggestCode(name));
@@ -1760,7 +1775,15 @@ function addTree(v,scroll){
   opts(div.querySelector(".t_s"),DOM.DBH); opts(div.querySelector(".t_q"),DOM.TREEQ);
   opts(div.querySelector(".t_ql"),DOM.TREEQL); opts(div.querySelector(".t_logs"),DOM.LOGS);
   const dbhSel=div.querySelector(".t_s"), spSel=div.querySelector(".t_sp");
-  dbhSel.addEventListener("change",()=>dbhSel.classList.remove("needs-dbh"));   // clears the red once DBH is set
+  /* A species with no diameter is a tree that will vanish from basal area, stems and volume without
+     saying so, and an imported 0 is the same thing wearing a number. Mark the DBH cell the moment the
+     row carries a species without a usable size, so it is caught at the tree rather than as a count at
+     submit. Only a real DBH clears the mark, so the carried-forward value below still has to be
+     confirmed, and setting the DBH back to blank brings the mark back. */
+  const dbhMissing_=()=>{ const n=parseFloat(dbhSel.value); return !(isFinite(n)&&n>0); };
+  const hasSpp_=()=>!!(spSel.value && spSel.value!==ADD_SENTINEL);
+  const flagDbh_=()=>{ if(hasSpp_() && dbhMissing_()) dbhSel.classList.add("needs-dbh"); };
+  dbhSel.addEventListener("change",()=>dbhSel.classList.toggle("needs-dbh", hasSpp_() && dbhMissing_()));
   /* Android reports the page jumping several trees after a DBH is picked. Choosing from a native
      select there closes a full-screen picker, the visual viewport resizes, and Chrome restores the
      scroll to a position that no longer means the same thing — so the crew end up looking at a
@@ -1770,10 +1793,11 @@ function addTree(v,scroll){
   [dbhSel, spSel, div.querySelector(".t_q"), div.querySelector(".t_ql"), div.querySelector(".t_logs")]
     .forEach(el=>{ if(el) el.addEventListener("change",()=>markTreeRow_(div)); });
   // species: clear on change, and also on blur — re-picking the SAME species fires no change event
-  const clearSp=()=>{ if(spSel.value && spSel.value!==ADD_SENTINEL) spSel.classList.remove("needs-entry"); };
+  const clearSp=()=>{ if(spSel.value && spSel.value!==ADD_SENTINEL) spSel.classList.remove("needs-entry"); flagDbh_(); };
   spSel.addEventListener("change",clearSp); spSel.addEventListener("blur",clearSp);
   if(v){ setSel(spSel,v.sp); setSel(dbhSel,v.s); setSel(div.querySelector(".t_q"),v.q);
-         setSel(div.querySelector(".t_ql"),v.ql); setSel(div.querySelector(".t_logs"),v.logs); }
+         setSel(div.querySelector(".t_ql"),v.ql); setSel(div.querySelector(".t_logs"),v.logs);
+         flagDbh_(); }   // a loaded or imported row missing its size is red on sight, not on submit
   else { spSel.value = prevSpp; dbhSel.value = prevDbh;
          dbhSel.classList.add("needs-dbh"); spSel.classList.add("needs-entry");   // set/confirm the species for this tree
          div.querySelector(".t_q").value = "AGS"; }
@@ -2068,7 +2092,7 @@ function grabPlot(i,mode){
       else setField($(f), d[f]!==undefined?d[f]:"");
     });
   }
-  setField($("PLOTNUM"), nextPlotFor($("STANDID").value));    // keep the automatic plot number
+  standChanged_();   // keeps the automatic plot number AND redraws the stand-dependent ground marks
   updateTally(); autoGPS();                                   // recapture GPS at the new spot
   closePlotPick();
   toast(mode==="all"?"Copied all fields — recapturing GPS":"Copied site fields — recapturing GPS");
@@ -4322,8 +4346,23 @@ function validatePlot(d){
   if(!d.X || !d.Y) warns.push({m:"No GPS location captured (X/Y empty)."});
   const n = d._trees!=null ? d._trees : treeCount();
   if(!n) warns.push({m:"No trees tallied — is this an empty / non-forested plot?",f:"treeRows"});
-  let incomplete=0; for(let i=1;i<=28;i++){ const sp=d["T"+i+"SP"], s=d["T"+i+"S"]; if((sp&&!s)||(!sp&&s)) incomplete++; }
+  /* A tree row is judged on what it actually carries, not on JavaScript truthiness. The string "0" is
+     truthy, so a slot reading 0 used to count as filled: a species with DBH 0 sailed through silently,
+     while an imported plot — whose empty slots are written as 0 rather than left blank — looked like 27
+     half-finished rows and could not be submitted at all. A DBH counts only when it parses above zero. */
+  let incomplete=0, zeroDbh=0;
+  for(let i=1;i<=28;i++){
+    const sp=String(d["T"+i+"SP"]==null?"":d["T"+i+"SP"]).trim();
+    const raw=String(d["T"+i+"S"]==null?"":d["T"+i+"S"]).trim();
+    const n=parseFloat(raw), has=isFinite(n)&&n>0, isZero=isFinite(n)&&n<=0;
+    if(!sp && !has) continue;                       // empty slot — blank, or an imported 0
+    if(sp && isZero) zeroDbh++;                     // a real species carrying a zero/negative diameter
+    else if((sp&&!has)||(!sp&&has)) incomplete++;   // one half of the row is missing
+  }
   if(incomplete) blocks.push({m:`${incomplete} tree row${incomplete>1?"s":""} missing species or DBH — complete or clear them.`,f:"treeRows"});
+  /* A tallied tree is worth a full BAF of basal area whatever its size, so a 0 here is not a small tree —
+     it is a tree that will vanish from basal area, stems and volume without saying so. */
+  if(zeroDbh) blocks.push({m:`${zeroDbh} tree${zeroDbh>1?"s have":" has"} a species but a diameter of 0 — enter the DBH, or clear the row if it was tallied by mistake.`,f:"treeRows"});
   if(d.CC==="") warns.push({m:"Crown closure (CC) not set.",f:"CC"});
   /* Blank means "not recorded" here, while 0 means "looked, there was none" — so an empty cover field
      is a gap in the record rather than a zero, and worth saying before the plot goes in. */
@@ -4448,8 +4487,43 @@ function pettVol(sp,dbh){ if(!isFinite(dbh)||dbh<=0) return 0; const c=pettCoef(
 /* Species codes are trimmed here, matching summarizeStand_ in Code.gs, which does
    String(...).trim() before every comparison. Imported files can carry padded codes; without this a
    " Cav " reads as a live tree on the phone and as habitat in the Sheet. */
+/* A slot is a tallied tree when it carries a species, or a diameter above zero. Testing the raw cells
+   for truthiness is not the same thing: the string "0" is truthy, and imported rows write their EMPTY
+   slots as 0 rather than leaving them blank, so a 1-tree plot came back as 28 trees and — with the
+   6-8 cm toggle on — 27 phantom BAFs of basal area. Matches the `if (!sp && !(dbh > 0)) continue`
+   test in summarizeStand_; keep the two in step. */
 function plotTrees(p){ const t=[]; for(let i=1;i<=28;i++){ const sp=String(p["T"+i+"SP"]==null?"":p["T"+i+"SP"]).trim(), s=parseFloat(p["T"+i+"S"]);
-  if(p["T"+i+"SP"]||p["T"+i+"S"]) t.push({sp,dbh:isFinite(s)?s:null}); } return t; }
+  const dbh=(isFinite(s)&&s>0)?s:null;
+  if(sp||dbh!=null) t.push({sp,dbh,q:p["T"+i+"Q"]||""}); } return t; }
+/* Roll the per-species 2 cm classes up into a DBH band — the app-side twin of dbhBand_ in Code.gs.
+   hi may be Infinity. Bounds are matched in class terms so the two sides band a stem identically. */
+function dbhBandApp_(dcl,np,lo,hi){
+  const dcLo=Math.floor(lo/2)*2, dcHi=isFinite(hi)?Math.floor(hi/2)*2:Infinity, out={};
+  Object.keys(dcl||{}).forEach(sp=>{ const cs=dcl[sp]; let n=0,ba=0,ef=0,vol=0,nAgs=0;
+    Object.keys(cs).forEach(k=>{ const dc=Number(k); if(dc<dcLo||dc>dcHi) return;
+      const c=cs[k]; n+=c.n; ba+=c.ba; ef+=c.ef; vol+=c.vol; nAgs+=c.nAgs; });
+    if(n>0) out[sp]={n,nAgs,baHa:ba/np,stemsHa:ef/np,volHa:vol/np,pctAGS:n?nAgs/n*100:null}; });
+  return out;
+}
+/* Largest-remainder apportionment, the app-side twin of apportion_ / apportionDec_ in Code.gs.
+   Without it the phone rounds each cell on its own and the Sheet apportions against the stand total,
+   so the same compartment reads 28 stems here and 27 there — a one-stem disagreement is exactly the
+   kind of thing that costs an afternoon proving the two are the same data. */
+function apportionApp_(total,weights){
+  total=Math.round(total); const sum=weights.reduce((a,b)=>a+b,0);
+  if(!(total>0)||!(sum>0)) return weights.map(()=>0);
+  const raw=weights.map(w=>total*w/sum), out=raw.map(x=>Math.floor(x));
+  const rem=total-out.reduce((a,b)=>a+b,0);
+  raw.map((x,i)=>({i,f:x-Math.floor(x)})).sort((a,b)=>b.f-a.f).forEach((o,k)=>{ if(k<rem) out[o.i]+=1; });
+  return out;
+}
+function apportionDecApp_(total,weights,dec){
+  const m=Math.pow(10,dec||0);
+  return apportionApp_(Math.round((total||0)*m),weights).map(v=>v/m);
+}
+const MARK_BANDS_APP_=[[10,25],[26,37],[38,49],[50,Infinity]];
+const MARK_DBH_APP_=["10-24","26-36","38-48","50+"];
+const MARK_NAMES_APP_=["Poles","Small","Medium","Large"];
 function treeBA(dbh){ return Math.PI/4*Math.pow(dbh/100,2); }   // m² per tree
 const HAB_LABEL={Sng:"Snags",CWD:"Coarse woody debris",CAV:"Cavity trees"};
 // Mirrors ageValue_ in Code.gs — keep the two in step or the phone and the Sheet will disagree on age.
@@ -4460,13 +4534,32 @@ function ageValue_(v){
   const n=parseFloat(m[0]); return (isFinite(n)&&n>0)?n:null;
 }
 function computeStand(plots, includeSmall){
-  let baSum=0,stemsSum=0,ageSum=0,ageN=0,htSum=0,htN=0,volSum=0; const spBA={};
+  let baSum=0,stemsSum=0,ageSum=0,ageN=0,htSum=0,htN=0,volSum=0; const spBA={}, dcl={};
+  /* noDbh: live trees the prism tallied with no diameter recorded. A prism counts every tree at a
+     fixed BAF whatever its size, so the basal area is known even when the diameter is not — but
+     stems/ha and volume both need the diameter to expand, so they cannot include it.
+     baSized: the basal area of trees whose diameter IS known, which is what QMD is taken over. Where
+     nothing is missing baSized equals baSum and every figure is unchanged to the digit. */
+  let noDbh=0, baSized=0;
   const hab={}; PETT_SKIP.forEach(h=>hab[h]={count:0,baSum:0,stemsSum:0});
   plots.forEach(p=>{ plotTrees(p).forEach(t=>{
       const hb=structBucket_(t.sp);   // case-insensitive over all five codes, same as the Sheet
       if(hb){ const H=hab[hb]; H.count++; H.baSum+=BAF; if(t.dbh) H.stemsSum+=BAF/treeBA(t.dbh); }   // habitat — kept out of live metrics
-      else { if(!includeSmall && !(t.dbh && t.dbh>=10)) return;   // default: live metrics use trees ≥10 cm DBH only
-        baSum+=BAF; if(t.dbh){ const ef=BAF/treeBA(t.dbh); stemsSum+=ef; if(t.dbh>=10) volSum+=pettVol(t.sp,t.dbh)*ef; } if(t.sp) spBA[t.sp]=(spBA[t.sp]||0)+BAF; }   // volume always trees ≥10 cm
+      // default: live metrics use trees ≥10 cm. A tree with no diameter is not known to be small, and
+      // the prism did count it, so it stays in — see noDbh above.
+      else { if(!includeSmall && t.dbh!=null && t.dbh<10) return;
+        baSum+=BAF; if(t.dbh==null) noDbh++;
+        if(t.dbh){ baSized+=BAF; const ef=BAF/treeBA(t.dbh); stemsSum+=ef;
+          if(t.dbh>=10){ const v=pettVol(t.sp,t.dbh)*ef; volSum+=v;
+            /* Per-species 2 cm DBH class tally, mirroring the `dcl` accumulator in summarizeStand_
+               so the phone can answer the same size-class and retention questions offline. Keyed on
+               floor(dbh/2)*2, which is gapless at every band edge — unlike a set of literal
+               "10-24 / 26-36" tests, which drop an imported 25 or 37 cm stem on the floor. */
+            const dc=Math.floor(t.dbh/2)*2, sp=t.sp||"?";
+            const ds=dcl[sp]||(dcl[sp]={}); const cellD=ds[dc]||(ds[dc]={n:0,ba:0,ef:0,vol:0,nAgs:0});
+            cellD.n++; cellD.ba+=BAF; cellD.ef+=ef; cellD.vol+=v;
+            if(String(t.q||"").trim().toUpperCase()!=="UGS") cellD.nAgs++;
+          } } if(t.sp) spBA[t.sp]=(spBA[t.sp]||0)+BAF; }   // volume always trees ≥10 cm
     });
     // same rule as the Sheet: the entered age wins, tolerant of "80 yrs" and the like
     let a=ageValue_(p.AGECORED); if(a==null) a=ageValue_(p.AGE); if(a==null) a=ageValue_(p.AGECLASS);
@@ -4477,12 +4570,13 @@ function computeStand(plots, includeSmall){
      unweighted RMS over it double-counts the big stems. This is qmdFrom_() in Code.gs, character for
      character — the two must agree or the phone and the Sheet report different stands. The old RMS form
      read +64% on uneven-aged tolerant hardwood and +167% on post-harvest residual. */
-  const qmd=(baHa>0&&stemsHa>0)?100*Math.sqrt(baHa/(Math.PI/4*stemsHa)):0;
+  const baSizedHa=np?baSized/np:0;
+  const qmd=(baSizedHa>0&&stemsHa>0)?100*Math.sqrt(baSizedHa/(Math.PI/4*stemsHa)):0;
   const meanAge=ageN?ageSum/ageN:null, meanHt=htN?htSum/htN:null, volHa=np?volSum/np:0;
   const tot=Object.values(spBA).reduce((a,b)=>a+b,0);
   const comp=Object.entries(spBA).map(([sp,ba])=>({sp,pct:tot?ba/tot*100:0})).sort((a,b)=>b.pct-a.pct);
   const habOut=[...PETT_SKIP].map(h=>({label:HAB_LABEL[h]||h,count:hab[h].count,perHa:np?hab[h].stemsSum/np:0,baHa:np?hab[h].baSum/np:0})).filter(x=>x.count>0);
-  return {nplots:np,baHa,stemsHa,qmd,meanAge,meanHt,comp,vol:volHa,hab:habOut};
+  return {nplots:np,baHa,stemsHa,qmd,meanAge,meanHt,comp,vol:volHa,hab:habOut,dbhClasses:dcl,noDbh};
 }
 let summarySource="mine";   // "mine" | "audit" | "both"
 let summaryCollector = "__all__";
@@ -4572,6 +4666,83 @@ function setSumThreshold(small){
   const seg=$("sumDbhSeg"); if(seg){ [...seg.children].forEach((b,i)=>b.classList.toggle("on", i===(small?1:0))); }
   renderSummary();
 }
+/* Retention threshold for the size-class panel: "keep everything this size and larger, what comes
+   out?". One control rather than a band min/max pair, because on a phone in the stand that is the
+   question being asked — the Sheet's DBH Range tab has the full band selector for desk work. */
+let summaryKeepCm = (function(){ try{ const v=parseInt(STORE&&STORE.getItem("fi_keepcm"),10); return isFinite(v)?v:40; }catch(e){ return 40; } })();
+function setSummaryKeep(v){ summaryKeepCm=parseInt(v,10)||40;
+  try{ if(STORE) STORE.setItem("fi_keepcm",String(summaryKeepCm)); }catch(e){}
+  renderSummary(); }
+/* Stems and volume per hectare by marking size class, and the removed/kept split at the retention
+   threshold. Built from computeStand's 2 cm accumulator, the same source the Sheet uses, so the
+   phone and the Compartment Summary answer this identically. */
+function sizeClassHtml_(s){
+  const dcl=s.dbhClasses||{}, np=s.nplots||1;
+  if(!Object.keys(dcl).length) return "";
+  const f1=x=>x==null?"—":x.toFixed(1), f0=x=>x==null?"—":Math.round(x);
+  /* Apportioned out of the STAND totals in one pass, exactly as the Sheet's Size Class Summary does,
+     so the bands sum to the headline figures above and the phone and the Sheet agree cell for cell. */
+  const cells=[];
+  MARK_BANDS_APP_.forEach((b,i)=>{ const per=dbhBandApp_(dcl,np,b[0],b[1]);
+    Object.keys(per).sort((a,c)=>per[c].baHa-per[a].baHa).forEach(sp=>cells.push({bi:i,sp,e:per[sp]})); });
+  if(!cells.length) return "";
+  const aSt=apportionApp_(Math.round(s.stemsHa),cells.map(c=>c.e.stemsHa));
+  const aBA=apportionDecApp_(s.baHa,cells.map(c=>c.e.baHa),1);
+  const aVol=apportionDecApp_(s.vol,cells.map(c=>c.e.volHa),1);
+  const bands={};
+  cells.forEach((c,k)=>{ const b=bands[c.bi]||(bands[c.bi]={st:0,ba:0,v:0,n:0,ags:0,rows:[]});
+    b.st+=aSt[k]; b.ba+=aBA[k]; b.v+=aVol[k]; b.n+=c.e.n; b.ags+=c.e.nAgs;
+    b.rows.push({sp:c.sp,st:aSt[k],ba:aBA[k],v:aVol[k]}); });
+  let cls="";
+  Object.keys(bands).sort((a,b)=>a-b).forEach(bi=>{ const b=bands[bi];
+    cls+=`<tr><td style="padding:3px 6px 3px 0;color:#cdebcf"><b>${MARK_NAMES_APP_[bi]}</b> <span style="color:#7a9a76">${MARK_DBH_APP_[bi]}</span></td>`+
+      `<td style="text-align:right;padding:3px 6px">${b.st}</td><td style="text-align:right;padding:3px 6px">${f1(b.ba)}</td><td style="text-align:right;padding:3px 0">${f1(b.v)}</td></tr>`;
+    cls+=b.rows.map(r=>`<tr><td style="padding:1px 6px 1px 10px;color:#8fb89a;font-size:11px">${esc(r.sp)}</td>`+
+      `<td style="text-align:right;padding:1px 6px;color:#8fb89a;font-size:11px">${r.st}</td>`+
+      `<td style="text-align:right;padding:1px 6px;color:#8fb89a;font-size:11px">${f1(r.ba)}</td>`+
+      `<td style="text-align:right;padding:1px 0;color:#8fb89a;font-size:11px">${f1(r.v)}</td></tr>`).join("");
+  });
+  // removed / kept at the retention threshold — its own apportionment, also summing to the stand
+  const keep=summaryKeepCm;
+  const remP=dbhBandApp_(dcl,np,10,keep-1), keptP=dbhBandApp_(dcl,np,keep,Infinity);
+  const split=[];
+  Object.keys(remP).forEach(sp=>split.push({sp,side:0,e:remP[sp]}));
+  Object.keys(keptP).forEach(sp=>split.push({sp,side:1,e:keptP[sp]}));
+  const sSt=apportionApp_(Math.round(s.stemsHa),split.map(c=>c.e.stemsHa));
+  const sVol=apportionDecApp_(s.vol,split.map(c=>c.e.volHa),1);
+  const sBA=apportionDecApp_(s.baHa,split.map(c=>c.e.baHa),1);
+  const bySp={}; const R={st:0,v:0,ba:0}, K={st:0,v:0,ba:0};
+  split.forEach((c,k)=>{ const e=bySp[c.sp]||(bySp[c.sp]={});
+    e[c.side]={st:sSt[k],v:sVol[k]};
+    const T=c.side?K:R; T.st+=sSt[k]; T.v+=sVol[k]; T.ba+=sBA[k]; });
+  const spp=Object.keys(bySp).sort((a,b)=>{
+    const t=o=>((o[0]||{v:0}).v+(o[1]||{v:0}).v); return t(bySp[b])-t(bySp[a]); });
+  const opts=[20,24,26,30,34,38,40,44,48,50,56,60]
+    .map(v=>`<option value="${v}"${v===keep?" selected":""}>${v} cm</option>`).join("");
+  return `<div style="margin-top:14px"><b>Size classes</b> <span style="font-size:10px;color:#7a9a76">— trees ≥10 cm · stems/ha · BA m²/ha · vol m³/ha</span>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:4px">
+      <tr style="color:#7a9a76;font-size:10px"><td></td><td style="text-align:right">stems</td><td style="text-align:right">BA</td><td style="text-align:right">vol</td></tr>
+      ${cls}</table>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <b>Keep trees ≥</b>
+      <select onchange="setSummaryKeep(this.value)" style="padding:4px 6px">${opts}</select>
+      <span style="font-size:11px;color:#7a9a76">what comes out below that size</span>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px">
+      <tr style="color:#7a9a76;font-size:10px"><td></td><td colspan="2" style="text-align:center">REMOVED &lt;${keep} cm</td><td colspan="2" style="text-align:center">KEPT ≥${keep} cm</td></tr>
+      <tr style="color:#7a9a76;font-size:10px"><td></td><td style="text-align:right">stems</td><td style="text-align:right">vol</td><td style="text-align:right">stems</td><td style="text-align:right">vol</td></tr>
+      <tr><td style="padding:3px 0;color:#cdebcf"><b>All species</b></td>
+        <td style="text-align:right;padding:3px 6px">${R.st}</td><td style="text-align:right;padding:3px 6px">${f1(R.v)}</td>
+        <td style="text-align:right;padding:3px 6px">${K.st}</td><td style="text-align:right;padding:3px 0">${f1(K.v)}</td></tr>
+      ${spp.map(sp=>{ const r=bySp[sp][0], k=bySp[sp][1]; return `<tr><td style="padding:1px 0 1px 10px;color:#8fb89a;font-size:11px">${esc(sp)}</td>`+
+        `<td style="text-align:right;padding:1px 6px;color:#8fb89a;font-size:11px">${r?r.st:"—"}</td>`+
+        `<td style="text-align:right;padding:1px 6px;color:#8fb89a;font-size:11px">${r?f1(r.v):"—"}</td>`+
+        `<td style="text-align:right;padding:1px 6px;color:#8fb89a;font-size:11px">${k?k.st:"—"}</td>`+
+        `<td style="text-align:right;padding:1px 0;color:#8fb89a;font-size:11px">${k?f1(k.v):"—"}</td></tr>`; }).join("")}
+    </table>
+    <div style="font-size:10px;color:#7a9a76;margin-top:4px">Residual BA after removal: ${f1(K.ba)} m²/ha of ${f1(K.ba+R.ba)}.</div>
+    ${s.noDbh?`<div style="font-size:10px;color:#e8b04b;margin-top:4px">${s.noDbh} tree${s.noDbh===1?"":"s"} tallied with no diameter — counted in BA and in the composition, but not in stems, volume or any size class above.</div>`:""}</div>`;
+}
 function renderSummary(){
   { const t=$("sumFreshTxt"); if(t) t.innerHTML=freshnessLine_(); }
   const inclSmall=summaryInclSmall;
@@ -4596,6 +4767,7 @@ function renderSummary(){
       <div class="metric"><div class="k">Total vol/ha</div><div class="v">${f(s.vol,0)}<small> m³</small></div></div>
     </div>
     <div style="margin-top:4px"><b>Species — by basal area</b>${comp}</div>
+    ${sizeClassHtml_(s)}
     ${hab}
     <div class="note">Live-tree metrics (BA, stems, QMD, composition, volume): DBH ≥ ${inclSmall?"6":"10"} cm. BAF ${BAF.toFixed(1)} variable-radius plots. Volume = Pettawawa total stem volume — height modelled from DBH per species (Bonnor &amp; Magnussen 1986)${s.vol?` · ≈ ${(s.vol*M3_TO_CORDS).toFixed(1)} cords/ha`:""}. Species outside the equation set default to Pr (conifer) or Mh (hardwood).${_sumExcluded?` <b>${_sumExcluded} plot${_sumExcluded>1?"s":""} left out</b> (marked no data collected).`:""}</div>`;
 }
@@ -4673,10 +4845,7 @@ document.addEventListener("change", e=>{ const el=e.target, a=el&&el.id&&ADDABLE
 $("TRACT").addEventListener("change", ()=>{ if($("TRACT").value===ADD_TRACT) openAddTract(); });
 $("STANDID").addEventListener("change", ()=>{
   if($("STANDID").value===ADD_STAND){ openAddStand(); return; }
-  if(editingIndex==null) setField($("PLOTNUM"), nextPlotFor($("STANDID").value));
-  // the "already in this compartment" marks depend on the stand, so redraw them when it changes
-  try{ renderGround(getGround()); }catch(e){}
-  updateHdrAt_();
+  standChanged_();   // same side effects as every programmatic stand change — see standChanged_()
 });
 $("PLOTNUM").addEventListener("change", updateHdrAt_);
 $("PLOTNUM").addEventListener("input", updateHdrAt_);
@@ -6798,7 +6967,7 @@ function tractOrPolyAt_(lat,lon){ const h=pointInPolys_(lat,lon); if(h && h.trac
 // Fill Stand ID, Tract and Age on the form from whatever compartment (loaded boundary OR drawn polygon) the point falls in.
 function autoStandTract_(lat,lon){
   const stand=standOrPolyAt_(lat,lon);
-  if(stand){ addStand(stand); standSelect(); setSel($("STANDID"),stand); if(typeof editingIndex!=="undefined"&&editingIndex==null) setField($("PLOTNUM"), nextPlotFor(stand)); }
+  if(stand){ addStand(stand); standSelect(); setSel($("STANDID"),stand); standChanged_(); }
   const tr=tractOrPolyAt_(lat,lon);
   if(tr){ addTract(tr); tractSelect(); setSel($("TRACT"),tr); }
   const age=ageAt_(lat,lon);
