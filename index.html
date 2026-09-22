@@ -1112,7 +1112,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-22 · v331";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-22 · v332";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1853,55 +1853,13 @@ function addPair(kind,v,scroll){
    Deliberately conservative: it only scrolls when the control has actually left the screen, so a
    phone that behaved correctly is never moved, and it waits for the resize to finish rather than
    fighting the browser's own restore. */
-(function holdGroupSteady_(){
-  /* NOTHING is corrected after a value is chosen. That is the whole point of this version.
-
-     Two earlier attempts both corrected the scroll AFTER the picker closed: first a smooth scroll
-     280 ms later, which the crew saw as "drops down, then slides back up"; then a burst of instant
-     restores, which they saw as a shake. Both were racing Chrome's own restore, and EVERY scrollTo
-     is visible movement — so each cure was just a new symptom. Correcting after the fact cannot
-     work: by the time you can measure the jump, it has already been drawn.
-
-     So the page is placed ONCE, on the tap, BEFORE the native picker opens: the heading that names
-     the group of fields ("Cover", "Ground species") goes just under the app bar. Choosing a value
-     moves nothing at all. Tapping the next dropdown in the same group moves nothing either — it is
-     already where it was put. It only re-places after the crew has scrolled the page themselves. */
-  let heldFor=null, ourScrollAt=0;
-  const barH=()=>{ const b=document.querySelector(".appbar"); return (b?b.offsetHeight:90)+8; };
-  const eligible=n=> n && n.tagName && /^(SELECT|INPUT|TEXTAREA)$/.test(n.tagName) && !n.closest("#fmap");
-  /* The heading above this run of fields. Fields sit in a .grid (or a .rep row); the group heading is
-     the nearest .grouphd before it. No heading — a lone field — means nothing is placed. */
-  const groupHeadOf=el=>{
-    /* Repeating rows — trees, regen, shrubs — are excluded. They are their own thing: a group here
-       would mean tapping tree 20's DBH threw the page back to the "Trees" heading and hid the very
-       row being edited. markTreeRow_ looks after those, and only when a row has actually gone off
-       screen. */
-    if(el.closest(".rep")) return null;
-    let n=el.closest(".grid")||el.parentElement;
-    while(n && n!==document.body){
-      let p=n.previousElementSibling;
-      while(p){ if(p.classList && p.classList.contains("grouphd")) return p; p=p.previousElementSibling; }
-      n=n.parentElement;
-    }
-    return null;
-  };
-  const place=el=>{
-    if(!eligible(el)) return;
-    const hd=groupHeadOf(el); if(!hd) return;
-    if(heldFor===hd) return;                     // already placed, and not scrolled since
-    try{
-      const y=window.scrollY + hd.getBoundingClientRect().top - barH();
-      heldFor=hd; ourScrollAt=Date.now();
-      window.scrollTo({top:Math.max(0,y),behavior:"auto"});   // instant, and before the picker opens
-    }catch(e){}
-  };
-  // placed on the tap, never on the change — the crew never sees a reaction to their choice
-  ["pointerdown","touchstart"].forEach(ev=>document.addEventListener(ev, e=>place(e.target), true));
-  /* A scroll the crew made themselves releases the hold so the next tap can re-place. Our own
-     scrollTo fires this too, hence the short grace window. A scroll Chrome makes on its own also
-     releases it, which is right: the next tap then puts the group back where it belongs. */
-  window.addEventListener("scroll", ()=>{ if(Date.now()-ourScrollAt>400) heldFor=null; }, {passive:true});
-})();
+/* Nothing scrolls the form when a dropdown is tapped or a value chosen. Three versions tried to
+   and all three were wrong: a smooth correction after the picker closed (seen as a bounce), a
+   burst of instant ones (a shake), then placing the group heading at the top on the tap (which
+   moved the cover fields away under the crew's thumb and had them hitting ground-vegetation
+   chips by mistake). The form now stays exactly where the crew put it; they scroll it
+   themselves. Repeating tree rows keep markTreeRow_, which only acts on a row that has
+   genuinely gone off screen - that one was never the complaint. DO NOT add a fourth. */
 let _treeMarkT=null;
 function markTreeRow_(row){
   if(!row) return;
@@ -1915,11 +1873,13 @@ function markTreeRow_(row){
     setTimeout(()=>{
       try{
         const r=row.getBoundingClientRect();
-        /* Only move if the row has actually drifted off, so a steady phone is left alone — and the
-           threshold sits WELL clear of where keepFieldInView_ parks a field it had to rescue
-           (roughly the app-bar height, ~90). At the old 90 the two would collide on a phone with a
-           shorter bar: the pin places the row, this decides it is too high, and smooth-scrolls it —
-           which is the very bounce the pin exists to remove. */
+        /* Only move if the row has actually drifted off, so a steady phone is left alone. The
+           threshold was 90 — the app-bar height — which collided with the v330 scroll pin on a
+           phone with a shorter bar: the pin placed the row, this decided it was too high, and
+           smooth-scrolled it, which was the very bounce the pin existed to remove. That pin is
+           gone as of v332 and nothing else places rows now, but 40 stays: it is the honest test
+           of "actually off the screen", and 90 was never that. Repeating tree/regen rows are the
+           only thing left in the form that scrolls itself, and they were never the complaint. */
         if(r.top < 40 || r.bottom > (window.innerHeight - 40)) scrollRowIntoView(row);
       }catch(e){}
     }, 260);
@@ -4888,6 +4848,8 @@ document.querySelectorAll("details.sec").forEach(sec=>{
 });
 // After a field is set, lift the next field up to sit just beneath the header.
 const FIELD_SEL="select, input:not([type=file]), textarea";
+// Herbs / Moss / Grass-edge: filled as a set, never auto-advanced to or from.
+const COVER_IDS_=/^(HERBS|MOSS|GRASSEDG)$/;
 function fieldBlock(el){
   // align the whole labeled container so the field NAME stays visible (not tucked under the header)
   const row=el.closest(".rep"); if(row) return row;
@@ -4908,6 +4870,11 @@ document.addEventListener("change",e=>{
   if(el.id==="addModalInput" || el.value===ADD_SENTINEL) return;
   if($("addModal").style.display==="flex") return;    // species dialog open — leave the view alone
   if(el.closest(".rep")) return;                       // tree/regen/shrub row — keep the Add button visible, don't advance past it
+  /* The cover trio does not auto-advance, in either direction. These three sit side by side and are
+     filled as a set, so advancing off one slid the next out from under the crew's thumb — and
+     landing on the ground-species chips after Grass had them ticking a species by mistake. The block
+     stays put and the crew scroll past it themselves. Everywhere else the advance is wanted. */
+  if(COVER_IDS_.test(el.id||"")) return;
   const sec=el.closest("details.sec"); if(!sec) return;
   const vis=x=>x.offsetParent!==null && x.id!=="addModalInput";
   // Right-column rule: a right-side field only advances when its left partner has data.
@@ -4925,6 +4892,7 @@ document.addEventListener("change",e=>{
   const ti=targets.indexOf(el);
   if(ti<0 || ti+1>=targets.length) return;             // last target in the section — don't fling away
   const next=targets[ti+1];
+  if(next && COVER_IDS_.test(next.id||"")) return;     // do not fling the cover block up either
   let block;
   if(next.classList.contains("chips")){
     const gh=next.previousElementSibling;
