@@ -1112,7 +1112,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-22 · v330";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-22 · v331";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1853,52 +1853,54 @@ function addPair(kind,v,scroll){
    Deliberately conservative: it only scrolls when the control has actually left the screen, so a
    phone that behaved correctly is never moved, and it waits for the resize to finish rather than
    fighting the browser's own restore. */
-(function keepFieldInView_(){
-  /* PIN, don't chase. The first version of this waited 280 ms for Chrome's restore and then SMOOTHLY
-     scrolled the field back — which is the "moves down, then back up" the crew reported on the cover
-     dropdowns. It corrected the jump after the fact, so the jump was still on screen, and the
-     animation drew attention to it.
+(function holdGroupSteady_(){
+  /* NOTHING is corrected after a value is chosen. That is the whole point of this version.
 
-     Now the field's position is recorded BEFORE the picker opens, and put back INSTANTLY as the
-     viewport settles. Chrome's restore is overwritten before a frame can show it, so nothing appears
-     to move at all. Instant, never smooth: a smooth scroll here is the bounce. */
-  let el=null, wantTop=0, timers=[];
-  const headerH=()=>{ const b=document.querySelector(".appbar"); return (b?b.offsetHeight:90)+14; };
+     Two earlier attempts both corrected the scroll AFTER the picker closed: first a smooth scroll
+     280 ms later, which the crew saw as "drops down, then slides back up"; then a burst of instant
+     restores, which they saw as a shake. Both were racing Chrome's own restore, and EVERY scrollTo
+     is visible movement — so each cure was just a new symptom. Correcting after the fact cannot
+     work: by the time you can measure the jump, it has already been drawn.
+
+     So the page is placed ONCE, on the tap, BEFORE the native picker opens: the heading that names
+     the group of fields ("Cover", "Ground species") goes just under the app bar. Choosing a value
+     moves nothing at all. Tapping the next dropdown in the same group moves nothing either — it is
+     already where it was put. It only re-places after the crew has scrolled the page themselves. */
+  let heldFor=null, ourScrollAt=0;
+  const barH=()=>{ const b=document.querySelector(".appbar"); return (b?b.offsetHeight:90)+8; };
   const eligible=n=> n && n.tagName && /^(SELECT|INPUT|TEXTAREA)$/.test(n.tagName) && !n.closest("#fmap");
-
-  const remember=n=>{
-    if(!eligible(n)) return;
-    el=n;
-    try{ wantTop=n.getBoundingClientRect().top; }catch(e){ el=null; }
+  /* The heading above this run of fields. Fields sit in a .grid (or a .rep row); the group heading is
+     the nearest .grouphd before it. No heading — a lone field — means nothing is placed. */
+  const groupHeadOf=el=>{
+    /* Repeating rows — trees, regen, shrubs — are excluded. They are their own thing: a group here
+       would mean tapping tree 20's DBH threw the page back to the "Trees" heading and hid the very
+       row being edited. markTreeRow_ looks after those, and only when a row has actually gone off
+       screen. */
+    if(el.closest(".rep")) return null;
+    let n=el.closest(".grid")||el.parentElement;
+    while(n && n!==document.body){
+      let p=n.previousElementSibling;
+      while(p){ if(p.classList && p.classList.contains("grouphd")) return p; p=p.previousElementSibling; }
+      n=n.parentElement;
+    }
+    return null;
   };
-  const restore=()=>{
-    if(!el || !el.getBoundingClientRect || !el.isConnected){ el=null; return; }
-    let r; try{ r=el.getBoundingClientRect(); }catch(e){ el=null; return; }
-    /* Where it should sit: exactly where it was. If that was under the sticky header or off the
-       bottom — a field tapped at the very edge of the screen — put it just below the header instead,
-       which is what "stays at the top" means for a control that was not properly visible to start. */
-    const h=headerH();
-    let want=wantTop;
-    if(want < h || want > window.innerHeight-70) want=h;
-    const dy=r.top-want;
-    // a phone that did not drift is never moved; 1 px of rounding is not drift
-    if(Math.abs(dy)>1) window.scrollTo({top:Math.max(0,window.scrollY+dy),behavior:"auto"});
+  const place=el=>{
+    if(!eligible(el)) return;
+    const hd=groupHeadOf(el); if(!hd) return;
+    if(heldFor===hd) return;                     // already placed, and not scrolled since
+    try{
+      const y=window.scrollY + hd.getBoundingClientRect().top - barH();
+      heldFor=hd; ourScrollAt=Date.now();
+      window.scrollTo({top:Math.max(0,y),behavior:"auto"});   // instant, and before the picker opens
+    }catch(e){}
   };
-  /* Several discrete restores rather than a rAF loop: Chrome's own restore lands at an unpredictable
-     moment after the picker closes, and a continuous loop would fight the crew if they started to
-     scroll. These all fall inside the time the picker is closing. */
-  const hold=()=>{ timers.forEach(clearTimeout); timers=[];
-    restore();
-    [16,50,120,250,400].forEach(ms=>timers.push(setTimeout(restore,ms)));
-    timers.push(setTimeout(()=>{ el=null; }, 600));
-  };
-
-  // record the position while the field is still where the crew last saw it
-  ["pointerdown","touchstart","focusin"].forEach(ev=>
-    document.addEventListener(ev, e=>remember(e.target), true));
-  document.addEventListener("change", e=>{ if(eligible(e.target)){ if(e.target!==el) remember(e.target); hold(); } }, true);
-  // the resize IS the jump on Android — put it back on the same frame it happens
-  if(window.visualViewport) window.visualViewport.addEventListener("resize", ()=>{ if(el) restore(); });
+  // placed on the tap, never on the change — the crew never sees a reaction to their choice
+  ["pointerdown","touchstart"].forEach(ev=>document.addEventListener(ev, e=>place(e.target), true));
+  /* A scroll the crew made themselves releases the hold so the next tap can re-place. Our own
+     scrollTo fires this too, hence the short grace window. A scroll Chrome makes on its own also
+     releases it, which is right: the next tap then puts the group back where it belongs. */
+  window.addEventListener("scroll", ()=>{ if(Date.now()-ourScrollAt>400) heldFor=null; }, {passive:true});
 })();
 let _treeMarkT=null;
 function markTreeRow_(row){
