@@ -1112,7 +1112,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-21 · v327";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-21 · v329";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -5129,14 +5129,46 @@ function dlRender_(err){
   const box=$("dlBody"); if(!box) return;
   if(err){ box.innerHTML=`<div style="color:#e8a33a;line-height:1.5">${esc(err)}</div>`; return; }
   if(_dlBusy){ box.innerHTML=`<div style="line-height:1.5">Loading <b>${esc(_dlBusy)}</b>…</div>`; return; }
-  if(!_dlItems.length){ box.innerHTML=`<div style="color:#8fae95;line-height:1.5">Nothing in the shared layers folder yet.<br><br>In Drive, put boundary shapefiles, reference point or line files and georeferenced PDFs into the <b>FRI Layers</b> folder and they will appear here for everyone.</div>`; return; }
+  /* The empty folder is exactly when someone wants to pull a file out of their mail, so the button
+     has to appear here too — hiding it behind a non-empty list was the first version's mistake. */
+  if(!_dlItems.length){ box.innerHTML=`<div style="color:#8fae95;line-height:1.5;margin-bottom:10px">Nothing in the shared layers folder yet.<br><br>Either put files into the <b>FRI Layers</b> folder in Drive, or email them in with <b>FRIPLOTS DATA</b> in the subject and press the button below.</div>`+dlMailBtn_(); return; }
   const icon=k=>k==="pdf"?"🗺":(k==="shapefile"?"⬇":(k==="geojson"?"⬇":(k==="kml"?"⬇":"📄")));
   const rows=_dlItems.map((x,i)=>
     `<button type="button" onclick="dlPick_(${i})" style="display:block;width:100%;text-align:left;padding:10px;margin:0 0 6px;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#e8f0e6;font:inherit">`+
     `<div style="font-size:13px;word-break:break-all">${icon(x.kind)} ${esc(x.name)}</div>`+
     `<div style="color:#8fae95;font-size:11px;margin-top:2px">${esc(x.kind)}${x.kb?" · "+esc(String(x.kb))+" KB":""}${x.when?" · "+esc(x.when):""}</div></button>`).join("");
-  box.innerHTML=`<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:8px">Tap a file to load it onto the map. It loads the same way as a file from this phone.</div>`+
+  box.innerHTML=`<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:8px">Tap a file to load it onto the map. It loads the same way as a file from this phone — and once it is loaded it stays on the phone, so it keeps working with no signal.</div>`+
+    dlMailBtn_()+
     `<div style="max-height:52vh;overflow-y:auto;-webkit-overflow-scrolling:touch">${rows}</div>`;
+}
+/* Anyone allowed can email a file in with FRIPLOTS DATA in the subject; this asks the backend to go
+   and look, then re-reads the list. The allow-list of senders lives on the Sheet, not here. */
+function dlMailBtn_(){
+  return `<button type="button" id="dlMailBtn" onclick="dlCheckMail_()" style="display:block;width:100%;text-align:left;padding:10px;margin:0 0 10px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">`+
+    `✉ Check email for new files`+
+    `<div style="color:#8fae95;font-size:11px;margin-top:2px">Files anything emailed in with <b>FRIPLOTS DATA</b> in the subject</div></button>`;
+}
+function dlCheckMail_(){
+  if(!connected || isOffline()){ toast("Checking email needs a connection",true); return; }
+  const b=$("dlMailBtn"); if(b){ b.disabled=true; b.style.opacity=.6; b.firstChild&&(b.innerHTML="✉ Checking the mailbox…"); }
+  const cb="__dm"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  const done=msg=>{ toast(msg); openDriveLayers(); };             // re-read the list either way
+  window[cb]=r=>{ clean();
+    if(!r || !r.ok){
+      const e=(r&&r.error)||"";
+      dlRender_(/authoriz|permission|scope/i.test(e)
+        ? "The backend has not been given permission to read the mailbox yet. Open the Sheet, Extensions, Apps Script, and run “collectLayerMailMenu_” once from the editor."
+        : ("Could not check the mailbox"+(e?": "+e:".")));
+      return; }
+    if(r.saved) done(r.saved+" new file"+(r.saved===1?"":"s")+" filed"+(r.names&&r.names.length?": "+r.names.slice(0,3).join(", "):""));
+    else if(r.threads) done("Nothing new — "+r.threads+" matching email"+(r.threads===1?"":"s")+" already collected"+(r.refused?", "+r.refused+" sender(s) not on the list":""));
+    else done("No email found with “"+(r.subject||"FRIPLOTS DATA")+"” in the subject and an attachment, in the last 30 days");
+  };
+  sc.onerror=()=>{ clean(); dlRender_("Could not reach the backend to check the mailbox."); };
+  setTimeout(()=>{ if(window[cb]){ clean(); dlRender_("Timed out checking the mailbox — try again."); } },60000);
+  sc.src=SCRIPT_URL+sep+"action=mailcheck&callback="+cb;
+  document.body.appendChild(sc);
 }
 function dlPick_(i){
   const it=_dlItems[i]; if(!it) return;
