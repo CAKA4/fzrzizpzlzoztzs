@@ -932,7 +932,9 @@
 
       <details class="mgroup"><summary>📤 Send &amp; export</summary>
         <button type="button" onclick="closeMore();openReportModal()">📧 Email analysis report — Excel / PDF (by property)</button>
-        <button type="button" onclick="closeMore();exportPlotsAnalysisShp('main')">📍 Plots + analysis → shapefile (ArcGIS)</button>
+        <button type="button" onclick="closeMore();exportPlotsRawShp()">📋 All plot data → shapefile (every column)</button>
+        <button type="button" onclick="closeMore();exportPlotsFullSummaryShp()">📊 All plots + full summary → shapefile</button>
+        <button type="button" onclick="closeMore();exportPlotsAnalysisShp('main')">📍 Plots + short analysis → shapefile</button>
         <button type="button" onclick="closeMore();exportCompartmentsAnalysisShp('main')">⬠ Compartments + analysis → shapefile</button>
         <button type="button" onclick="closeMore();openMapFiles()">🗂 Map files on Drive — tracks, routes, areas</button>
         <button type="button" onclick="closeMore();openCompRpt()">📄 Compartment PDF reports — one, a tract, or all</button>
@@ -1055,13 +1057,22 @@
 </div>
 
 <div class="modal" id="plotCardModal" style="display:none" onclick="if(event.target===this)closePlotCard()">
-  <div class="modal-card" style="max-width:440px">
+  <!-- flex column so the scrolling body absorbs exactly the space left over by the title and the
+       buttons. It was a flat max-height:60vh, which on a 844px phone left 95px of the screen unused
+       while the card held 1310px of content to scroll through. min-height:0 on the body is what lets
+       a flex child actually shrink; without it the buttons get pushed off the bottom. -->
+  <div class="modal-card" style="max-width:440px;display:flex;flex-direction:column;overflow:hidden">
     <div class="modal-title" style="display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--card);padding:6px 0 10px;margin:0 0 6px;z-index:2">
       <span id="plotCardTitle">Plot</span>
       <button type="button" onclick="closePlotCard()" style="background:#16271a;border:1px solid #33623a;border-radius:8px;color:#cdebcf;width:36px;height:36px;font-size:18px;line-height:1;cursor:pointer;flex:none" aria-label="Close">✕</button>
     </div>
-    <div id="plotCardBody" style="max-height:60vh;overflow:auto;-webkit-overflow-scrolling:touch"></div>
-    <div class="modal-actions" id="plotCardActions"></div>
+    <!-- padding-right keeps the content clear of the scroll bar. Without it every right-aligned
+         value sat flush against the edge the bar is drawn on, so on a phone the last character of
+         "Bt6 Wn2 Mh2", "AGS" and the ground-species list was covered. An overlay scroll bar never
+         changes scrollWidth, so this never showed up as overflow - it just hid text. scrollbar-gutter
+         reserves the space up front where the browser supports it; the padding covers the rest. -->
+    <div id="plotCardBody" style="flex:1 1 auto;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;padding-right:12px;scrollbar-gutter:stable"></div>
+    <div class="modal-actions" id="plotCardActions" style="flex:none;padding-top:10px"></div>
   </div>
 </div>
 
@@ -1112,7 +1123,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-24 · v335";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-25 · v339";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3300,6 +3311,8 @@ function valForField_(a,k){
     case "advSph":     return (a.advSph===""||a.advSph==null?"":String(a.advSph));
     case "earlyComp":  return a.earlyComp||"";
     case "earlySph":   return (a.earlySph===""||a.earlySph==null?"":String(a.earlySph));
+    case "sapSph":     return (a.sapSph===""||a.sapSph==null?"":String(a.sapSph));
+    case "si":         return (a.si===""||a.si==null?"":String(a.si));
     case "regenClass": return a.regenClass||"";
     case "cavity":     return (a.cavity===""||a.cavity==null?"":String(a.cavity));
     case "cwd":        return (a.cwd===""||a.cwd==null?"":String(a.cwd));
@@ -3319,7 +3332,7 @@ function sizeClassStr_(arr){
 // Kept terse because the dot is small; the picker carries the full name and units.
 const MY_LABEL_TAG={num:"Plot",ft:"FT",dom:"Dom",comp:"Comp",sapComp:"Sap",ba:"BA",qmd:"QMD",
   stems:"SPH",age:"Age",ht:"Ht",cc:"CC",ags:"AGS",baCls:"BAcls",stCls:"SPHcls",
-  advComp:"Adv",advSph:"AdvSPH",earlyComp:"Early",earlySph:"EarSPH",regenClass:"Regen",
+  advComp:"Adv",advSph:"AdvSPH",earlyComp:"Early",earlySph:"EarSPH",sapSph:"SapSPH",si:"Index",regenClass:"Regen",
   vol:"Vol",cords:"Cds",plonVol:"Plon",stk:"Stk",volRatio:"VR",yieldGap:"YG",
   cavity:"Cav",cwd:"CWD",snags:"Sng"};
 // Composition strings run long ("Bd8 Pt1 Bt1 Ce2 By2 Ab2"). Trimmed to the leading species so a
@@ -3354,7 +3367,7 @@ const MY_LABEL_OPTS=[["num","Plot number"],["ft","Forest type"],["dom","Dominant
   ["cc","Canopy closure %"],["ags","% AGS"],
   ["baCls","BA by size class"],["stCls","Stems by size class"],
   ["advComp","Adv comp"],["advSph","Adv sph"],["earlyComp","Early comp"],["earlySph","Early sph"],
-  ["regenClass","Regen class"],
+  ["sapSph","Sapling sph 6-8 cm"],["si","Stocking index"],["regenClass","Regen class"],
   ["vol","Volume m³/ha"],["cords","Cords/ha"],["plonVol","Plonski vol"],["stk","Stocking ratio"],
   ["volRatio","Vol ratio"],["yieldGap","Yield gap"],
   ["cavity","Cavity/ha"],["cwd","CWD/ha"],["snags","Snags/ha"]];
@@ -5482,7 +5495,11 @@ try{ if(STORE){ standAnField=STORE.getItem("fi_standanfield")||"ba"; standLabelM
 const STAND_AN_OPTS=[["ft","Forest type"],["comp","Comp (>9cm)"],["dom","Dominant species"],["sapComp","Sap comp"],
   ["nplots","Plots"],["ba","BA m²/ha"],["qmd","QMD cm"],["stems","Stems/ha"],["age","Age"],["ht","Height m"],
   ["cc","Canopy closure %"],["ags","% AGS"],["advComp","Adv comp"],["advSph","Adv sph"],
-  ["earlyComp","Early comp"],["earlySph","Early sph"],["regenClass","Regen class"],
+  ["earlyComp","Early comp"],["earlySph","Early sph"],
+  /* The sapling term and the index sit beside the class they produce. A regeneration class shown
+     next to advance and early figures of 0, with nothing on screen that could add up to it, is not
+     a reading anyone can check - which is exactly what compartment 112c looked like. */
+  ["sapSph","Sapling sph 6-8 cm"],["si","Stocking index"],["regenClass","Regen class"],
   ["vol","Volume m³/ha"],["cords","Cords/ha"],["plonVol","Plonski vol"],["stk","Stocking ratio"],
   ["volRatio","Vol ratio"],["yieldGap","Yield gap"],["cavity","Cavity/ha"],["cwd","CWD/ha"],["snags","Snags/ha"]];
 function standAnFetch_(force){
@@ -6086,7 +6103,10 @@ const PLOTCARD_SAR_={SAROSPEC:"Species at risk",DSV:"Dog-strangling vine",EUROBU
 const PLOTCARD_PEST_={PESTS:"Pests",PESTQUAN:"Pest severity",DISEASE:"Disease",DISEQUAN:"Disease severity",RPD:"Red pine decline"};
 function pcVal_(v){ return (v==null)?"":String(v).trim(); }
 function pcHas_(v){ const s=pcVal_(v); return s!=="" && s.toLowerCase()!=="none" && s!=="—"; }
-function pcRow_(label,val){ return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0"><span style="color:#7a9a76">${esc(label)}</span><span style="color:#e8f0e6;text-align:right;font-weight:600">${esc(val)}</span></div>`; }
+/* min-width:0 on both sides, or a long value cannot shrink below its own content width and pushes
+   the row wider than the card - a flex item defaults to min-width:auto. overflow-wrap:anywhere lets
+   a long ground-species list break instead of running off the edge. */
+function pcRow_(label,val){ return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0"><span style="color:#7a9a76;min-width:0">${esc(label)}</span><span style="color:#e8f0e6;text-align:right;font-weight:600;min-width:0;overflow-wrap:anywhere">${esc(val)}</span></div>`; }
 function pcSection_(title,inner){ if(!inner) return ""; return `<div style="margin-top:12px"><div style="font:700 12px system-ui;letter-spacing:.04em;text-transform:uppercase;color:#8fe6a0;border-bottom:1px solid #274b30;padding-bottom:4px;margin-bottom:5px">${esc(title)}</div>${inner}</div>`; }
 /* ── The analysed numbers, carried into the card ────────────────────────────────────────────────
    These live only in the crew feed (plotanalysis) and were only ever visible in the small popup
@@ -6138,7 +6158,7 @@ function plotCardHtml_(p, an){
     const isLive=sp && ST.indexOf(sp.toUpperCase())<0; if(isLive) live++;
     const q=pcVal_(p[`T${i}Q`]), cl=pcVal_(p[`T${i}QL`]), lg=pcVal_(p[`T${i}LOGS`]);
     const extra=[q,cl,lg?(lg+" logs"):""].filter(Boolean).join(" · ");
-    trees+=`<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px solid #14251a"><span style="color:#e8f0e6"><b>${esc(sp||"—")}</b>${dbh?` ${esc(dbh)} cm`:""}</span><span style="color:#9bbfa2;font-size:12px;text-align:right">${esc(extra)}</span></div>`; }
+    trees+=`<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px solid #14251a"><span style="color:#e8f0e6;min-width:0"><b>${esc(sp||"—")}</b>${dbh?` ${esc(dbh)} cm`:""}</span><span style="color:#9bbfa2;font-size:12px;text-align:right;min-width:0;overflow-wrap:anywhere">${esc(extra)}</span></div>`; }
   // Regeneration
   let regen="";
   for(let i=1;i<=5;i++){ const sp=pcVal_(p[`ADRGNSP${i}`]), n=pcVal_(p[`ADRGNN${i}`]); if(sp||n) regen+=pcRow_(`Advance · ${sp||"—"}`, n?`${n} stems`:"—"); }
@@ -7404,7 +7424,14 @@ function driveSave_(blob,name,kind){
       try{
         const b64=String(fr.result).split(",")[1]||"";
         if(!b64) return;
-        if(b64.length > 8*1024*1024){ toast("Saved to this device only — too big for Drive",true); return; }
+        /* Raised from 8 MB. A shapefile carrying every column of 415 plots is far larger than the
+           tracks and routes this was written for, and a file that never reaches Drive can never be
+           emailed either - so say that, rather than letting the email button fail later for a
+           reason nobody can see. Apps Script accepts a 50 MB POST; base64 costs a third on top. */
+        if(b64.length > 30*1024*1024){
+          toast("Saved to this device only — too big for Drive, so it cannot be emailed either",true);
+          return;
+        }
         fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
           body:JSON.stringify({_action:"mapfile", name:name, kind:kind||"export",
             mime:(blob.type||"application/octet-stream"), data:b64,
@@ -7681,12 +7708,104 @@ function exportPolyShp(){
   toast(`${all.length} polygon${all.length==1?"":"s"} → shapefile (UTM 17N)`);
 }
 
+/* ── Shapefile field names ──────────────────────────────────────────────────────────────────────
+   A .dbf field name is at most 10 characters. FRIPLOTS has 227 columns and several names longer
+   than that ("CRUISER_EMAIL", "PHOTO_LINKS"), and a silent truncation is how two columns collide
+   into one and a whole column of data disappears. This truncates deliberately and de-duplicates,
+   and the caller ships the full mapping in the zip so nothing has to be guessed at the far end. */
+function dbfNames_(headers){
+  const used={}, map=[];
+  headers.forEach(h=>{
+    let base=String(h||"F").toUpperCase().replace(/[^A-Z0-9_]/g,"_").slice(0,10) || "F";
+    let name=base, n=1;
+    while(used[name]){ const suf=String(++n); name=base.slice(0,10-suf.length)+suf; }
+    used[name]=1; map.push({src:String(h), dbf:name, cut:String(h).length>10 || name!==String(h).toUpperCase()});
+  });
+  return map;
+}
+/* Field widths measured from the data in BYTES (dbfWidth_), never characters - a comment with a
+   curly quote or an accent is longer in UTF-8 than it looks. Empty columns still get width 1 so the
+   field exists in the table rather than vanishing. */
+function dbfFieldsFor_(map, rows, cap){
+  cap=cap||120;
+  return map.map((m,i)=>{
+    let w=Math.max(dbfWidth_(m.dbf), 1);
+    rows.forEach(r=>{ const v=r[i]; const L=dbfWidth_(v); if(L>w) w=L; });
+    return {name:m.dbf, type:"C", len:Math.min(w, cap)};
+  });
+}
+function csvCell_(v){ const s=String(v==null?"":v); return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; }
+/* Ships inside the zip next to the .dbf. ArcGIS shows the 10-character name; this says what each
+   one was called on the Sheet, and flags the ones that had to be shortened. */
+function fieldMapCsv_(map){
+  const lines=["DBF_FIELD,SHEET_COLUMN,SHORTENED"];
+  map.forEach(m=>lines.push([csvCell_(m.dbf),csvCell_(m.src),(m.src.toUpperCase()!==m.dbf?"yes":"")].join(",")));
+  return new TextEncoder().encode(lines.join("\r\n"));
+}
+/* Build a point shapefile from a header list and an array of string rows, where two of the columns
+   are the latitude and longitude. Shared by the raw export and the full per-plot summary. */
+function shpFromRows_(base, head, rows, latKey, lonKey, extraFiles){
+  const li=head.indexOf(latKey), oi=head.indexOf(lonKey);
+  if(li<0||oi<0){ toast("The feed did not carry "+latKey+"/"+lonKey,true); return 0; }
+  const map=dbfNames_(head);
+  const feats=[], keep=[];
+  rows.forEach(r=>{
+    const lat=parseFloat(r[li]), lon=parseFloat(r[oi]);
+    if(!(isFinite(lat)&&isFinite(lon)&&(lat!==0||lon!==0))) return;
+    const u=utm17n_(lat,lon);
+    feats.push({pts:[{x:u.x,y:u.y}], box:{xmin:u.x,ymin:u.y,xmax:u.x,ymax:u.y}});
+    keep.push(r);
+  });
+  if(!feats.length){ toast("No plots with a location came back",true); return 0; }
+  const fields=dbfFieldsFor_(map, keep);
+  const {shp,shx}=buildShpSet_(feats,1);
+  const dbf=buildDbf_(fields, keep.map(r=>r.map(v=>v==null?"":String(v))));
+  const stamp=base+"_"+nowStr().replace(/[: ]/g,"-");
+  const files=[{name:stamp+".shp",data:shp},{name:stamp+".shx",data:shx},{name:stamp+".dbf",data:dbf},
+    {name:stamp+".prj",data:new TextEncoder().encode(PRJ_17N)}, dbfCpgFile_(stamp),
+    {name:stamp+"_fields.csv",data:fieldMapCsv_(map)}].concat(extraFiles||[]);
+  const zip=zipStore_(files);
+  const blob=new Blob([zip],{type:"application/zip"}), url=URL.createObjectURL(blob), a=document.createElement("a");
+  a.href=url; a.download=stamp+".zip"; document.body.appendChild(a); a.click(); a.remove();
+  driveSave_(blob,a.download,"shapefile"); setTimeout(()=>URL.revokeObjectURL(url),1500);
+  offerMailExport_(stamp);
+  return keep.length;
+}
+/* EVERY column of FRIPLOTS, every plot. "All the collected data", not a summary. */
+function exportPlotsRawShp(){
+  if(!connected){ toast("Connect to a Sheet first",true); return; }
+  toast("Reading the whole Sheet…");
+  jsonpAction_("plotsfull", r=>{
+    if(!r || !r.ok || !r.head || !r.head.length){ toast("The Sheet did not return the plot data — redeploy the backend (New version)",true); return; }
+    const n=shpFromRows_("FRIplots_full", r.head, r.plots||[], "Y", "X");
+    if(!n) return;
+    const miss=r.skippedNoCoord||0;
+    toast(`${n} of ${r.total} plots · every column → shapefile`+(miss?` · ${miss} had no location`:""));
+    if(miss) setTimeout(()=>toast(`${miss} plot${miss>1?"s have":" has"} no GPS fix, so ${miss>1?"they":"it"} cannot be a map feature — fix the coordinates or use the CSV export`,true), 2600);
+  });
+}
+/* The full per-plot analysis - everything the Compartment Summary reports, one row per plot. */
+function exportPlotsFullSummaryShp(){
+  if(!connected){ toast("Connect to a Sheet first",true); return; }
+  toast("Analysing every plot…");
+  jsonpAction_("plotsummary&set=all", r=>{
+    if(!r || !r.ok || !r.head || !r.head.length){ toast("The Sheet did not return the summary — redeploy the backend (New version)",true); return; }
+    const n=shpFromRows_("FRIplots_summary", r.head, r.plots||[], "LAT", "LON");
+    if(!n) return;
+    const miss=r.skippedNoCoord||0;
+    toast(`${n} of ${r.total} plots · full summary → shapefile`+(miss?` · ${miss} had no location`:""));
+  });
+}
 // Export PLOTS as a point shapefile enriched with each plot's full analysis (forest type, BA, QMD,
 // stems, age, height, %AGS, volume, Plonski, stocking) — ready for ArcGIS. Analysis comes from the
 // Sheet's per-plot feed, so it's the same numbers as the Plot Summary tab.
 function exportPlotsAnalysisShp(set){
   if(!connected){ toast("Connect to a Sheet first",true); return; }
-  const which=(set==="audit")?"audit":"main";
+  /* "main" excluded every imported plot, and plotanalysis separately drops anything marked
+     INANALYSIS=N. On the live Sheet that was 192 of 415 plots in the file with nothing said about
+     the other 223. Imported plots are analysed with all the others now, so the default set is
+     everything; the Imported-plots menu still asks for that subset explicitly. */
+  const which=(set==="audit")?"audit":"all";
   toast("Fetching plot analysis…");
   jsonpAction_("plotanalysis&set="+which, r=>{
     const plots=(r&&r.plots)||[];
@@ -7716,7 +7835,7 @@ function exportCompartmentsAnalysisShp(set){
   if(!BOUND || !BOUND.features || !BOUND.features.length){ toast("Load your compartment boundaries first (Layers → Stand boundaries)",true); return; }
   if(!standField){ toast("Pick the stand-name field first (Layers → Stand name field)",true); return; }
   if(!connected){ toast("Connect to a Sheet first",true); return; }
-  const which=(set==="audit")?"audit":"main";
+  const which=(set==="audit")?"audit":"all";   // see exportPlotsAnalysisShp - "main" hid the imported plots
   toast("Fetching stand analysis…");
   jsonpAction_("standanalysis&set="+which, r=>{
     const byStand={}; ((r&&r.stands)||[]).forEach(s=>byStand[String(s.stand).trim().toLowerCase()]=s);
@@ -7786,20 +7905,41 @@ function offerMailExport_(base){
       `<div style="color:#5a7a62;font-size:11px;margin-top:8px;line-height:1.4">The Drive copy is there either way - FRI Tools, Map exports, on the Sheet.</div>`);
   }, 400);   // let the download finish starting before covering the map
 }
+/* The file reaches Drive over a no-cors POST the app cannot read a reply from, so the app never
+   learns when the upload finished. The first version waited a flat 2.5 seconds and asked once; a
+   shapefile of 415 plots takes considerably longer than that to upload and be written, so the ask
+   arrived before the file existed, the endpoint answered "no export named ...", and to the crew it
+   looked as though the button simply did nothing.
+
+   Now it keeps asking - every 3 seconds for a minute - and only gives up when the file genuinely
+   never appears. "not yet" is not an error; it is the normal first few answers. */
 function mailExport_(base){
   closeInfoSheet_();
   const to=String(cruiserEmail||"").trim();
   if(!to){ toast("Set your email under \"Entered by\" first",true); return; }
-  toast("Asking the Sheet to email it…");
-  /* The upload is a no-cors POST the app cannot read, so the file may not have finished landing in
-     Drive yet. Give it a moment, then ask - and if it is not there yet, say so plainly instead of
-     reporting a success nobody can see. */
-  setTimeout(()=>{
+  if(!connected || isOffline()){ toast("Need a connection to email it",true); return; }
+  let tries=0; const MAX=20;
+  toast("Uploading, then emailing it…");
+  const ask=()=>{
+    tries++;
     jsonp_("action=mailexport&to="+encodeURIComponent(to)+"&base="+encodeURIComponent(base), r=>{
-      if(r && r.ok) toast("Emailed to "+to);
-      else toast((r && r.error) ? ("Couldn't email it: "+r.error) : "Couldn't reach the Sheet to email it", true);
-    }, 30000);
-  }, 2500);
+      if(r && r.ok){ toast("Emailed to "+to); return; }
+      const err=String((r&&r.error)||"");
+      /* Gmail permission is a different problem from a slow upload, and retrying will never fix
+         it. Say exactly what to do instead of timing out with a vague failure. */
+      if(/not sufficient|authoriz|permission|scope/i.test(err)){
+        toast("Google hasn't been given permission to send mail — on the Sheet run FRI Tools \u203a Email settings \u203a Send test email once, and grant it",true);
+        return;
+      }
+      if(tries>=MAX){
+        toast(err ? ("Couldn't email it: "+err) : "Couldn't reach the Sheet to email it", true);
+        return;
+      }
+      if(tries===3) toast("Still uploading — a large shapefile takes a moment…");
+      setTimeout(ask, 3000);
+    }, 25000);
+  };
+  setTimeout(ask, 2000);
 }
 
 /* ---- import reference points / lines / polygons (shapefile, GeoJSON, GPX) ---- */
