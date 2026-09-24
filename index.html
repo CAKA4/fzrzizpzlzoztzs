@@ -1112,7 +1112,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-22 · v332";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-24 · v335";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2445,7 +2445,19 @@ function fetchJson_(action, cb){
     try{ cb(JSON.parse(t), null); }catch(err){ cb(null, "parse: "+(t||"").slice(0,80)); } })
     .catch(err=>{ if(done)return; done=true; clearTimeout(to); cb(null, String(err)); });
 }
+/* `action` may carry extra parameters - "plotanalysis&set=main". They have to stay part of the
+   QUERY STRING; running encodeURIComponent over the lot turned the & into %26 and the = into %3D,
+   so the backend received one parameter literally named
+        action = "plotanalysis&set=main"
+   which matches no handler. doGet fell through to its "endpoint is live" default, the JSONP
+   callback was never called, and twelve seconds later the app reported "The Sheet didn't respond -
+   redeploy". Nothing was wrong with the deployment: the three callers that pass parameters this way
+   - the plots shapefile export, the compartments shapefile export, and the imported-plots-in-main
+   toggle - had never worked. fetchJson_ has always split correctly; this is the same split. */
 function jsonpAction_(action, cb){
+  const amp=String(action).indexOf("&");
+  const name_=amp>=0?String(action).slice(0,amp):String(action);   // the action itself
+  const rest_=amp>=0?String(action).slice(amp):"";                 // "&set=main", kept intact
   const name="__cb"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
   let settled=false;
   const clean=()=>{ try{ delete window[name]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
@@ -2455,7 +2467,7 @@ function jsonpAction_(action, cb){
   // If the script loads but never calls back (old deployment returns plain text), catch it after a wait.
   setTimeout(()=>{ if(settled) return; settled=true; clean();
     toast("No response from the Sheet — the app's script may need redeploying (New version).",true); }, 12000);
-  sc.src=SCRIPT_URL+sep+"action="+encodeURIComponent(action)+"&callback="+name;
+  sc.src=SCRIPT_URL+sep+"action="+encodeURIComponent(name_)+rest_+"&callback="+name;
   document.body.appendChild(sc);
   toast("Working in the Sheet…");
 }
@@ -3812,19 +3824,12 @@ function ageNoteHtml_(a){
   return `<div style="color:#8a7a3a;background:#fbf6e4;border-left:3px solid #e0c86a;border-radius:3px;`+
     `margin-top:5px;padding:4px 6px;font-size:11px;line-height:1.35">Age: ${esc(n)}</div>`;
 }
-// analyzed popup for a plot
-function plotPopHtml_(p){
-  const row=(k,v)=> (v===""||v==null)?"":`<tr><td style="color:#5a7a62;padding-right:8px;white-space:nowrap">${k}</td><td><b>${esc(String(v))}</b></td></tr>`;
-  const age=(p.age===""?"":(p.age+(p.ageEst?"*":"")));
-  return `<div style="font-family:'Courier New',monospace;font-size:12px;color:#16271a;line-height:1.35">`+
-    `<b>${esc(p.stand||"—")}${p.plot?(" · plot "+esc(p.plot)):""}</b>${p.cruiser?` <span style="color:#5a7a62">(${esc(p.cruiser)})</span>`:""}`+
-    `<table style="margin-top:4px;border-collapse:collapse">`+
-    row("Type",p.ft)+row("Comp",p.comp)+row("BA m²/ha",p.ba)+row("QMD cm",p.qmd)+row("Stems/ha",p.stems)+
-    row("Age",age)+row("Ht m",p.ht)+row("% AGS",p.ags)+row("Vol m³/ha",p.vol)+row("Plonski Vol",p.plonVol)+row("Stocking",p.stk)+
-    `</table>`+ (p.ageEst?`<div style="color:#5a7a62;margin-top:3px">* age estimated</div>`:"")+
-    ageNoteHtml_(p)+
-    crewPhotoHtml_(p)+`</div>`;
-}
+/* v334: the small analysed popup that used to open on a plot dot is GONE, and so is the
+   function that built it. Every plot dot on the map - yours, a crew member's, an imported one -
+   now opens the same full plot card, on every device. The analysed figures it was the only home
+   for (forest type, BA, QMD, stems, volume, Plonski, stocking) are an Analysis section inside
+   that card now, so nothing was lost with it. Do not reintroduce a second, smaller view of a
+   plot: having two was what made the app look as though it behaved differently on a desktop. */
 /* Thumbnails of the photos taken at someone else's plot, so you can see the stand without walking to
    it. Drive serves a thumbnail straight from the file id; tapping opens the full picture. If the
    photos folder isn't shared with this person the image won't load, so it hides itself rather than
@@ -3848,11 +3853,26 @@ function renderCrewPlots(rows, silent){
   // Don't redraw YOUR OWN plots here — they already show as your yellow pins. Otherwise a plot you
   // collected appears twice (yellow device copy + a coloured crew copy from the Sheet), and deleting
   // the device copy leaves the crew dot behind.
+  /* …but ONLY the ones this device actually holds. The old test hid every row bearing your name,
+     which is right on the phone that collected them and wrong everywhere else: on a desktop that
+     never collected a plot, `saved` is empty and this filter removed the only copy there was, so
+     your own plots were not merely un-editable there, they were invisible. Matching on the plot's
+     own id keeps the duplicate off the phone and puts your work back on the map at the desk. */
   const me=String(cruiserEmail||"").trim().toLowerCase();
   const meName=String(cruiser||"").trim().toLowerCase();
+  const haveIds=new Set(saved.map(p=>String((p&&p._id)||"")).filter(Boolean));
+  const haveNat=new Set(saved.map(p=>p?(String(p.STANDID||"").trim().toLowerCase()+"|"+String(p.PLOTNUM||"").trim().toLowerCase()):"").filter(k=>k!=="|"));
   if(me||meName) rows=(rows||[]).filter(r=>{
     const re=String(r.email||"").trim().toLowerCase(), rn=String(r.cruiser||"").trim().toLowerCase();
-    return !((me&&re===me) || (meName&&rn===meName));
+    const isMine=(me&&re===me) || (meName&&rn===meName);
+    if(!isMine) return true;
+    const id=String(r.id||"");
+    if(id && haveIds.has(id)) return false;          // this device drew it as a yellow pin already
+    if(!id){                                          // backend too old to send an id — fall back
+      const nk=String(r.stand||"").trim().toLowerCase()+"|"+String(r.plot||"").trim().toLowerCase();
+      if(haveNat.has(nk)) return false;
+    }
+    return true;                                      // mine, but not on this device — show it
   });
   const labelled = plotLabelField!=="none";
   const pts=[];
@@ -3865,13 +3885,13 @@ function renderCrewPlots(rows, silent){
   const bounds=[];
   // pass 1: ordinary plots (small dots) — get an analyzed label when a field is chosen
   pts.forEach(p=>{ if(latest[p.who]===p) return; const col=crewColorFor(p.who);
-    const mk=L.circleMarker([p.lat,p.lon],{radius:PLOT_DOT_R,color:"#fff",weight:2.5,fillColor:col,fillOpacity:.95}).bindPopup(plotPopHtml_(p)).addTo(crewLayer);
+    const mk=L.circleMarker([p.lat,p.lon],{radius:PLOT_DOT_R,color:"#fff",weight:2.5,fillColor:col,fillOpacity:.95}).on("click",()=>openSheetPlot_(p.id,p.stand,p.plot,p)).addTo(crewLayer);
     if(labelled){ const t=plotLabelText_(p); if(t) mk.bindTooltip(t,{permanent:true,direction:"top",offset:[0,-8],className:"plot-tip"}); }
     bounds.push([p.lat,p.lon]); });
   // pass 2: each cruiser's latest plot (halo + larger dot) on top
   Object.keys(latest).forEach(who=>{ const p=latest[who], col=crewColorFor(who);
     L.circleMarker([p.lat,p.lon],{radius:13,color:col,weight:2.5,fill:false,opacity:.95}).addTo(crewLayer);
-    const m=L.circleMarker([p.lat,p.lon],{radius:8,color:"#fff",weight:3,fillColor:col,fillOpacity:1}).bindPopup(plotPopHtml_(p)).addTo(crewLayer);
+    const m=L.circleMarker([p.lat,p.lon],{radius:8,color:"#fff",weight:3,fillColor:col,fillOpacity:1}).on("click",()=>openSheetPlot_(p.id,p.stand,p.plot,p)).addTo(crewLayer);
     const tip = labelled ? plotLabelText_(p) : p.who;   // analyzed value when labelling, else cruiser name
     if(tip) m.bindTooltip(tip,{permanent:true,direction:"top",offset:[0,-11],className:labelled?"plot-tip":"crew-tip"});
     bounds.push([p.lat,p.lon]); });
@@ -6068,7 +6088,43 @@ function pcVal_(v){ return (v==null)?"":String(v).trim(); }
 function pcHas_(v){ const s=pcVal_(v); return s!=="" && s.toLowerCase()!=="none" && s!=="—"; }
 function pcRow_(label,val){ return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0"><span style="color:#7a9a76">${esc(label)}</span><span style="color:#e8f0e6;text-align:right;font-weight:600">${esc(val)}</span></div>`; }
 function pcSection_(title,inner){ if(!inner) return ""; return `<div style="margin-top:12px"><div style="font:700 12px system-ui;letter-spacing:.04em;text-transform:uppercase;color:#8fe6a0;border-bottom:1px solid #274b30;padding-bottom:4px;margin-bottom:5px">${esc(title)}</div>${inner}</div>`; }
-function plotCardHtml_(p){
+/* ── The analysed numbers, carried into the card ────────────────────────────────────────────────
+   These live only in the crew feed (plotanalysis) and were only ever visible in the small popup
+   that v334 removes. Dropping that popup without bringing these across would have quietly cost
+   the stand type, basal area, QMD, stems, volume, Plonski volume and stocking - so the card shows
+   them whenever the feed has been loaded, for your own plots as well as anyone else's. */
+const PLOTCARD_AN_=[["ft","Forest type"],["comp","Composition"],["dom","Leading species"],
+  ["ba","BA m²/ha"],["qmd","QMD cm"],["stems","Stems/ha"],["cc","Canopy closure %"],
+  ["age","Age yr"],["ht","Height m"],["ags","% AGS"],["vol","Volume m³/ha"],
+  ["cords","Cords/ha"],["plonVol","Plonski volume"],["volRatio","Volume ratio"],
+  ["stk","Stocking"],["regenClass","Regeneration"],["sapComp","Sapling composition"]];
+function pcAnalysisHtml_(an){
+  if(!an) return "";
+  let s="";
+  PLOTCARD_AN_.forEach(([k,label])=>{
+    let v=an[k];
+    if(v===""||v==null) return;
+    if(k==="age" && an.ageEst) v=String(v)+"*";
+    s+=pcRow_(label, String(v));
+  });
+  if(!s) return "";
+  if(an.ageEst) s+=`<div style="color:#7a9a76;font-size:11px;padding-top:3px">* age estimated</div>`;
+  if(an.ageNote) s+=`<div style="color:#d8c47a;font-size:11px;padding-top:3px">Age: ${esc(String(an.ageNote))}</div>`;
+  return s;
+}
+/* Find the analysed row for a plot. crewData is the WHOLE plotanalysis feed - it is cached before
+   the map filters your own plots out of it - so this works for your plots too. Match on the plot's
+   id, falling back to stand + plot number for a backend too old to send ids. */
+function anForPlot_(p){
+  if(!p || !Array.isArray(crewData) || !crewData.length) return null;
+  const id=String(p._id||"").trim();
+  if(id){ const hit=crewData.find(r=>String(r.id||"")===id); if(hit) return hit; }
+  const st=String(p.STANDID||"").trim().toLowerCase(), pn=String(p.PLOTNUM||"").trim().toLowerCase();
+  if(!st&&!pn) return null;
+  return crewData.find(r=>String(r.stand||"").trim().toLowerCase()===st
+                       && String(r.plot||"").trim().toLowerCase()===pn) || null;
+}
+function plotCardHtml_(p, an){
   const ST=["SNG","CWD","CAV","SNAG","CAVITY"];
   // Header
   let head=pcRow_("Tract / property", pcVal_(p.TRACT)||"—");
@@ -6118,6 +6174,7 @@ function plotCardHtml_(p){
       <div style="margin-top:4px;font-size:13px">${head}</div>
       <div style="margin-top:6px;color:#8fe6a0;font-weight:700">Live stems (BAF 2.0): ${live}</div>
     </div>
+    ${pcSection_("Analysis", pcAnalysisHtml_(an))}
     ${pcSection_(`Trees (${live} live)`, trees||`<div style="color:#7a9a76;padding:3px 0">No trees tallied.</div>`)}
     ${pcSection_("Regeneration", regen)}
     ${pcSection_("Shrubs & ground", ground)}
@@ -6202,13 +6259,132 @@ function plotCard(i,isAudit){
   _plotCardIdx=i; _plotCardAudit=!!isAudit;
   $("plotCardTitle").textContent=(isAudit?"Imported plot":"Plot")+" · "+(p.STANDID||"—")+" / "+(p.PLOTNUM||"?");
   setTimeout(()=>{ pcFillPhotos_(p).catch(()=>{}); },0);
-  $("plotCardBody").innerHTML=plotCardHtml_(p);
+  $("plotCardBody").innerHTML=plotCardHtml_(p, anForPlot_(p));
   $("plotCardActions").innerHTML = isAudit
     ? `<button class="btn ghost" type="button" onclick="closePlotCard()">Close</button><button class="btn ghost" type="button" onclick="plotCardMove()">📍 Move</button><button class="btn submit" type="button" onclick="plotCardEdit()">🔍 Review / edit</button>`
     : `<button class="btn ghost" type="button" onclick="closePlotCard()">Close</button><button class="btn ghost" type="button" style="color:#e9a89f" onclick="plotCardMove()">📍 Move</button><button class="btn ghost" type="button" style="color:#e9a89f" onclick="plotCardDelete()">🗑 Delete</button><button class="btn submit" type="button" onclick="plotCardEdit()">✎ Edit</button>`;
   $("plotCardModal").style.display="flex";
 }
 function closePlotCard(){ $("plotCardModal").style.display="none"; }
+
+/* ── A plot that lives on the Sheet, not on this device ─────────────────────────────────────────
+   Why this exists. `saved` is this device's localStorage and is never synced down, and
+   renderCrewPlots deliberately hides rows whose cruiser or email match this device so your own
+   plots don't appear twice. On the phone that is right — your own plots are already yellow pins.
+   On a desktop that never collected anything the two rules stack: saved is empty AND your own
+   rows are filtered out, so the ONLY dots left to tap are other cruisers', and the only thing you
+   can ever get is the small analysed popup. It reads exactly like a desktop-versus-phone
+   difference; there is no platform check anywhere in this app.
+
+   The popup cannot simply grow an Edit button. The crew feed (plotanalysis) carries 24 analysed
+   numbers and no tally at all — no trees, no regen, no ground — so there would be nothing behind
+   the button. This fetches the real FRIPLOTS row instead, one row at a time, and hands it to the
+   same card the phone uses. ─────────────────────────────────────────────────────────────────── */
+let _sheetPlot=null;                 // {id, submitted, plot} fetched from the Sheet, or null
+/* `an` is the analysed row the dot was drawn from. It is passed in so that a plot can still be
+   opened with no signal: the tally needs the network, these numbers are already in hand. */
+let _sheetAn=null;                   // the analysed row the dot was drawn from, kept for a retry
+function openSheetPlot_(id, stand, plot, an){
+  try{ fmap&&fmap.closePopup(); }catch(e){}
+  /* A retry comes back through here without the analysed row, so hold on to it rather than
+     letting the second attempt fall back to a bare toast after the first showed a card. */
+  if(an) _sheetAn=an; else an=_sheetAn;
+  if(!connected || isOffline()){ plotCardOffline_(an, "No signal"); return; }
+  toast("Fetching the plot…");
+  const q = id ? ("action=plotrow&id="+encodeURIComponent(id))
+               : ("action=plotrow&stand="+encodeURIComponent(stand||"")+"&plot="+encodeURIComponent(plot||""));
+  jsonp_(q, r=>{
+    if(!r || !r.ok || !r.plot){
+      /* Still open the card. Falling back to a toast would put the crew back where they started -
+         a dot they cannot see into - and out in the bush a dropped request is the normal case,
+         not the exception. Show what the map already knows and say what is missing. */
+      plotCardOffline_(an, (r&&r.error==="not found")
+        ? "That plot is no longer in the Sheet"
+        : (r ? "The Sheet did not have it — the backend may need redeploying (New version)"
+             : "Couldn't reach the Sheet"));
+      return;
+    }
+    _sheetPlot={id:String(r.id||""), submitted:String(r.submitted||""), plot:r.plot, an:an||null};
+    plotCardSheet_();
+  }, 25000);
+}
+/* The same card, built from the analysed row alone, when the tally could not be fetched. No Edit
+   button: there is nothing loaded to edit, and offering one would invite an edit that overwrites a
+   full row with a blank one. */
+function plotCardOffline_(an, why){
+  an=an||_sheetAn;
+  if(!an){ toast(why||"Couldn't open that plot", true); return; }
+  _sheetPlot=null; _plotCardIdx=null; _plotCardAudit=false;
+  $("plotCardTitle").textContent="Plot · "+(an.stand||"—")+" / "+(an.plot||"?");
+  const rows=pcAnalysisHtml_(an);
+  const who=String(an.cruiser||"").trim()||shortEmail_(an.email)||"";
+  let head=pcRow_("Date", String(an.date||"").replace("T"," ").slice(0,16)||"—");
+  if(who) head+=pcRow_("Collector", who);
+  if(isFinite(parseFloat(an.lat))&&isFinite(parseFloat(an.lon)))
+    head+=pcRow_("GPS", parseFloat(an.lat).toFixed(5)+", "+parseFloat(an.lon).toFixed(5));
+  $("plotCardBody").innerHTML=`<div style="font-size:14px">
+    <div style="background:#14251a;border:1px solid #274b30;border-radius:10px;padding:10px;margin-bottom:6px">
+      <div style="font:700 16px system-ui;color:#eaf3e8">${esc(an.stand||"—")} · plot ${esc(an.plot||"?")}</div>
+      <div style="margin-top:4px;font-size:13px">${head}</div>
+    </div>
+    <div style="color:#e9c46a;background:#2a2412;border:1px solid #6b5a22;border-radius:7px;padding:8px 10px;margin-bottom:6px;font-size:12px;line-height:1.45">
+      ${esc(why||"The tally could not be loaded")} — showing the analysed figures only.
+      The trees, regen and ground records need a connection to the Sheet.</div>
+    ${pcSection_("Analysis", rows)}
+    ${crewPhotoHtml_(an)}
+  </div>`;
+  $("plotCardActions").innerHTML=`<button class="btn ghost" type="button" onclick="closePlotCard()">Close</button>`+
+    (connected&&!isOffline()
+      ? `<button class="btn submit" type="button" onclick="openSheetPlot_('${esc(an.id||"")}','${esc(an.stand||"")}','${esc(an.plot||"")}')">↻ Try again</button>`
+      : "");
+  $("plotCardModal").style.display="flex";
+}
+function plotCardSheet_(){
+  const s=_sheetPlot; if(!s) return;
+  const p=s.plot;
+  _plotCardIdx=null; _plotCardAudit=false;
+  $("plotCardTitle").textContent="Plot · "+(p.STANDID||"—")+" / "+(p.PLOTNUM||"?")+" · from the Sheet";
+  setTimeout(()=>{ pcFillPhotos_(p).catch(()=>{}); },0);
+  $("plotCardBody").innerHTML=plotCardHtml_(p, s.an || anForPlot_(Object.assign({_id:s.id},p)));
+  const mine=sheetPlotIsMine_(p);
+  const who=String(p.CRUISER||"").trim()||shortEmail_(p.CRUISER_EMAIL)||"someone else";
+  const banner = mine ? "" :
+    `<div style="color:#e9c46a;background:#2a2412;border:1px solid #6b5a22;border-radius:7px;`+
+    `padding:8px 10px;margin-bottom:9px;font-size:12px;line-height:1.45">`+
+    `Collected by <b>${esc(who)}</b>, not on this device. You can edit it, but if ${esc(who)}'s `+
+    `device sends its copy again afterwards it will overwrite your changes without warning.</div>`;
+  $("plotCardActions").innerHTML = banner +
+    `<button class="btn ghost" type="button" onclick="closePlotCard()">Close</button>`+
+    `<button class="btn submit" type="button" onclick="sheetPlotEdit_()">✎ Edit</button>`;
+  $("plotCardModal").style.display="flex";
+}
+function sheetPlotIsMine_(p){
+  const me=String(cruiserEmail||"").trim().toLowerCase(), meName=String(cruiser||"").trim().toLowerCase();
+  const re=String(p.CRUISER_EMAIL||"").trim().toLowerCase(), rn=String(p.CRUISER||"").trim().toLowerCase();
+  return !!((me&&re===me) || (meName&&rn===meName));
+}
+/* Bring the Sheet's copy onto this device and open it in the ordinary editor. Once it is in
+   `saved` it is an ordinary plot — Move, Delete and re-send all work on it as usual. It is marked
+   _sent because it IS already in the Sheet; editing clears that flag the same way editing any
+   other plot does, so it queues for the next send rather than going twice. */
+function sheetPlotEdit_(){
+  const s=_sheetPlot; if(!s) return;
+  const rec=Object.assign({}, s.plot);
+  rec._id = s.id || rec._id || genId();
+  rec._sent = true;
+  rec._fromSheet = s.submitted || "";     // what the row looked like when we pulled it
+  closePlotCard();
+  const at=saved.findIndex(q=>q && String(q._id||"")===String(rec._id));
+  if(at>=0){
+    /* Already here — a second pull would create a duplicate that the upsert would then fight
+       with. Keep the device's copy; it may hold edits that have not been sent yet. */
+    toast("Already on this device — opening your copy");
+    editFromMap(at); return;
+  }
+  saved.push(rec); persist(); renderSaved();
+  try{ if(fmap) renderMapPins(); }catch(e){}
+  editFromMap(saved.length-1);
+}
 /* ── Move a plot ───────────────────────────────────────────────────────────────
    A plot recorded at the wrong spot — GPS drift under canopy, or a plot dropped from the truck and
    walked to afterwards — could only be fixed by deleting and re-entering it, losing the tally. This
@@ -7589,6 +7765,41 @@ function dlShp_(base,shp,shx,dbf){
   const blob=new Blob([zip],{type:"application/zip"}), url=URL.createObjectURL(blob), a=document.createElement("a");
   a.href=url; a.download=base+".zip"; document.body.appendChild(a); a.click(); a.remove();
   driveSave_(blob,a.download,"shapefile"); setTimeout(()=>URL.revokeObjectURL(url),1500);
+  offerMailExport_(base);
+}
+/* A browser download is the least useful of the three places this file can go when you are holding
+   a phone: it lands somewhere iOS will not show you, and a shapefile is no use on a phone anyway -
+   it is wanted at a desk, in ArcGIS. The copy in Drive has always been made; this offers the third
+   route, which is the one actually asked for. Offered rather than automatic, so a crew member
+   exporting a track all afternoon is not mailed twenty zips. */
+function offerMailExport_(base){
+  if(!connected || isOffline()) return;
+  const to=String(cruiserEmail||"").trim();
+  setTimeout(()=>{
+    showInfoSheet_("Export ready",
+      `<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:10px">`+
+      `<b style="color:#e8f0e6">${esc(base)}.zip</b><br>Downloaded, and saved to the Drive folder `+
+      `"FRI Map Exports". Shapefiles are zipped and projected to UTM 17N (NAD83).</div>`+
+      (to
+        ? `<button type="button" onclick="mailExport_('${esc(base)}')" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">&#128231; Email it to me<div style="color:#8fae95;font-size:11px;margin-top:2px">${esc(to)}</div></button>`
+        : `<div style="color:#e9c46a;font-size:12px;line-height:1.45">To have it emailed, set your address under "Entered by" on the form first.</div>`)+
+      `<div style="color:#5a7a62;font-size:11px;margin-top:8px;line-height:1.4">The Drive copy is there either way - FRI Tools, Map exports, on the Sheet.</div>`);
+  }, 400);   // let the download finish starting before covering the map
+}
+function mailExport_(base){
+  closeInfoSheet_();
+  const to=String(cruiserEmail||"").trim();
+  if(!to){ toast("Set your email under \"Entered by\" first",true); return; }
+  toast("Asking the Sheet to email it…");
+  /* The upload is a no-cors POST the app cannot read, so the file may not have finished landing in
+     Drive yet. Give it a moment, then ask - and if it is not there yet, say so plainly instead of
+     reporting a success nobody can see. */
+  setTimeout(()=>{
+    jsonp_("action=mailexport&to="+encodeURIComponent(to)+"&base="+encodeURIComponent(base), r=>{
+      if(r && r.ok) toast("Emailed to "+to);
+      else toast((r && r.error) ? ("Couldn't email it: "+r.error) : "Couldn't reach the Sheet to email it", true);
+    }, 30000);
+  }, 2500);
 }
 
 /* ---- import reference points / lines / polygons (shapefile, GeoJSON, GPX) ---- */
