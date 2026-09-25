@@ -1124,7 +1124,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-25 · v342";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-25 · v344";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1279,10 +1279,45 @@ function shrubSelect(s){
 function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function pad(n){ return String(n).padStart(2,"0"); }
 function nowStr(){ const d=new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }
-function setNow(){ $("DATE").value=nowStr(); }
+/* The date the plot carried when it was opened for editing, in export form. If the
+   picker ever hands back a blank — v344 fixed the shape that caused it, but this is
+   the belt to that fix's braces — collect() puts this back rather than writing an
+   empty DATE over a real one, and validatePlot says so. Cleared by setNow(), which is
+   what every fresh-plot path calls. Declared here, above its first use, not beside
+   collect(): `let` is not hoisted, so setNow() would hit the temporal dead zone. */
+let dateOnLoad_="", dateRestored_=false;
+function setNow(){ $("DATE").value=nowStr(); dateOnLoad_=""; }   // fresh plot: nothing to restore
 // DATE: the picker uses datetime-local ("…T…"); the FRIPLOTS export uses a space ("YYYY-MM-DD HH:MM:SS").
-function dateForExport(v){ return (v||"").replace("T"," "); }
-function dateForInput(v){ v=v||""; return v.includes("T")?v:v.replace(" ","T"); }
+/* A datetime-local input normalises its own value to the SHORTEST form, so a time whose
+   seconds are zero reads back as "…T00:00" with no seconds at all. Left alone that puts
+   two shapes in the DATE column. Put the seconds back here, where the app-format string
+   is made, so the column stays one shape. (natDate_ in Code.gs absorbs both regardless,
+   so this is tidiness, not correctness.) */
+function dateForExport(v){
+  v=String(v==null?"":v).trim().replace("T"," ");
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(v) ? v+":00" : v;
+}
+/* A datetime-local input silently REFUSES anything that is not a plain local date-time:
+   a trailing "Z" or ±hh:mm, or an hour written with one digit, and the field goes blank
+   with no error. Both shapes arrive from the Sheet — it stores DATE as a real date cell
+   (the app writes text and Sheets converts it), and the feed sends that back through
+   toISOString(). Before v344 the blank field was then saved straight over the real date.
+
+   A zoned string is an instant, so it is converted to THIS DEVICE's local time rather
+   than having its digits chopped — chopping the Z would have put every plot 4-5 hours out. */
+function dateForInput(v){
+  v=String(v==null?"":v).trim(); if(!v) return "";
+  const p=n=>String(n).padStart(2,"0");
+  if(/([Zz]|[+\-]\d{2}:?\d{2})$/.test(v)){                       // zoned → real instant → local
+    const d=new Date(v);
+    if(!isNaN(d.getTime()))
+      return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"T"+
+             p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds());
+  }
+  const m=/^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(v);
+  if(m) return m[1]+"-"+p(m[2])+"-"+p(m[3])+"T"+p(m[4])+":"+m[5]+":"+(m[6]||"00");
+  return v.includes("T")?v:v.replace(" ","T");                   // leave anything else alone
+}
 
 /* Device autosave: persists your saved plots on this device so the list (and Edit)
    survive reloads on your live site. Storage is reached via a computed key and a
@@ -1917,6 +1952,8 @@ function collect(){
   const spv=v=>v===ADD_SENTINEL?"":v;
   SIMPLE.forEach(k=>{ d[k]=($(k)?$(k).value:"")||""; });
   d.DATE=dateForExport(d.DATE);
+  dateRestored_=false;
+  if(!d.DATE && dateOnLoad_){ d.DATE=dateOnLoad_; dateRestored_=true; }   // never blank a real date
   if(d.TRACT===ADD_TRACT) d.TRACT=""; else if(d.TRACT) addTract(d.TRACT);
   if(d.STANDID===ADD_STAND) d.STANDID=""; else if(d.STANDID) addStand(d.STANDID);
   for(const id in ADDABLE){ if(d[id]===ADDABLE[id].sentinel) d[id]=""; else if(d[id]) addableAdd(id,d[id]); }
@@ -1952,6 +1989,7 @@ function loadPlot(d){
   currentPhotoNames = String(d.PHOTOS||"").split(/;\s*/).filter(Boolean);
   SIMPLE.forEach(k=>{ setField($(k), d[k]!==undefined ? d[k] : ""); });
   $("DATE").value=dateForInput(d.DATE);
+  dateOnLoad_=dateForExport(dateForInput(d.DATE));   // remember it independently of the picker
   if(d.TRACT) addTract(d.TRACT);
   tractSelect(); setSel($("TRACT"), (d.TRACT&&d.TRACT!==ADD_TRACT)?d.TRACT:"");
   if(d.STANDID) addStand(d.STANDID);
@@ -4366,6 +4404,12 @@ function validatePlot(d){
     if(!String(d.STANDID||"").trim() || d.STANDID==="-") blocks.push({m:"Stand ID is required.",f:"STANDID"});
     if(!String(d.PLOTNUM||"").trim()) blocks.push({m:"Plot number is required.",f:"PLOTNUM"});
   }
+  // DATE was checked by nothing at all before v344, which is how two plots reached the
+  // Sheet with a blank date and nobody noticed until the data was audited.
+  if(dateRestored_)
+    warns.push({m:"The date field was blank, so the plot's own date ("+dateOnLoad_.slice(0,16)+") has been kept.",f:"DATE"});
+  else if(!String(d.DATE||"").trim())
+    warns.push({m:"No date on this plot. Press “Now”, or set it from the field notes.",f:"DATE"});
   if(!d.X || !d.Y) warns.push({m:"No GPS location captured (X/Y empty)."});
   const n = d._trees!=null ? d._trees : treeCount();
   if(!n) warns.push({m:"No trees tallied — is this an empty / non-forested plot?",f:"treeRows"});
