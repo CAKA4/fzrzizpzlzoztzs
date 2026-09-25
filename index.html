@@ -931,12 +931,19 @@
       </details>
 
       <details class="mgroup"><summary>📤 Send &amp; export</summary>
-        <button type="button" onclick="closeMore();openReportModal()">📧 Email analysis report — Excel / PDF (by property)</button>
+        <!-- This used to read "Email analysis report — Excel / PDF" and sat at the top of the group,
+             the only item with an envelope on it. Someone wanting their shapefiles emailed pressed it,
+             because it is the button that says "Email", and got a spreadsheet. The shapefile items
+             below do offer email, but only afterwards, in the panel that appears once the file is
+             built — which is easy to miss and impossible to guess from here. Moved down, renamed for
+             what it actually attaches, and the shapefile group now says where its email lives. -->
         <button type="button" onclick="closeMore();exportPlotsRawShp()">📋 All plot data → shapefile (every column)</button>
         <button type="button" onclick="closeMore();exportPlotsFullSummaryShp()">📊 All plots + full summary → shapefile</button>
         <button type="button" onclick="closeMore();exportPlotsAnalysisShp('main')">📍 Plots + short analysis → shapefile</button>
         <button type="button" onclick="closeMore();exportCompartmentsAnalysisShp('main')">⬠ Compartments + analysis → shapefile</button>
         <button type="button" onclick="closeMore();exportTractMapsPdf()">🗺 Tract maps → PDF (one page per tract)</button>
+        <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:6px 2px 8px">Each of the five above downloads to this device, then offers to email it to you once it has reached Drive.</div>
+        <button type="button" onclick="closeMore();openReportModal()">📗 Email the Excel workbook or PDF report (not shapefiles)</button>
         <button type="button" onclick="closeMore();openMapFiles()">🗂 Map files on Drive — tracks, routes, areas</button>
         <button type="button" onclick="closeMore();openCompRpt()">📄 Compartment PDF reports — one, a tract, or all</button>
       </details>
@@ -1124,7 +1131,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-25 · v344";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-25 · v348";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -7477,11 +7484,17 @@ function driveSave_(blob,name,kind){
           toast("Saved to this device only — too big for Drive, so it cannot be emailed either",true);
           return;
         }
+        /* mode:"no-cors" makes fetch resolve with an OPAQUE response whatever the server did —
+           200, 500, a login redirect, or a deployment that no longer exists all look identical,
+           and .catch only fires for a transport error. So the old ".then(() => 'Saved to Drive
+           as well')" was not a result; it was an assertion, and it was wrong for a whole day
+           while nothing at all was reaching Drive. Nothing is claimed here now: whether the file
+           arrived is established by mapfileConfirm_, which asks the Sheet. */
         fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
           body:JSON.stringify({_action:"mapfile", name:name, kind:kind||"export",
             mime:(blob.type||"application/octet-stream"), data:b64,
             cruiser:(cruiser||""), email:(cruiserEmail||"")})})
-          .then(()=>toast("Saved to Drive as well")).catch(()=>{});
+          .catch(()=>{});
       }catch(e){}
     };
     fr.readAsDataURL(blob);
@@ -7936,18 +7949,60 @@ function dlShp_(base,shp,shx,dbf){
    it is wanted at a desk, in ArcGIS. The copy in Drive has always been made; this offers the third
    route, which is the one actually asked for. Offered rather than automatic, so a crew member
    exporting a track all afternoon is not mailed twenty zips. */
+/* Did the upload actually land? The POST is no-cors, so the app cannot read its reply — but the
+   Sheet will happily say. `mapfiles` has existed since long before any of this and simply lists the
+   export log, so asking it needs no new backend and works on any deployment old enough to serve the
+   app at all. Polls because the upload and the Drive write take a few seconds.
+   cb(true, item) once the file appears; cb(false, why) when it never does. */
+function mapfileConfirm_(base, cb){
+  if(!connected || isOffline()){ cb(false,"offline"); return; }
+  let tries=0; const MAX=20;
+  const ask=()=>{
+    tries++;
+    jsonpAction_("mapfiles", r=>{
+      const items=(r&&r.items)||[];
+      const hit=items.filter(it=>String(it&&it.name||"").indexOf(base)>=0)[0];
+      if(hit){ cb(true,hit); return; }
+      if(!r){ cb(false, tries>=MAX ? "unreachable" : "retry"); if(tries<MAX) setTimeout(ask,3000); return; }
+      /* The backend records why an upload threw, because the POST that threw was no-cors and
+         could not say so itself. If it names THIS file, stop waiting — it is never coming. */
+      const le=r.lastError;
+      if(le && String(le.name||"").indexOf(base)>=0 && le.error){ cb(false, "failed: "+le.error); return; }
+      if(tries>=MAX){ cb(false, (le&&le.error) ? ("failed: "+le.error) : "never arrived"); return; }
+      setTimeout(ask,3000);
+    });
+  };
+  setTimeout(ask,2500);
+}
 function offerMailExport_(base){
   if(!connected || isOffline()) return;
   const to=String(cruiserEmail||"").trim();
   setTimeout(()=>{
     showInfoSheet_("Export ready",
       `<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:10px">`+
-      `<b style="color:#e8f0e6">${esc(base)}.zip</b><br>Downloaded, and saved to the Drive folder `+
-      `"FRI Map Exports". Shapefiles are zipped and projected to UTM 17N (NAD83).</div>`+
+      `<b style="color:#e8f0e6">${esc(base)}.zip</b><br>Downloaded to this device. `+
+      `Shapefiles are zipped and projected to UTM 17N (NAD83).`+
+      `<div id="expDrive" style="margin-top:6px;color:#8fae95">Checking whether it reached Drive…</div></div>`+
       (to
         ? `<button type="button" onclick="mailExport_('${esc(base)}')" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">&#128231; Email it to me<div style="color:#8fae95;font-size:11px;margin-top:2px">${esc(to)}</div></button>`
         : `<div style="color:#e9c46a;font-size:12px;line-height:1.45">To have it emailed, set your address under "Entered by" on the form first.</div>`)+
-      `<div style="color:#5a7a62;font-size:11px;margin-top:8px;line-height:1.4">The Drive copy is there either way - FRI Tools, Map exports, on the Sheet.</div>`);
+      `<div style="color:#5a7a62;font-size:11px;margin-top:8px;line-height:1.4">The download on this device is yours either way.</div>`);
+    /* Then say what is true rather than what was hoped. */
+    mapfileConfirm_(base, (ok, info)=>{
+      const el=$("expDrive"); if(!el) return;
+      if(ok){
+        el.style.color="#7fd0a0";
+        el.innerHTML=`&#10003; In Drive, folder "FRI Map Exports"`+(info&&info.kb?` &middot; ${esc(String(info.kb))} KB`:"");
+        return;
+      }
+      el.style.color="#e9c46a";
+      const why=String(info||"");
+      el.innerHTML = (why==="unreachable" || why==="offline")
+        ? `&#9888; Could not reach the Sheet, so it is <b>not</b> in Drive — and cannot be emailed. The download on this device is unaffected.`
+        : why.indexOf("failed: ")===0
+          ? `&#9888; Drive refused it, so it cannot be emailed:<br><span style="color:#e8f0e6">${esc(why.slice(8))}</span>`
+          : `&#9888; It did <b>not</b> reach Drive, so it cannot be emailed. The Sheet answered but the file never arrived — check Drive storage, then FRI Tools &rsaquo; Map exports.`;
+    });
   }, 400);   // let the download finish starting before covering the map
 }
 /* The file reaches Drive over a no-cors POST the app cannot read a reply from, so the app never
@@ -7958,11 +8013,37 @@ function offerMailExport_(base){
 
    Now it keeps asking - every 3 seconds for a minute - and only gives up when the file genuinely
    never appears. "not yet" is not an error; it is the normal first few answers. */
+/* The backend build that first answered action=mailexport. */
+const MAILEXPORT_MIN_ = 335;
+/* A toast clears itself after about two seconds, which is not long enough to read an instruction
+   with a menu path in it — so the reason goes in the info sheet, which stays until it is dismissed.
+   The export itself is unaffected either way: it is already in Drive under "FRI Map Exports". */
+/* `inDrive` says whether the file is known to have reached Drive. It matters: when the upload is
+   the thing that failed, telling the user the file is safely in Drive is worse than saying nothing,
+   and pointing them at an add-on that mails Drive files cannot help either. The footer used to
+   assert both unconditionally. */
+function mailExportFailed_(msg, inDrive){
+  showInfoSheet_("Couldn't email the export",
+    `<div style="font-size:13px;line-height:1.5;color:#e8f0e6">${msg}</div>`+
+    `<div style="font-size:12px;line-height:1.5;color:#8fae95;margin-top:12px">`+
+    (inDrive===false
+      ? `The copy downloaded to this device is fine — you can move it off the phone yourself. `+
+        `Nothing in Drive can be emailed until the upload works.`
+      : `The export itself is in your Drive folder <b>FRI Map Exports</b>.<br><br>`+
+        `To email it without updating the backend, open the Sheet, then Extensions › Apps Script, `+
+        `and run <b>friEmailExports</b> from the add-on.`)+
+    `</div>`);
+}
 function mailExport_(base){
   closeInfoSheet_();
   const to=String(cruiserEmail||"").trim();
   if(!to){ toast("Set your email under \"Entered by\" first",true); return; }
   if(!connected || isOffline()){ toast("Need a connection to email it",true); return; }
+  /* mailexport arrived in v335. If the deployed script is already known to be older, say so now
+     rather than retrying for a minute and then blaming the connection. Returns "" when the build
+     is not yet known, in which case the exhaustion branch below finds out. */
+  const stale_=staleBackendMsg_(MAILEXPORT_MIN_);
+  if(stale_){ mailExportFailed_(stale_); return; }
   let tries=0; const MAX=20;
   toast("Uploading, then emailing it…");
   const ask=()=>{
@@ -7977,7 +8058,21 @@ function mailExport_(base){
         return;
       }
       if(tries>=MAX){
-        toast(err ? ("Couldn't email it: "+err) : "Couldn't reach the Sheet to email it", true);
+        /* Silence cannot distinguish "no signal" from "the deployed script has never heard of this
+           request" — both are a callback that never fires. backendFailMsg_ probes an endpoint that
+           has existed since the beginning and says which of the two it is. Before v345 this said
+           "Couldn't reach the Sheet", which reads as a connection fault and sent nobody to the one
+           place that fixes it: Deploy › Manage deployments › New version. */
+        /* "no export named X" / "nothing exported yet" is not a mail fault at all: the Sheet is
+           answering perfectly well and telling us the file is not in its export log, i.e. the
+           upload never landed. Naming that as a mail failure sent a whole day of debugging at the
+           wrong end of the pipe. */
+        if(/no export named|nothing exported/i.test(err))
+          mailExportFailed_("The Sheet is reachable, but this export never reached Drive, so there is "+
+            "nothing to attach. The upload failed, not the email. "+
+            "Check Drive storage, then FRI Tools › Map exports to see what did arrive.", false);
+        else if(err) mailExportFailed_("The Sheet answered but refused: "+esc(err));
+        else backendFailMsg_(MAILEXPORT_MIN_, m=>mailExportFailed_(m));
         return;
       }
       if(tries===3) toast("Still uploading — a large shapefile takes a moment…");
