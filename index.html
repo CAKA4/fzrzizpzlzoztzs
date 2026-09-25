@@ -936,6 +936,7 @@
         <button type="button" onclick="closeMore();exportPlotsFullSummaryShp()">📊 All plots + full summary → shapefile</button>
         <button type="button" onclick="closeMore();exportPlotsAnalysisShp('main')">📍 Plots + short analysis → shapefile</button>
         <button type="button" onclick="closeMore();exportCompartmentsAnalysisShp('main')">⬠ Compartments + analysis → shapefile</button>
+        <button type="button" onclick="closeMore();exportTractMapsPdf()">🗺 Tract maps → PDF (one page per tract)</button>
         <button type="button" onclick="closeMore();openMapFiles()">🗂 Map files on Drive — tracks, routes, areas</button>
         <button type="button" onclick="closeMore();openCompRpt()">📄 Compartment PDF reports — one, a tract, or all</button>
       </details>
@@ -1123,7 +1124,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-25 · v340";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-25 · v342";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -7940,6 +7941,397 @@ function mailExport_(base){
     }, 25000);
   };
   setTimeout(ask, 2000);
+}
+
+/* ── Tract map PDFs ─────────────────────────────────────────────────────────────────────────────
+   One page per tract: the satellite imagery you see on the map, the compartment boundaries drawn
+   over it, every plot as a numbered dot, and labels placed so they do not sit on top of each other.
+
+   Why a raster page rather than vector text: the basemap is imagery, so the page is a picture
+   whatever happens. Drawing everything into one high-resolution canvas and wrapping that in a PDF
+   gives complete control over where each label lands - which is the hard part of a map - and
+   prints identically to what the screen showed. The canvas is rendered at 2x the page pixel size
+   so the labels stay sharp on paper.
+────────────────────────────────────────────────────────────────────────────────────────────────── */
+const TMAP_W = 1100, TMAP_H = 850;          // page drawing area, CSS px (landscape letter-ish)
+/* Everything below is authored in CSS px against a TMAP_W x TMAP_H page and multiplied by
+   TMAP_SCALE when drawn, so the canvas is supersampled and text stays sharp on paper. Sizes are
+   written as `n*TMAP_SCALE` - an earlier version wrote `n*TMAP_SCALE/2`, which cancelled out and
+   rendered every label and line at half the intended size on the page. */
+const TMAP_SCALE = 2;
+const TMAP_PAD = 0.12;                       // extra margin around the features, as a fraction
+const TMAP_MAXTILES = 90;                    // ceiling on tiles per page, so a big tract cannot stall
+
+/* Web Mercator: lat/lon -> absolute pixel at zoom z (256 px tiles). */
+function tmapPx_(lat, lon, z){
+  const n = 256 * Math.pow(2, z);
+  const x = (lon + 180) / 360 * n;
+  const s = Math.sin(lat * Math.PI / 180);
+  const y = (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n;
+  return {x, y};
+}
+function tmapLoadImg_(url){
+  return new Promise(res => {
+    const im = new Image();
+    im.crossOrigin = "anonymous";          // the map layer already requests tiles this way
+    im.onload = () => res(im);
+    im.onerror = () => res(null);          // a missing tile leaves a blank square, never a failed page
+    im.src = url;
+  });
+}
+
+/* ── Label placement ────────────────────────────────────────────────────────────────────────────
+   Greedy, in priority order. Each label tries a ring of candidate positions at increasing distance
+   from its feature; the first that hits nothing already placed wins. Anything pushed beyond the
+   "touching" distance gets a leader line back to its feature, so a displaced label still reads
+   unambiguously. A label that cannot be placed anywhere inside the frame is dropped rather than
+   drawn on top of another - an unreadable overlap is worse than a missing number, and the plot dot
+   is still there to be seen.  Returns [{x,y,w,h,text,leader:{x,y}|null,item}]. */
+function tmapPlaceLabels_(items, W, H, ctx){
+  const placed = [];
+  const hit = (a) => {
+    if (a.x < 2 || a.y < 2 || a.x + a.w > W - 2 || a.y + a.h > H - 2) return true;
+    for (let i = 0; i < placed.length; i++){
+      const b = placed[i];
+      if (a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y) return true;
+    }
+    return false;
+  };
+  const RING = [ [1,0],[ -1,0],[0,-1],[0,1],[1,-1],[-1,-1],[1,1],[-1,1] ];
+  const sorted = items.slice().sort((p,q) => (q.pri||0) - (p.pri||0));
+  sorted.forEach(it => {
+    ctx.font = it.font;
+    const w = ctx.measureText(it.text).width + 8, h = it.size + 6;
+    let best = null, leader = false;
+    /* distance 0 is "right where the feature is" - only offered to compartment labels, which sit
+       inside their own polygon and have nothing to collide with there. */
+    const dists = it.centre ? [0, it.gap, it.gap*2, it.gap*3.5, it.gap*5, it.gap*7, it.gap*10]
+                            : [it.gap, it.gap*1.8, it.gap*3, it.gap*4.5, it.gap*6.5, it.gap*9];
+    for (let di = 0; di < dists.length && !best; di++){
+      const d = dists[di];
+      if (d === 0){
+        const c = {x: it.x - w/2, y: it.y - h/2, w, h};
+        if (!hit(c)) { best = c; }
+        continue;
+      }
+      for (let ri = 0; ri < RING.length; ri++){
+        const dx = RING[ri][0], dy = RING[ri][1];
+        const cx = it.x + dx * d, cy = it.y + dy * d;
+        const c = {x: cx - w/2, y: cy - h/2, w, h};
+        if (!hit(c)){ best = c; leader = d > it.gap * 2; break; }
+      }
+    }
+    if (!best) return;                     // nowhere to put it - leave it off
+    placed.push(best);
+    best.text = it.text; best.item = it;
+    best.leader = leader ? {x: it.x, y: it.y} : null;
+  });
+  return placed;
+}
+
+/* Which compartments and plots belong to each tract. Boundaries are grouped by the tract field when
+   one has been chosen in Layers; otherwise a compartment inherits the tract of the plots inside it,
+   which is how the Sheet has always related the two. */
+function tmapGroupByTract_(){
+  const feats = (BOUND && BOUND.features) ? BOUND.features : [];
+  const plots = [];
+  const push = (p, src) => {
+    const lat = parseFloat(p.Y), lon = parseFloat(p.X);
+    if (!(isFinite(lat) && isFinite(lon) && (lat !== 0 || lon !== 0))) return;
+    plots.push({lat, lon, stand: String(p.STANDID||"").trim(), num: String(p.PLOTNUM||"").trim(),
+                tract: String(p.TRACT||"").trim(), src});
+  };
+  saved.forEach(p => push(p, "field"));
+  auditPlots.forEach(p => push(p, "imported"));
+  /* crewData is the whole analysed feed, so a device that did not collect a plot still maps it. */
+  if (Array.isArray(crewData)) crewData.forEach(r => {
+    const lat = parseFloat(r.lat), lon = parseFloat(r.lon);
+    if (!(isFinite(lat) && isFinite(lon))) return;
+    const key = String(r.stand||"").trim() + "|" + String(r.plot||"").trim();
+    if (plots.some(p => (p.stand + "|" + p.num) === key)) return;
+    plots.push({lat, lon, stand: String(r.stand||"").trim(), num: String(r.plot||"").trim(),
+                tract: "", src: r.src === "imported" ? "imported" : "field"});
+  });
+
+  const standTract = {};
+  plots.forEach(p => { if (p.stand && p.tract && !standTract[p.stand.toLowerCase()]) standTract[p.stand.toLowerCase()] = p.tract; });
+
+  const byTract = {};
+  const add = (t, key, val) => { const k = t || "(no tract)"; (byTract[k] = byTract[k] || {comps:[], plots:[]})[key].push(val); };
+  feats.forEach(f => {
+    const props = f.properties || {};
+    const stand = standField ? String(props[standField]||"").trim() : "";
+    let tract = tractField ? String(props[tractField]||"").trim() : "";
+    if (!tract && stand) tract = standTract[stand.toLowerCase()] || "";
+    const rings = featureRings_(f);
+    if (!rings.length) return;
+    add(tract, "comps", {stand, rings});
+  });
+  plots.forEach(p => {
+    let t = p.tract || standTract[p.stand.toLowerCase()] || "";
+    add(t, "plots", p);
+  });
+  return byTract;
+}
+
+/* Draw one tract onto a canvas and hand back the JPEG bytes. */
+async function tmapRender_(tract, group, onNote){
+  const pts = [];
+  group.comps.forEach(c => c.rings.forEach(r => r.forEach(pt => pts.push(pt))));
+  group.plots.forEach(p => pts.push([p.lat, p.lon]));
+  if (!pts.length) return null;
+  let latMin=1/0, latMax=-1/0, lonMin=1/0, lonMax=-1/0;
+  pts.forEach(p => { latMin=Math.min(latMin,p[0]); latMax=Math.max(latMax,p[0]);
+                     lonMin=Math.min(lonMin,p[1]); lonMax=Math.max(lonMax,p[1]); });
+  const dLat = Math.max(latMax-latMin, 1e-4), dLon = Math.max(lonMax-lonMin, 1e-4);
+  latMin -= dLat*TMAP_PAD; latMax += dLat*TMAP_PAD;
+  lonMin -= dLon*TMAP_PAD; lonMax += dLon*TMAP_PAD;
+
+  const W = TMAP_W*TMAP_SCALE, H = TMAP_H*TMAP_SCALE;
+  const MAPTOP = 78*TMAP_SCALE, MAPBOT = 46*TMAP_SCALE;      // title band and footer
+  const mapH = H - MAPTOP - MAPBOT, mapW = W;
+
+  /* Pick the FINEST zoom whose tile grid is still affordable, then scale the drawing so the
+     features fill the frame.
+
+     The first version chose the largest zoom at which the extent was smaller than the page and
+     drew it 1:1. Because zoom levels double, that left up to half the page empty around the
+     compartments - a map of mostly trees with the subject in the middle. Choosing by tile budget
+     and then scaling to fit uses the whole page, and because the imagery is usually being shrunk
+     rather than magnified it comes out sharper too. */
+  let z = 19;
+  for (; z > 8; z--){
+    const a = tmapPx_(latMax, lonMin, z), b = tmapPx_(latMin, lonMax, z);
+    const w = Math.abs(b.x-a.x), h = Math.abs(b.y-a.y);
+    /* The frame is filled by the extent, so the tiles needed are the EXTENT's own size in tile
+       pixels - not the page's. Measuring the page instead cancelled the zoom out of the formula
+       entirely and every map came back at zoom 19 regardless of how large the tract was. */
+    const tiles = Math.ceil(w/256 + 2) * Math.ceil(h/256 + 2);
+    if (tiles <= TMAP_MAXTILES) break;
+  }
+
+  const tl = tmapPx_(latMax, lonMin, z), br = tmapPx_(latMin, lonMax, z);
+  const extW = Math.abs(br.x-tl.x), extH = Math.abs(br.y-tl.y);
+  const S = Math.min(mapW/extW, mapH/extH);            // draw scale: <1 shrinks (sharp), >1 magnifies
+  const cx = (tl.x+br.x)/2, cy = (tl.y+br.y)/2;        // centre of the features, in tile pixels
+  /* every projection goes through here, so tiles, polygons, plots and labels cannot drift apart */
+  const toPx = (lat, lon) => { const p = tmapPx_(lat, lon, z);
+    return {x: (p.x-cx)*S + mapW/2, y: (p.y-cy)*S + mapH/2 + MAPTOP}; };
+  const originX = cx - (mapW/2)/S, originY = cy - (mapH/2)/S;   // tile-pixel at the frame's top-left
+
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const ctx = cv.getContext("2d");
+  ctx.fillStyle = "#ffffff"; ctx.fillRect(0,0,W,H);
+
+  // ── imagery ──
+  const x0 = Math.floor(originX/256), x1 = Math.floor((originX + mapW/S)/256);
+  const y0 = Math.floor(originY/256), y1 = Math.floor((originY + mapH/S)/256);
+  const jobs = [];
+  for (let tx = x0; tx <= x1; tx++) for (let ty = y0; ty <= y1; ty++){
+    jobs.push({tx, ty, url:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"+z+"/"+ty+"/"+tx});
+  }
+  ctx.save(); ctx.beginPath(); ctx.rect(0, MAPTOP, mapW, mapH); ctx.clip();
+  let got = 0;
+  for (let i = 0; i < jobs.length; i += 6){
+    const chunk = jobs.slice(i, i+6);
+    const imgs = await Promise.all(chunk.map(j => tmapLoadImg_(j.url)));
+    imgs.forEach((im, k) => { if (!im) return; got++;
+      const j = chunk[k];
+      ctx.drawImage(im, (j.tx*256-cx)*S + mapW/2, (j.ty*256-cy)*S + mapH/2 + MAPTOP,
+                    256*S + 1, 256*S + 1); });     // +1 closes the hairline seam between tiles
+    if (onNote) onNote(Math.round((i+chunk.length)/jobs.length*100));
+  }
+  ctx.restore();
+
+  // ── compartments ──
+  ctx.save(); ctx.beginPath(); ctx.rect(0, MAPTOP, mapW, mapH); ctx.clip();
+  ctx.lineJoin = "round";
+  group.comps.forEach(c => {
+    c.rings.forEach(r => {
+      ctx.beginPath();
+      r.forEach((pt, i) => { const q = toPx(pt[0], pt[1]); i ? ctx.lineTo(q.x,q.y) : ctx.moveTo(q.x,q.y); });
+      ctx.closePath();
+      ctx.fillStyle = "rgba(255,214,64,0.10)"; ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.55)"; ctx.lineWidth = 5*TMAP_SCALE; ctx.stroke();
+      ctx.strokeStyle = "#ffd640";           ctx.lineWidth = 2.6*TMAP_SCALE; ctx.stroke();
+    });
+  });
+  // ── plots ──
+  const R = 5.5*TMAP_SCALE;
+  group.plots.forEach(p => {
+    const q = toPx(p.lat, p.lon);
+    ctx.beginPath(); ctx.arc(q.x, q.y, R+2, 0, 7); ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fill();
+    ctx.beginPath(); ctx.arc(q.x, q.y, R, 0, 7);
+    ctx.fillStyle = p.src === "imported" ? "#7fd0ff" : "#ffe14d"; ctx.fill();
+    ctx.lineWidth = 1.6*TMAP_SCALE; ctx.strokeStyle = "#0b1a10"; ctx.stroke();
+  });
+  ctx.restore();
+
+  // ── labels ──
+  const items = [];
+  group.comps.forEach(c => {
+    if (!c.stand) return;
+    const ring = c.rings[0];
+    let sx=0, sy=0, n=0;
+    ring.forEach(pt => { const q = toPx(pt[0], pt[1]); sx+=q.x; sy+=q.y; n++; });
+    if (!n) return;
+    const x = sx/n, y = sy/n;
+    if (y < MAPTOP || y > MAPTOP+mapH) return;
+    items.push({x, y, text:c.stand, pri:100, centre:true, gap:22*TMAP_SCALE,
+                size:17*TMAP_SCALE, font:(700*1)+" "+(17*TMAP_SCALE)+"px system-ui", kind:"comp"});
+  });
+  group.plots.forEach(p => {
+    if (!p.num) return;
+    const q = toPx(p.lat, p.lon);
+    if (q.y < MAPTOP || q.y > MAPTOP+mapH) return;
+    items.push({x:q.x, y:q.y, text:p.num, pri:10, centre:false, gap:11*TMAP_SCALE,
+                size:12*TMAP_SCALE, font:(600*1)+" "+(12*TMAP_SCALE)+"px system-ui", kind:"plot"});
+  });
+  const placed = tmapPlaceLabels_(items, W, H, ctx);
+  ctx.save(); ctx.beginPath(); ctx.rect(0, MAPTOP, mapW, mapH); ctx.clip();
+  placed.forEach(L => {
+    if (L.leader){
+      ctx.beginPath();
+      ctx.moveTo(L.leader.x, L.leader.y);
+      ctx.lineTo(L.x + L.w/2, L.y + L.h/2);
+      ctx.strokeStyle = "rgba(0,0,0,0.65)"; ctx.lineWidth = 2.6*TMAP_SCALE; ctx.stroke();
+      ctx.strokeStyle = "#ffffff";          ctx.lineWidth = 1.1*TMAP_SCALE; ctx.stroke();
+    }
+    ctx.font = L.item.font;
+    ctx.textBaseline = "middle"; ctx.textAlign = "center";
+    const tx = L.x + L.w/2, ty = L.y + L.h/2;
+    ctx.lineWidth = 4*TMAP_SCALE; ctx.strokeStyle = "rgba(0,0,0,0.85)";
+    ctx.lineJoin = "round"; ctx.miterLimit = 2;
+    ctx.strokeText(L.text, tx, ty);
+    ctx.fillStyle = L.item.kind === "comp" ? "#ffd640" : "#ffffff";
+    ctx.fillText(L.text, tx, ty);
+  });
+  ctx.restore();
+
+  // ── title band, scale bar, legend ──
+  ctx.fillStyle = "#0e1c12"; ctx.fillRect(0, 0, W, MAPTOP);
+  ctx.fillStyle = "#ffffff"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  ctx.font = "700 " + (30*TMAP_SCALE) + "px system-ui";
+  ctx.fillText(tract, 18*TMAP_SCALE, 34*TMAP_SCALE);
+  ctx.fillStyle = "#9bd4a6"; ctx.font = (14*TMAP_SCALE) + "px system-ui";
+  ctx.fillText(group.comps.length + " compartment" + (group.comps.length===1?"":"s") + "  ·  " +
+               group.plots.length + " plot" + (group.plots.length===1?"":"s") +
+               "  ·  " + nowStr().slice(0,10), 18*TMAP_SCALE, 58*TMAP_SCALE);
+
+  ctx.fillStyle = "#0e1c12"; ctx.fillRect(0, H-MAPBOT, W, MAPBOT);
+  // scale bar: pick a round distance that lands near 180 px
+  const mPerPx = 156543.03392 * Math.cos(latMin*Math.PI/180) / Math.pow(2, z) / S;   // S included, or the bar lies
+  const want = 180*TMAP_SCALE * mPerPx;
+  const nice = [10,20,25,50,100,200,250,500,1000,2000,2500,5000];
+  let bar = nice[nice.length-1];
+  for (let i=0;i<nice.length;i++) if (nice[i] >= want) { bar = nice[i]; break; }
+  const barPx = bar / mPerPx;
+  const bx = 18*TMAP_SCALE, by = H - MAPBOT/2;
+  ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 3*TMAP_SCALE;
+  ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx+barPx, by);
+  ctx.moveTo(bx, by-6*TMAP_SCALE); ctx.lineTo(bx, by+6*TMAP_SCALE);
+  ctx.moveTo(bx+barPx, by-6*TMAP_SCALE); ctx.lineTo(bx+barPx, by+6*TMAP_SCALE);
+  ctx.stroke();
+  ctx.fillStyle = "#ffffff"; ctx.font = (13*TMAP_SCALE) + "px system-ui"; ctx.textBaseline = "middle";
+  ctx.fillText((bar >= 1000 ? (bar/1000)+" km" : bar+" m"), bx+barPx+10*TMAP_SCALE, by);
+  // legend
+  const lx = W - 300*TMAP_SCALE;
+  ctx.beginPath(); ctx.arc(lx, by, R, 0, 7); ctx.fillStyle = "#ffe14d"; ctx.fill();
+  ctx.strokeStyle = "#0b1a10"; ctx.lineWidth = 1.6*TMAP_SCALE; ctx.stroke();
+  ctx.fillStyle = "#ffffff"; ctx.fillText("field plot", lx+12*TMAP_SCALE, by);
+  const lx2 = lx + 110*TMAP_SCALE;
+  ctx.beginPath(); ctx.arc(lx2, by, R, 0, 7); ctx.fillStyle = "#7fd0ff"; ctx.fill();
+  ctx.strokeStyle = "#0b1a10"; ctx.stroke();
+  ctx.fillStyle = "#ffffff"; ctx.fillText("imported", lx2+12*TMAP_SCALE, by);
+
+  return {dataUrl: cv.toDataURL("image/jpeg", 0.86), tiles: got, zoom: z,
+          labels: placed.length, wanted: items.length,
+          leaders: placed.filter(L=>L.leader).length};
+}
+
+/* ── A minimal multi-page PDF carrying one JPEG per page ──────────────────────────────────────── */
+function tmapPdf_(pages, wPt, hPt){
+  const enc = new TextEncoder();
+  const chunks = []; let len = 0;
+  const put = u => { chunks.push(u); len += u.length; };
+  const putStr = s => put(enc.encode(s));
+  const offs = [];
+  const obj = (n, body, stream) => {
+    offs[n] = len;
+    putStr(n + " 0 obj\n" + body + "\n");
+    if (stream){ putStr("stream\n"); put(stream); putStr("\nendstream\n"); }
+    putStr("endobj\n");
+  };
+  putStr("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
+  const N = pages.length;
+  const kids = pages.map((p,i) => (3 + i*3) + " 0 R").join(" ");
+  obj(1, "<< /Type /Catalog /Pages 2 0 R >>");
+  obj(2, "<< /Type /Pages /Kids [" + kids + "] /Count " + N + " >>");
+  pages.forEach((p, i) => {
+    const pg = 3 + i*3, content = pg + 1, img = pg + 2;
+    obj(pg, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + wPt + " " + hPt + "] " +
+            "/Resources << /XObject << /Im0 " + img + " 0 R >> >> /Contents " + content + " 0 R >>");
+    const cs = enc.encode("q " + wPt + " 0 0 " + hPt + " 0 0 cm /Im0 Do Q");
+    obj(content, "<< /Length " + cs.length + " >>", cs);
+    obj(img, "<< /Type /XObject /Subtype /Image /Width " + p.w + " /Height " + p.h +
+             " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " + p.bytes.length + " >>",
+        p.bytes);
+  });
+  const xref = len;
+  const total = 3 + N*3;
+  putStr("xref\n0 " + total + "\n0000000000 65535 f \n");
+  for (let n = 1; n < total; n++){
+    putStr(("0000000000" + (offs[n]||0)).slice(-10) + " 00000 n \n");
+  }
+  putStr("trailer\n<< /Size " + total + " /Root 1 0 R >>\nstartxref\n" + xref + "\n%%EOF\n");
+  const out = new Uint8Array(len); let o = 0;
+  chunks.forEach(u => { out.set(u, o); o += u.length; });
+  return out;
+}
+function tmapB64ToBytes_(dataUrl){
+  const b64 = String(dataUrl).split(",")[1] || "";
+  const bin = atob(b64);
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+
+async function exportTractMapsPdf(){
+  if (!BOUND || !BOUND.features || !BOUND.features.length){
+    toast("Load your compartment boundaries first (Layers → Stand boundaries)", true); return;
+  }
+  if (!standField){ toast("Pick the stand-name field first (Layers → Stand name field)", true); return; }
+  if (isOffline()){ toast("The satellite imagery needs a connection", true); return; }
+  const byTract = tmapGroupByTract_();
+  const names = Object.keys(byTract).filter(t => byTract[t].comps.length).sort();
+  if (!names.length){ toast("No compartments could be matched to a tract", true); return; }
+  toast("Building " + names.length + " map" + (names.length===1?"":"s") + "…");
+  const pages = [];
+  const notes = [];
+  for (let i = 0; i < names.length; i++){
+    const t = names[i];
+    let r = null;
+    try {
+      r = await tmapRender_(t, byTract[t], pct => {
+        toast("Map " + (i+1) + " of " + names.length + " — " + t + " — imagery " + pct + "%");
+      });
+    } catch(e){ notes.push(t + ": " + e.message); continue; }
+    if (!r) { notes.push(t + ": nothing to draw"); continue; }
+    pages.push({bytes: tmapB64ToBytes_(r.dataUrl), w: TMAP_W*TMAP_SCALE, h: TMAP_H*TMAP_SCALE});
+    notes.push(t + ": " + byTract[t].comps.length + " comp, " + byTract[t].plots.length + " plots, " +
+               r.labels + "/" + r.wanted + " labels, " + r.leaders + " leader lines, zoom " + r.zoom);
+  }
+  if (!pages.length){ toast("No maps could be drawn", true); return; }
+  const pdf = tmapPdf_(pages, TMAP_W*0.72, TMAP_H*0.72);      // 1100x850 px at ~100 dpi -> points
+  const base = "FRItract_maps_" + nowStr().replace(/[: ]/g,"-");
+  const blob = new Blob([pdf], {type:"application/pdf"});
+  const url = URL.createObjectURL(blob), a = document.createElement("a");
+  a.href = url; a.download = base + ".pdf"; document.body.appendChild(a); a.click(); a.remove();
+  driveSave_(blob, a.download, "map");
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  offerMailExport_(base);
+  toast(pages.length + " tract map" + (pages.length===1?"":"s") + " → PDF");
+  try{ console.log("[tract maps]\n" + notes.join("\n")); }catch(e){}
 }
 
 /* ---- import reference points / lines / polygons (shapefile, GeoJSON, GPX) ---- */
