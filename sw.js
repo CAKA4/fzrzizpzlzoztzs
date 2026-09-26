@@ -2,7 +2,7 @@
    © 2026 Chris Gynan. All rights reserved. Proprietary — no license granted.
    Caches the app shell + map libraries so the app opens with no signal after the first
    online visit. Bump CACHE when you change index.html so devices pick up the new build. */
-const CACHE = "st-treecard-v158";
+const CACHE = "st-treecard-v159";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 // Map libraries (cross-origin). Cached so the map shell works offline after one online load.
 // (Imagery tiles are NOT cached here — those still need a connection.)

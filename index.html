@@ -466,6 +466,7 @@
   /* The page count sits OUTSIDE the ellipsis, because "Sept23 Phase1 90p…" with the
      31 pp swallowed tells the user nothing about whether the right file went in. */
   .docrow .nm b.ct{ flex:0 0 auto; font-weight:600 }
+  .docrow .nm b.miss{ color:var(--blaze) }
   /* THE CHECKBOX HAS TO BE TOLD ITS WIDTH. The global rule a few hundred lines up is
      `input,select,textarea{ width:100% }` — meant for the text fields — and a tick box
      obeys it too, so it claimed the whole row and squeezed the section name out of
@@ -1917,7 +1918,7 @@
    Menu → Settings and kept on the device — so re-uploading this file after an
    update no longer wipes it. */
 const SCRIPT_URL_DEFAULT = "https://script.google.com/macros/s/AKfycbzRy_ObDe76tb6DUKOb4gaa__Sd6kIwLSjs-WFGeHr9Zw3HiSOKgdlxFtPkaz29qMj1-A/exec";
-const APP_BUILD  = "2026-09-26 · v158";
+const APP_BUILD  = "2026-09-26 · v159";
 /* THE Code.gs THIS BUILD EXPECTS TO FIND ON THE SHEET — bumped only when Code.gs
    itself changes, which is not every build.
 
@@ -11190,7 +11191,15 @@ function docSections(){
   defaultSections().forEach(d => { if(!have[d.id]) l.push(d); });
   return l;
 }
-function docSave(l){ if(STORE){ try{ STORE.setItem("st_doc", JSON.stringify(l)); }catch(e){} } }
+/* RETURNS WHETHER IT ACTUALLY SAVED. It used to swallow the exception, so a storage
+   that was full or blocked lost the section list without a word — you added a PDF,
+   the row appeared, and it was gone the next time the screen opened. */
+function docSave(l){
+  if(!STORE) return false;
+  try{ STORE.setItem("st_doc", JSON.stringify(l)); return true; }
+  catch(e){ docSaveFailed = String((e && e.name) || e || "failed"); return false; }
+}
+let docSaveFailed = "";
 function defaultSections(){
   return [
     {id:"contents",  name:"Contents",                       kind:"toc",    on:true,  fixed:true},
@@ -11232,6 +11241,10 @@ function openDoc(){
   $("docValue").value = valueModeFor(currentProject());
   $("docPlace").value = docPlacement;
   renderDoc();
+  const ups = docSections().filter(d => d && d.kind === "upload");
+  docSay(ups.length ? (ups.length === 1 ? "1 PDF in the list." : ups.length + " PDFs in the list.")
+                    : "No PDFs added yet.");
+  docCheckUploads();
   $("docSheet").classList.add("show");
 }
 function renderDoc(){
@@ -11242,7 +11255,9 @@ function renderDoc(){
     `<div class="docrow">
        <label class="nm">
          <input type="checkbox" ${d.on?"checked":""} ${d.fixed?"disabled":""} onchange="docToggle(${i},this.checked)">
-         <span>${esc(d.name)}</span>${d.pages?`<b class="ct">${d.pages} pp</b>`:""}</label>
+         <span>${esc(d.name)}</span>${d.pages?`<b class="ct">${d.pages} pp</b>`:""}${
+           (d.kind==="upload" && docHere[d.id] === false)
+             ? `<b class="ct miss" title="The pages are on the device this was added on">not here</b>` : ""}</label>
        ${(d.kind==="upload" && i>1)?`<button class="alt" onclick="docToTop(${i})" title="Move up behind Contents">⤒</button>`:""}
        <button class="alt" onclick="docMove(${i},-1)">↑</button>
        <button class="alt" onclick="docMove(${i},1)">↓</button>
@@ -11275,6 +11290,60 @@ function docRemove(i){
   idbDelete("doc:"+l[i].id);
   l.splice(i,1); docSave(l); renderDoc();
 }
+/* A PROJECT SETUP ARRIVING FROM ANOTHER DEVICE MUST NOT DELETE A PDF YOU ADDED HERE.
+   The section list travels between devices as part of the project setup, but the PAGES
+   of an uploaded PDF do not — they are in this device's own storage. So the list that
+   comes down from the Sheet was written by a device that may never have seen your
+   arborist report, and taking it wholesale removed the row. The PDF was still on the
+   phone, but nothing referred to it any more, and it looked for all the world like the
+   upload had failed.
+
+   The incoming order wins for everything it names. Every upload row that exists HERE
+   and is missing from it is put back, as near to where it was as the new order allows.
+   Deleting an upload is a deliberate act — the ✕ on its row — never a side effect of
+   a sync. */
+function mergeDocKit(incoming){
+  const local = docSections();
+  /* Nothing usable came down. Taking it would leave the list holding only the local
+     uploads and no sections at all. */
+  if(!Array.isArray(incoming) || !incoming.length) return local;
+  const out = incoming.slice();
+  const has = {};
+  out.forEach(d => { if(d && d.id) has[d.id] = 1; });
+  local.forEach((d, idx)=>{
+    if(!d || d.kind !== "upload" || has[d.id]) return;
+    /* Behind whichever of its old neighbours survived, so a report that sat after
+       Contents comes back after Contents rather than on the end. */
+    let at = out.length;
+    for(let k = idx - 1; k >= 0; k--){
+      const p = out.findIndex(x => x && local[k] && x.id === local[k].id);
+      if(p >= 0){ at = p + 1; break; }
+    }
+    out.splice(at, 0, d);
+  });
+  /* Contents is index 0 everywhere downstream — docMove refuses to pass it, the
+     builder makes sheet 1 out of it. A list that arrived with it anywhere else would
+     quietly break both, so it is put back in front here rather than trusted. */
+  const ci = out.findIndex(d => d && d.id === "contents");
+  if(ci > 0) out.unshift(out.splice(ci, 1)[0]);
+  return out;
+}
+
+/* WHICH UPLOADS THIS DEVICE ACTUALLY HOLDS THE PAGES FOR. A row whose pages are on
+   the other phone builds nothing at all, and used to do so in silence — the contents
+   simply skipped it. Kept out of the saved list on purpose: it is a fact about this
+   device, and the saved list is shared. */
+let docHere = {};
+function docCheckUploads(){
+  const ups = docSections().filter(d => d && d.kind === "upload");
+  if(!ups.length){ docHere = {}; return Promise.resolve(); }
+  return Promise.all(ups.map(d =>
+    idbGet("doc:" + d.id)
+      .then(rec => { docHere[d.id] = !!(rec && rec.data && rec.data.length > 2); })
+      .catch(()=> { docHere[d.id] = false; })
+  )).then(()=> renderDoc());
+}
+
 /* Each upload is NAMED as it goes in, because the name is what the contents page
    prints. Taking the filename meant a reviewer's contents read "Scan_20260918_0003"
    where it should read "TREE PROTECTION FENCE AND SIGN DETAIL" — and with five to ten
@@ -11284,25 +11353,52 @@ function docSuggestName(fn){
   return String(fn||"").replace(/\.[^.]+$/,"").replace(/[_-]+/g," ")
                        .replace(/\s+/g," ").trim().slice(0,70);
 }
+/* A FAILURE HERE USED TO BE A TOAST AND NOTHING ELSE. A toast is three seconds long
+   and a thirty-page report takes a minute to read in, so the one moment the message
+   mattered was the one moment nobody was looking at the screen. Chris added his
+   report and came back to a list with no report in it and no idea why.
+
+   So every outcome is written into the status line under the list and LEFT there —
+   it is the only thing on this screen that persists — and the row is checked for
+   afterwards rather than assumed. */
+function docSay(msg){ const s = $("docStatus"); if(s) s.textContent = msg; }
 function addDocPdfs(files){
   const l = docSections();
-  let i = 0, added = 0;
+  let i = 0, added = 0; const trouble = [];
+  docSaveFailed = "";
   const next = ()=>{
     if(i>=files.length){
-      docSave(l); renderDoc();
-      toast(added ? (added + (added===1?" PDF":" PDFs") + " added " +
-                     (docPlacement==="end" ? "at the end" : "straight after Contents"))
-                  : "Nothing added");
+      const saved = docSave(l);
+      renderDoc();
+      /* DID IT ACTUALLY LAND? Reading the list back is the only honest answer: the
+         splice, the save and the storage are three separate things that can fail. */
+      const back = docSections().filter(d => d.kind === "upload").length;
+      if(!saved){
+        docSay("Could not save the list" + (docSaveFailed ? " (" + docSaveFailed + ")" : "") +
+               " — this device's storage is full or blocked. Nothing was added.");
+        toast("Could not save the document list", true);
+      } else if(trouble.length){
+        docSay(trouble.join("  ·  ") + (added ? "  ·  " + added + " added." : ""));
+        toast("Some PDFs could not be added", true);
+      } else if(added){
+        docSay(added + (added===1 ? " PDF" : " PDFs") + " added " +
+               (docPlacement==="end" ? "at the end" : "straight after Contents") +
+               ". " + back + " in the list.");
+        toast(added + (added===1?" PDF":" PDFs") + " added");
+      } else {
+        docSay("Nothing added.");
+      }
       return;
     }
     const f = files[i++];
     const suggested = docSuggestName(f.name);
     const given = prompt("What is this? It is printed in the contents.\n\n" + f.name, suggested);
-    if(given === null){ next(); return; }            // skipped this one
+    if(given === null){ trouble.push(f.name + ": skipped"); next(); return; }
     const label = normText(given) || suggested || "Untitled";
-    $("docStatus").textContent = "Reading " + f.name + "…";
-    pdfToPages(f, (p,n)=>{ $("docStatus").textContent = `${label} — page ${p} of ${n}`; })
+    docSay("Reading " + f.name + "…");
+    pdfToPages(f, (p,n)=> docSay(`${label} — page ${p} of ${n}`))
       .then(pages=>{
+        if(!pages || !pages.length) throw new Error("no pages came back");
         const id = "u"+Date.now().toString(36)+Math.floor(Math.random()*1000);
         return idbPut({filename:"doc:"+id, data:JSON.stringify(pages)}).then(()=>{
           /* Recomputed per file, so several chosen at once stay in the order given. */
@@ -11312,7 +11408,16 @@ function addDocPdfs(files){
           docSave(l); renderDoc(); next();
         });
       })
-      .catch(()=>{ toast("Could not read "+f.name, true); next(); });
+      .catch(err=>{
+        /* The reason matters. A password-protected PDF, a phone that ran out of
+           memory on a 300-page scan and a corrupt file all used to read
+           "Could not read" and leave you guessing which. */
+        const why = String((err && (err.name === "QuotaExceededError" ? "no room left on this device"
+                                   : err.message || err.name)) || "unreadable").slice(0, 90);
+        trouble.push(f.name + ": " + why);
+        docSay(f.name + " — " + why);
+        next();
+      });
   };
   next();
 }
@@ -11519,7 +11624,9 @@ function tablePages(rows, title, W, H, M, foot){
 
    The arborist report's FIRST page is its title page, and it is pulled out to sit in
    the left slot of sheet 1 with the contents beside it. */
+let docMissing = [];
 async function docBlocks(W, H){
+  docMissing = [];
   const slots = tppSlots(W, H);
   const rect  = tppContentRect(W, H);
   const M     = Math.round(PDF_DPI*0.30);
@@ -11532,7 +11639,12 @@ async function docBlocks(W, H){
       if(dsec.kind === "upload"){
         const rec  = await idbGet("doc:" + dsec.id);
         const arr  = rec && rec.data ? JSON.parse(rec.data) : [];
+        /* A TICKED SECTION THAT PRINTS NOTHING has to be said out loud. The pages of
+           an upload live on the device it was added on, so a section list shared from
+           another phone can name a PDF this one has never held — and the document
+           came out without it, with a contents page that did not mention it either. */
         if(arr.length) out.push({ name:dsec.name, lay:"2up", pages:arr, upload:true });
+        else docMissing.push(dsec.name);
 
       } else if(dsec.kind === "details" || dsec.kind === "appendix"){
         /* ONE BLOCK PER DRAWING, so the contents can name each detail the way the
@@ -11683,7 +11795,16 @@ async function buildDocument(){
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url), 4000);
   setStatus(`${visibleTrees().length} trees on device`);
-  toast(`${sheets.length} sheet document assembled`);
+  if(docMissing.length){
+    toast(docMissing.length + " ticked section" + (docMissing.length===1?"":"s") +
+          " printed nothing — see the assembly screen", true);
+    alert("The document was built, but these ticked sections printed nothing:\n\n  " +
+          docMissing.join("\n  ") +
+          "\n\nAn uploaded PDF keeps its pages on the device it was added on. If the " +
+          "section came from another device's project setup, add the PDF again here.");
+  } else {
+    toast(`${sheets.length} sheet document assembled`);
+  }
 }
 function closeDoc(){ $("docSheet").classList.remove("show"); }
 
@@ -13828,7 +13949,7 @@ function kitApply(project, kit, only){
     if(STORE){ try{ STORE.setItem(TPPKEY, JSON.stringify(tppText)); }catch(e){} }
     done.push("wording");
   }
-  if(take("doc") && Array.isArray(kit.doc)){ docSave(kit.doc); done.push("doc"); }
+  if(take("doc") && Array.isArray(kit.doc)){ docSave(mergeDocKit(kit.doc)); done.push("doc"); }
   if(take("labels") && kit.labels && typeof kit.labels === "object"){
     labelCfg = kit.labels; persistLabelCfg(); renderLabels(); syncLabelBtn(); done.push("labels");
   }
