@@ -1131,7 +1131,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-25 · v348";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-25 · v349";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3630,7 +3630,12 @@ function openMapFiles(){
   if(!connected || isOffline()){ mfRender_("Offline — this list lives in the Sheet."); return; }
   const cb="__mf"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
   const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
-  window[cb]=r=>{ clean(); _mfItems=((r&&r.items)||[]); _mfFolder=(r&&r.folder)||""; mfRender_(); };
+  /* r.error was discarded here, so when the backend could not reach Drive at all this panel
+     showed an empty list and said nothing — indistinguishable from "you have not exported
+     anything yet". That is the difference between "no files" and "Drive is refusing us". */
+  window[cb]=r=>{ clean(); _mfItems=((r&&r.items)||[]); _mfFolder=(r&&r.folder)||"";
+    if(r && r.ok===false && r.error){ mfRender_("The Sheet could not read Drive: "+esc(String(r.error))); return; }
+    mfRender_(); };
   sc.onerror=()=>{ clean(); mfRender_("Couldn't reach the Sheet."); };
   setTimeout(()=>{ if(window[cb]){ clean(); mfRender_("No answer from the Sheet."); } },15000);
   sc.src=SCRIPT_URL+sep+"action=mapfiles&callback="+cb;
