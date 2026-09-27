@@ -767,7 +767,7 @@
 
     <details class="lgroup"><summary>👥 Crew &amp; live location</summary>
       <div class="lgroup-body">
-        <button type="button" id="crewBtn" onclick="closeLayersMenu();fetchCrew(false)">👥 Crew plots — always on · tap to refresh</button>
+        <button type="button" id="crewBtn" onclick="closeLayersMenu();fetchCrew(false)">👥 Crew plots — tap to refresh</button>
         <div id="plotLabelRow" style="display:none;padding:0 0 2px">
           <label style="font-size:12px;color:#cfe6d4;display:block;margin:0 2px 3px">Label plots by</label>
           <select id="plotLabelSel" onchange="setPlotLabel(this.value)">
@@ -1131,7 +1131,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-25 · v349";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-27 · v350";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3223,7 +3223,8 @@ function crewColorFor(name){
   return "hsl("+Math.round((Math.abs(h)%CREW_HUES)*(360/CREW_HUES))+",72%,56%)";
 }
 
-function setCrewBtn(){ const b=$("crewBtn"); if(b) b.textContent = "👥 Crew plots" + (crewData.length?" ("+crewData.length+")":"") + " — always on · tap to refresh";
+function setCrewBtn(){ const b=$("crewBtn"); if(b) b.textContent = "👥 Crew plots" + (crewData.length?" ("+crewData.length+")":"") +
+    ((typeof layerVis!=="undefined" && layerVis.sheet===false) ? " — hidden · tap to refresh" : " — tap to refresh");
   const row=$("plotLabelRow"); if(row) row.style.display = crewShown ? "block" : "none";
   const sel=$("plotLabelSel"); if(sel) sel.value=plotLabelField; }
 // Kept so anything still calling it just forces a refresh — the layer can no longer be hidden.
@@ -3959,7 +3960,11 @@ function renderCrewPlots(rows, silent){
     const tip = labelled ? plotLabelText_(p) : p.who;   // analyzed value when labelling, else cruiser name
     if(tip) m.bindTooltip(tip,{permanent:true,direction:"top",offset:[0,-11],className:labelled?"plot-tip":"crew-tip"});
     bounds.push([p.lat,p.lon]); });
-  crewShown=true; setCrewBtn(); updateLayerStatus();
+  /* Do NOT force the layer back on here. A refresh (and there is one on a timer) used to switch
+     the Sheet plots on again a few seconds after they were hidden. Honour the user's choice. */
+  if(layerVis.sheet===false && fmap && fmap.hasLayer(crewLayer)) fmap.removeLayer(crewLayer);
+  crewShown = (typeof layerVis==="undefined") ? true : layerVis.sheet!==false;
+  setCrewBtn(); updateLayerStatus();
   const crews=Object.keys(latest).length, n=pts.length;
   if(!silent) toast(n?`Showing ${n} crew plot${n>1?"s":""} from ${crews} cruiser${crews>1?"s":""}${labelled?" · labelled":" · latest highlighted"}`:"No submitted plots with a location yet",!n);
   if(!silent && bounds.length) try{ fmap.fitBounds(bounds,{padding:[44,44]}); }catch(e){}   // fit only on first load, not auto-refreshes
@@ -5015,9 +5020,12 @@ if("serviceWorker" in navigator){ try{ navigator.serviceWorker.register("./sw.js
 
 /* ====================== MAP TAB ====================== */
 let fmap=null, fpins=null, fauditpins=null, fboundLayer=null, flabelLayer=null, fmeMarker=null, fmeRing=null, fwatch=null;
-/* Crew plots and live position are always on. Everyone needs to see which plots are already done
-   before walking to one, and a shared position is worth having if someone gets turned around. There
-   is no longer a way to switch either off, so these start true rather than false. */
+/* Crew plots and live position both START on: everyone needs to see which plots are already done
+   before walking to one, and a shared position is worth having if someone gets turned around.
+   As of v350 the crew PLOTS can be switched off again — Layers ▸ "Plots from the Sheet", or the
+   "All plots" master switch — because on a property with 400-odd submitted plots the dots cover
+   the boundaries entirely. crewShown is kept in step with layerVis.sheet by applyLayerVis_().
+   Live crew POSITION is a different thing and is still always on. */
 let crewLayer=null, crewShown=true, crewColors={}, crewTimer=null, crewData=[], plotLabelField="none";
 let liveLayer=null, liveOn=true, liveBroadcastTimer=null, livePollTimer=null;
 let crewRouteLayer=null, crewRoutesShown=false, crewRoutesTimer=null;
@@ -5326,12 +5334,33 @@ function renderLayerList(){
   c.innerHTML=`<div class="layer-hd">Boundary files</div>`+boundFiles.map(f=>
     `<div class="layer-row"><span>${esc(f.name)} <small>(${f.features.length})</small></span><button type="button" onclick="removeBoundFile('${esc(f.id)}')">✕</button></div>`).join("");
 }
-// On/off visibility for each map overlay. Layer stays loaded — this only shows/hides it.
-var layerVis={ mine:true, imported:true, bound:true, ref:true, photo:true, track:true };
+/* On/off visibility for each map overlay. Layer stays loaded — this only shows/hides it.
+   `sheet` is the crew layer: every plot in the Sheet. It had no switch at all before v350 — the
+   map chip said "always on" and toggleCrewPlots() only refreshed — so on a property with 400-odd
+   submitted plots there was no way to see the boundaries underneath them. */
+var layerVis={ mine:true, imported:true, sheet:true, bound:true, ref:true, photo:true, track:true };
 try{ if(typeof STORE!=="undefined"&&STORE) Object.assign(layerVis, JSON.parse(STORE.getItem("fi_layervis"))||{}); }catch(e){}
-function layerGroupFor_(k){ return {mine:fpins, imported:fauditpins, bound:fboundLayer, ref:refLayer, photo:photoLayer}[k]; }
+function layerGroupFor_(k){ return {mine:fpins, imported:fauditpins, sheet:crewLayer, bound:fboundLayer, ref:refLayer, photo:photoLayer}[k]; }
+/* The three plot layers, for the master "All plots" switch. */
+const PLOT_LAYER_KEYS_=["mine","imported","sheet"];
+function plotsAllOn_(){ return PLOT_LAYER_KEYS_.every(k=>layerVis[k]!==false); }
+function plotsAnyOn_(){ return PLOT_LAYER_KEYS_.some(k=>layerVis[k]!==false); }
+/* One tap for "get these dots off my map". Turns every plot layer off if any is on, and all of
+   them back on when none is. */
+function toggleAllPlots(){
+  const turnOff=plotsAnyOn_();
+  PLOT_LAYER_KEYS_.forEach(k=>{ layerVis[k]=!turnOff; });
+  crewShown=layerVis.sheet!==false;
+  try{ STORE&&STORE.setItem("fi_layervis",JSON.stringify(layerVis)); }catch(e){}
+  applyLayerVis_(); renderLayerVis_(); updateLayerStatus(); setCrewBtn();
+  toast(turnOff?"All plots hidden — the data is untouched":"All plots showing");
+}
 function applyLayerVis_(){
-  [["mine",fpins,flabelLayer],["imported",fauditpins,null],["bound",fboundLayer,flabelLayer],["ref",refLayer,freflabelLayer],["photo",photoLayer,null]].forEach(([k,lyr,lbl])=>{
+  /* Keep crewShown in step here rather than only in the toggle, so a choice restored from storage
+     on a cold start is honoured too — otherwise the layer came back hidden but everything keyed on
+     crewShown (the label chooser, tap-to-identify) still behaved as though it were visible. */
+  crewShown = layerVis.sheet!==false;
+  [["mine",fpins,flabelLayer],["imported",fauditpins,null],["sheet",crewLayer,null],["bound",fboundLayer,flabelLayer],["ref",refLayer,freflabelLayer],["photo",photoLayer,null]].forEach(([k,lyr,lbl])=>{
     if(!fmap||!lyr) return;
     if(layerVis[k]===false){ if(fmap.hasLayer(lyr)) fmap.removeLayer(lyr); if(k==="bound"&&lbl&&fmap.hasLayer(lbl)) fmap.removeLayer(lbl); if(k==="ref"&&lbl&&fmap.hasLayer(lbl)) fmap.removeLayer(lbl); }
     else { if(!fmap.hasLayer(lyr)) fmap.addLayer(lyr); if(k==="bound"&&lbl&&!fmap.hasLayer(lbl)) fmap.addLayer(lbl); if(k==="ref"&&lbl&&!fmap.hasLayer(lbl)) fmap.addLayer(lbl); }
@@ -5344,6 +5373,8 @@ function applyLayerVis_(){
 }
 function toggleLayerVis(k){ layerVis[k]=!(layerVis[k]!==false); try{ STORE&&STORE.setItem("fi_layervis",JSON.stringify(layerVis)); }catch(e){}
   if(k==="track"){ trackShown=layerVis.track; setTrackBtn(); }
+  if(k==="sheet"){ crewShown=layerVis.sheet!==false; setCrewBtn();
+    const row=$("plotLabelRow"); if(row) row.style.display = crewShown ? "block" : "none"; }
   applyLayerVis_(); renderLayerVis_(); updateLayerStatus(); }
 
 // Labels on/off, per label layer (boundary stand names, imported-point labels). Persisted.
@@ -5359,6 +5390,7 @@ function zoomToLayer(k){
   let b=[];
   if(k==="mine") saved.forEach(p=>{ const y=parseFloat(p.Y),x=parseFloat(p.X); if(isFinite(y)&&isFinite(x)) b.push([y,x]); });
   else if(k==="imported") (auditPlots||[]).forEach(p=>{ const y=parseFloat(p.Y),x=parseFloat(p.X); if(isFinite(y)&&isFinite(x)) b.push([y,x]); });
+  else if(k==="sheet") (typeof crewData!=="undefined"?crewData:[]).forEach(r=>{ const y=parseFloat(r.lat),x=parseFloat(r.lon); if(isFinite(y)&&isFinite(x)) b.push([y,x]); });
   else if(k==="bound"){ if(typeof BOUND!=="undefined"&&BOUND&&BOUND.features) collectCoords_(BOUND.features,b); }
   else if(k==="ref") (refLabels||[]).forEach(r=>{ if(isFinite(r.lat)&&isFinite(r.lng)) b.push([r.lat,r.lng]); });
   else if(k==="track") b=(trackLog||[]).slice();
@@ -5378,14 +5410,24 @@ function renderLayerVis_(){
   const hasPdf=(typeof pdfOverlay!=="undefined"&&pdfOverlay);
   const impN=(typeof auditPlots!=="undefined"&&auditPlots)?auditPlots.length:0;
   // [key, label, count, canLabel]
+  const shtN=(typeof crewData!=="undefined"&&crewData)?crewData.length:0;
   const rows=[["imported","🔵 Imported plots", impN, false],
              ["mine","📍 My plots", saved.length, false],
+             ["sheet","👥 Plots from the Sheet", shtN, false],
              ["bound","▧ Stand boundaries", bndN, true],
              ["ref","• Imported points/lines", refN, true],
              ["track","〰 Track log", trkN, false],
              ["pdf","🗺 PDF map", hasPdf?1:0, false]]
     .filter(r=>r[0]==="mine"||r[0]==="track"||r[2]>0);
-  box.innerHTML = rows.length ? `<div class="layer-hd" style="margin-top:2px">Layers — tap ⤢ to zoom</div>`+rows.map(([k,label,cnt,canLabel])=>{
+  /* One switch for every plot layer at once — the thing people actually reach for when they want
+     to see what is under the dots. Only worth showing when there are plots to hide. */
+  const plotTotal_=saved.length+impN+shtN;
+  const allRow_ = plotTotal_ ? (()=>{ const on=plotsAllOn_(), any=plotsAnyOn_();
+    return `<div class="visrow" style="border-bottom:1px solid #2a4030;padding-bottom:5px;margin-bottom:3px">`+
+      `<span onclick="toggleAllPlots()" style="flex:1;cursor:pointer"><b>◉ All plots</b> <small>(${plotTotal_})</small></span>`+
+      `<span class="visdot ${any?"on":""}" onclick="toggleAllPlots()" style="cursor:pointer">${on?"ON":(any?"SOME":"OFF")}</span></div>`;
+  })() : "";
+  box.innerHTML = rows.length ? `<div class="layer-hd" style="margin-top:2px">Layers — tap ⤢ to zoom</div>`+allRow_+rows.map(([k,label,cnt,canLabel])=>{
     const on=(k==="pdf")?(typeof pdfVisible==="undefined"?true:pdfVisible):(layerVis[k]!==false);
     const onTap=(k==="pdf")?"togglePDF();renderLayerVis_()":`toggleLayerVis('${k}')`;
     const lblBtn = canLabel ? `<button type="button" class="visbtn ${labelVis[k]!==false?"on":""}" title="Labels on/off" onclick="event.stopPropagation();toggleLabels('${k}')">🏷</button>` : "";
@@ -7565,9 +7607,14 @@ function allPointLayers_(){
   const mine=[]; saved.forEach(p=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X);
     if(isFinite(lat)&&isFinite(lon)) mine.push({lat,lon,stand:(p.STANDID||"").trim()||standOrPolyAt_(lat,lon)||"(unattributed)"}); });
   if(mine.length) layers.push({layer:"My plots (this device)", pts:mine});
-  if(crewShown && crewData.length){ const crew=[]; crewData.forEach(r=>{ const lat=parseFloat(r.lat), lon=parseFloat(r.lon);
+  /* Deliberately NOT gated on whether the layer is visible. This answers "how many plots are in
+     each compartment", which is a question about the data, not about the map. Hiding a layer to
+     see the boundaries underneath must not quietly subtract 400 plots from a count — that is the
+     same absent-vs-zero trap that has bitten this code before, and it would be invisible. The
+     label says where the plots came from; the total is the total. */
+  if(crewData.length){ const crew=[]; crewData.forEach(r=>{ const lat=parseFloat(r.lat), lon=parseFloat(r.lon);
     if(isFinite(lat)&&isFinite(lon)) crew.push({lat,lon,stand:(r.stand||"").trim()||standOrPolyAt_(lat,lon)||"(unattributed)"}); });
-    if(crew.length) layers.push({layer:"Crew plots (from the Sheet)", pts:crew}); }
+    if(crew.length) layers.push({layer:"Crew plots (from the Sheet)"+(layerVis.sheet===false?" — hidden on the map":""), pts:crew}); }
   /* The imported plots loaded for completion — the blue pins. They were missing from the tally
      entirely, while the reference points were labelled "Imported points", so the one layer you would
      most want counted was absent and its name was taken by something else. */
