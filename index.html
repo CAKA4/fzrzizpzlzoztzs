@@ -943,7 +943,15 @@
         <button type="button" onclick="closeMore();exportCompartmentsAnalysisShp('main')">⬠ Compartments + analysis → shapefile</button>
         <button type="button" onclick="closeMore();exportTractMapsPdf()">🗺 Tract maps → PDF (one page per tract)</button>
         <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:6px 2px 8px">Each of the five above downloads to this device, then offers to email it to you once it has reached Drive.</div>
-        <button type="button" onclick="closeMore();openReportModal()">📗 Email the Excel workbook or PDF report (not shapefiles)</button>
+        <!-- The wording here has now been wrong in two different directions. It began as "Email
+             analysis report — Excel / PDF (by property)" and sat at the top of the group, so people
+             after their shapefiles pressed it and got a spreadsheet (v347 moved and renamed it).
+             The rename then dropped "(by property)" — the one phrase that said you can pick a single
+             tract — and the next question was "how do I email the Excel summaries for the tract I
+             finished today?", which is exactly what this button does. Say all four things it does:
+             summaries, Excel or PDF, one tract or all, emailed. -->
+        <button type="button" onclick="closeMore();openReportModal()">📗 Email me the summaries — Excel or PDF, by tract</button>
+        <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:4px 2px 2px">Plot data plus every summary tab, for one property or all of them. Rebuilt from the Sheet first, so it includes today's plots once they have synced.</div>
         <button type="button" onclick="closeMore();openMapFiles()">🗂 Map files on Drive — tracks, routes, areas</button>
         <button type="button" onclick="closeMore();openCompRpt()">📄 Compartment PDF reports — one, a tract, or all</button>
       </details>
@@ -1131,7 +1139,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-28 · v352";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-28 · v353";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
