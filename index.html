@@ -987,7 +987,7 @@
     <div class="modal-title">Stand summary</div>
     <div class="sumseg-wrap"><div class="sumseg-label">Plots</div>
       <div class="seg" id="sumSrcSeg">
-        <button type="button" class="seg-btn on" onclick="setSumSource('mine')">My plots</button>
+        <button type="button" class="seg-btn on" onclick="setSumSource('mine')">On this device</button>
         <button type="button" class="seg-btn" onclick="setSumSource('audit')">Imported</button>
         <button type="button" class="seg-btn" onclick="setSumSource('both')">Both</button>
       </div>
@@ -1131,7 +1131,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-27 · v350";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-28 · v352";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3289,7 +3289,7 @@ function zoomToFindMatches_(){
 function openMyLabel(){
   if(auditPlots.length){
     showInfoSheet_("Label plot dots", `<div style="color:#a9c9b0;font-size:12px;margin-bottom:8px">Which set do you want to label?</div>`+
-      `<button type="button" onclick="closeInfoSheet_();openMyLabelPicker()" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6;font:inherit;font-size:13px">🟡 My plots — by analysis (type, BA, volume, age…)</button>`+
+      `<button type="button" onclick="closeInfoSheet_();openMyLabelPicker()" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6;font:inherit;font-size:13px">🟡 Plots on this device — by analysis (type, BA, volume, age…)</button>`+
       `<button type="button" onclick="closeInfoSheet_();openAuditLabelPicker()" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6;font:inherit;font-size:13px">🔵 Imported plots — by field</button>`);
   } else openMyLabelPicker();
 }
@@ -3923,22 +3923,31 @@ function renderCrewPlots(rows, silent){
      never collected a plot, `saved` is empty and this filter removed the only copy there was, so
      your own plots were not merely un-editable there, they were invisible. Matching on the plot's
      own id keeps the duplicate off the phone and puts your work back on the map at the desk. */
-  const me=String(cruiserEmail||"").trim().toLowerCase();
-  const meName=String(cruiser||"").trim().toLowerCase();
-  const haveIds=new Set(saved.map(p=>String((p&&p._id)||"")).filter(Boolean));
-  const haveNat=new Set(saved.map(p=>p?(String(p.STANDID||"").trim().toLowerCase()+"|"+String(p.PLOTNUM||"").trim().toLowerCase()):"").filter(k=>k!=="|"));
-  if(me||meName) rows=(rows||[]).filter(r=>{
-    const re=String(r.email||"").trim().toLowerCase(), rn=String(r.cruiser||"").trim().toLowerCase();
-    const isMine=(me&&re===me) || (meName&&rn===meName);
-    if(!isMine) return true;
-    const id=String(r.id||"");
-    if(id && haveIds.has(id)) return false;          // this device drew it as a yellow pin already
-    if(!id){                                          // backend too old to send an id — fall back
-      const nk=String(r.stand||"").trim().toLowerCase()+"|"+String(r.plot||"").trim().toLowerCase();
-      if(haveNat.has(nk)) return false;
-    }
-    return true;                                      // mine, but not on this device — show it
+  /* v352. The rule used to be "hide the crew dot if it is MINE and already on this device". That
+     left a colleague's plot drawn twice — once as a device pin and once as a crew dot — because
+     "Restore plots from the Sheet" copies EVERYONE's rows onto this device. The user who reported
+     it was told by the count tool that twelve of his colleague's plots were his, and the map had
+     been showing each of them as two dots all along.
+
+     The rule is now simply "is this plot already on this device?", whoever collected it. The
+     device pin is the one kept, and nothing is lost by that: plotFill_ already colours device pins
+     with the SAME crewColorFor() the crew dots use, so who-collected-what still reads off the map
+     at a glance; the device pin also carries the plot number, the needs-work ring and the search
+     highlight, and it opens from the local copy with no network, where a crew dot has to fetch the
+     row before it can show anything.
+
+     Two things this must not do. It must not hide a plot that has no device pin to fall back on —
+     so the suppression only applies while the device layer is actually being drawn. And it must
+     not cost the live view: each cruiser's LATEST plot still gets its halo below, so "where has
+     everyone got to" survives. */
+  const onDevice=new Set();
+  if(layerVis.mine!==false) saved.forEach(p=>{ if(!p) return;
+    const lat=parseFloat(p.Y), lon=parseFloat(p.X);
+    onDevice.add(ptKey_(p._id,p.STANDID,p.PLOTNUM,lat,lon));
+    if(p._id) onDevice.add(ptKey_(null,p.STANDID,p.PLOTNUM,lat,lon));   // also match a feed with no id
   });
+  const heldHere=r=>onDevice.has(ptKey_(r.id,r.stand,r.plot,parseFloat(r.lat),parseFloat(r.lon)))
+               || onDevice.has(ptKey_(null,r.stand,r.plot,parseFloat(r.lat),parseFloat(r.lon)));
   const labelled = plotLabelField!=="none";
   const pts=[];
   (rows||[]).forEach(r=>{ const lat=parseFloat(r.lat), lon=parseFloat(r.lon);
@@ -3949,24 +3958,34 @@ function renderCrewPlots(rows, silent){
   const latest={}; pts.forEach(p=>{ if(!latest[p.who] || p.t>latest[p.who].t) latest[p.who]=p; });
   const bounds=[];
   // pass 1: ordinary plots (small dots) — get an analyzed label when a field is chosen
-  pts.forEach(p=>{ if(latest[p.who]===p) return; const col=crewColorFor(p.who);
+  let hidDup=0;
+  pts.forEach(p=>{ if(latest[p.who]===p) return;
+    if(heldHere(p)){ hidDup++; bounds.push([p.lat,p.lon]); return; }   // the device pin already draws it
+    const col=crewColorFor(p.who);
     const mk=L.circleMarker([p.lat,p.lon],{radius:PLOT_DOT_R,color:"#fff",weight:2.5,fillColor:col,fillOpacity:.95}).on("click",()=>openSheetPlot_(p.id,p.stand,p.plot,p)).addTo(crewLayer);
     if(labelled){ const t=plotLabelText_(p); if(t) mk.bindTooltip(t,{permanent:true,direction:"top",offset:[0,-8],className:"plot-tip"}); }
     bounds.push([p.lat,p.lon]); });
   // pass 2: each cruiser's latest plot (halo + larger dot) on top
+  /* The halo is how you see where each cruiser has got to, so it is drawn even when the plot is
+     already on this device — but then ONLY the ring, with no fill and no tooltip on a second dot,
+     so it reads as a ring around the device pin instead of covering it. */
   Object.keys(latest).forEach(who=>{ const p=latest[who], col=crewColorFor(who);
     L.circleMarker([p.lat,p.lon],{radius:13,color:col,weight:2.5,fill:false,opacity:.95}).addTo(crewLayer);
+    bounds.push([p.lat,p.lon]);
+    if(heldHere(p)){ hidDup++; return; }
     const m=L.circleMarker([p.lat,p.lon],{radius:8,color:"#fff",weight:3,fillColor:col,fillOpacity:1}).on("click",()=>openSheetPlot_(p.id,p.stand,p.plot,p)).addTo(crewLayer);
     const tip = labelled ? plotLabelText_(p) : p.who;   // analyzed value when labelling, else cruiser name
     if(tip) m.bindTooltip(tip,{permanent:true,direction:"top",offset:[0,-11],className:labelled?"plot-tip":"crew-tip"});
-    bounds.push([p.lat,p.lon]); });
+  });
   /* Do NOT force the layer back on here. A refresh (and there is one on a timer) used to switch
      the Sheet plots on again a few seconds after they were hidden. Honour the user's choice. */
   if(layerVis.sheet===false && fmap && fmap.hasLayer(crewLayer)) fmap.removeLayer(crewLayer);
   crewShown = (typeof layerVis==="undefined") ? true : layerVis.sheet!==false;
   setCrewBtn(); updateLayerStatus();
   const crews=Object.keys(latest).length, n=pts.length;
-  if(!silent) toast(n?`Showing ${n} crew plot${n>1?"s":""} from ${crews} cruiser${crews>1?"s":""}${labelled?" · labelled":" · latest highlighted"}`:"No submitted plots with a location yet",!n);
+  if(!silent) toast(n?`Showing ${n} crew plot${n>1?"s":""} from ${crews} cruiser${crews>1?"s":""}`+
+      (hidDup?` · ${hidDup} already on this device, drawn once`:"")+(labelled?" · labelled":" · latest highlighted")
+    :"No submitted plots with a location yet",!n);
   if(!silent && bounds.length) try{ fmap.fitBounds(bounds,{padding:[44,44]}); }catch(e){}   // fit only on first load, not auto-refreshes
 }
 
@@ -5412,7 +5431,7 @@ function renderLayerVis_(){
   // [key, label, count, canLabel]
   const shtN=(typeof crewData!=="undefined"&&crewData)?crewData.length:0;
   const rows=[["imported","🔵 Imported plots", impN, false],
-             ["mine","📍 My plots", saved.length, false],
+             ["mine","📍 Plots on this device", saved.length, false],
              ["sheet","👥 Plots from the Sheet", shtN, false],
              ["bound","▧ Stand boundaries", bndN, true],
              ["ref","• Imported points/lines", refN, true],
@@ -5922,7 +5941,7 @@ function updateInStand(){ const s=mePos?standOrPolyAt_(mePos.lat,mePos.lon):null
 
 /* ----- plot pins from saved plots ----- */
 // If a plot pin is within ~22 px of the tap, open its popup instead of the boundary popup.
-// Uses screen pixels so the buffer feels the same at every zoom. My plots take priority, then crew,
+// Uses screen pixels so the buffer feels the same at every zoom. Plots held on this device take priority, then crew,
 // then imported points; the nearest within the buffer wins.
 function nearbyPlotPopup_(latlng){
   if(!fmap) return false;
@@ -6038,7 +6057,10 @@ function myColor_(){
   return who ? crewColorFor(who) : "#e8b84b";
 }
 function plotFill_(p){
-  const who=String((p&&(p.CRUISER||p.EMAIL))||"").trim();
+  /* saved rows carry CRUISER_EMAIL; there is no EMAIL field, so the old fallback never fired and a
+     plot with a blank CRUISER was painted in YOUR colour — one more way someone else's work read
+     as your own. */
+  const who=String((p&&(p.CRUISER||p.CRUISER_EMAIL))||"").trim();
   if(!who) return myColor_();          // collected here before a name was set
   try{ return crewColorFor(shortEmail_(who)); }catch(e){ return myColor_(); }
 }
@@ -6867,7 +6889,7 @@ function updateLayerStatus(){
   const nMine=(typeof saved!=="undefined"&&saved)?saved.length:0;
   const nImp=(typeof auditPlots!=="undefined"&&auditPlots)?auditPlots.length:0;
   const rows=[
-    `${dot("#e8b84b")}<span>My plots: <b>${nMine}</b> ${nMine==1?"plot":"plots"}</span>`,
+    `${dot("#e8b84b")}<span>On this device: <b>${nMine}</b> ${nMine==1?"plot":"plots"}</span>`,
   ].concat(nImp?[`${dot("#4aa3e0")}<span>Imported plots: <b>${nImp}</b> ${nImp==1?"plot":"plots"}</span>`]:[]).concat([
     `${dot("#8fd18a")}<span>Stand boundaries: <b>${nb}</b> ${nb==1?"file":"files"} <span class="ls-muted">· ${plural(npoly,"polygon")}</span></span>`,
     `${dot("#ffffff")}<span>Reference: <b>${nref}</b> ${nref==1?"feature":"features"} <span class="ls-muted">· ${plural(npt,"point")}</span></span>`,
@@ -7602,19 +7624,53 @@ function addPolyPoint(ll){ const s=snapLatLng_(ll); polyPts.push([s.lat,s.lon]);
 /* ---------- point counting tools ---------- */
 // Gather every point layer as {layer, pts:[{lat,lon,stand}]}. "stand" is the plot's own stand where
 // known, else looked up by location — so we can break counts down by compartment.
+/* One identity for a plot, however it reached the device. "Restore plots from the Sheet" copies
+   EVERY row into `saved` — including plots other people collected — and those same rows also arrive
+   in the crew feed. Without a key they were two different points to the counters, so a colleague's
+   plot was counted once as "mine" and again as "crew", and the density came out double. The Sheet's
+   PlotID is kept by the restore (`r._id = r.PlotID`) and is the same value the crew feed sends as
+   `id`, so the two copies collapse onto one key. */
+function ptKey_(id, stand, plot, lat, lon){
+  const i=String(id==null?"":id).trim();
+  if(i) return "id:"+i;
+  const s=String(stand==null?"":stand).trim().toLowerCase(), p=String(plot==null?"":plot).trim().toLowerCase();
+  if(s||p) return "sp:"+s+"|"+p;
+  return "xy:"+(+lat).toFixed(5)+"|"+(+lon).toFixed(5);
+}
+/* Did I collect this, or did it just end up on my device? */
+function collectedByMe_(who, email){
+  const me=String(typeof cruiserEmail!=="undefined"?cruiserEmail:"").trim().toLowerCase();
+  const meName=String(typeof cruiser!=="undefined"?cruiser:"").trim().toLowerCase();
+  const e=String(email||"").trim().toLowerCase(), n=String(who||"").trim().toLowerCase();
+  if(me && e) return e===me;
+  if(meName && n) return n===meName;
+  return !e && !n;    // unattributed rows on this device are treated as your own
+}
 function allPointLayers_(){
   const layers=[];
-  const mine=[]; saved.forEach(p=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X);
-    if(isFinite(lat)&&isFinite(lon)) mine.push({lat,lon,stand:(p.STANDID||"").trim()||standOrPolyAt_(lat,lon)||"(unattributed)"}); });
-  if(mine.length) layers.push({layer:"My plots (this device)", pts:mine});
+  /* "My plots (this device)" was a lie after a Sheet restore: `saved` means "held on this device",
+     not "collected by me". Someone looking at 12 of their colleague's plots was told they were
+     theirs. Split by who actually collected it, and name the layers for provenance. */
+  const mineOwn=[], mineOther=[];
+  saved.forEach(p=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X);
+    if(!isFinite(lat)||!isFinite(lon)) return;
+    const who=(p.CRUISER||"").trim(), email=(p.CRUISER_EMAIL||"").trim();
+    const rec={lat,lon,who:who||email||"(not recorded)",
+      key:ptKey_(p._id,p.STANDID,p.PLOTNUM,lat,lon),
+      stand:(p.STANDID||"").trim()||standOrPolyAt_(lat,lon)||"(unattributed)"};
+    (collectedByMe_(who,email)?mineOwn:mineOther).push(rec); });
+  if(mineOwn.length) layers.push({layer:"Plots you collected (on this device)", pts:mineOwn});
+  if(mineOther.length) layers.push({layer:"On this device, collected by someone else", pts:mineOther});
   /* Deliberately NOT gated on whether the layer is visible. This answers "how many plots are in
      each compartment", which is a question about the data, not about the map. Hiding a layer to
      see the boundaries underneath must not quietly subtract 400 plots from a count — that is the
      same absent-vs-zero trap that has bitten this code before, and it would be invisible. The
      label says where the plots came from; the total is the total. */
   if(crewData.length){ const crew=[]; crewData.forEach(r=>{ const lat=parseFloat(r.lat), lon=parseFloat(r.lon);
-    if(isFinite(lat)&&isFinite(lon)) crew.push({lat,lon,stand:(r.stand||"").trim()||standOrPolyAt_(lat,lon)||"(unattributed)"}); });
-    if(crew.length) layers.push({layer:"Crew plots (from the Sheet)"+(layerVis.sheet===false?" — hidden on the map":""), pts:crew}); }
+    if(isFinite(lat)&&isFinite(lon)) crew.push({lat,lon,who:(r.cruiser||r.email||"(not recorded)"),
+      key:ptKey_(r.id,r.stand,r.plot,lat,lon),
+      stand:(r.stand||"").trim()||standOrPolyAt_(lat,lon)||"(unattributed)"}); });
+    if(crew.length) layers.push({layer:"In the Sheet (all crews)"+(layerVis.sheet===false?" — hidden on the map":""), pts:crew}); }
   /* The imported plots loaded for completion — the blue pins. They were missing from the tally
      entirely, while the reference points were labelled "Imported points", so the one layer you would
      most want counted was absent and its name was taken by something else. */
@@ -7622,15 +7678,35 @@ function allPointLayers_(){
     const imp=[], impDone=[];
     auditPlots.forEach(p=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X);
       if(!isFinite(lat)||!isFinite(lon)) return;
-      const rec={lat,lon,stand:(p.STANDID||"").trim()||standOrPolyAt_(lat,lon)||"(unattributed)"};
+      const rec={lat,lon,who:(p.CRUISER||"").trim()||"(not recorded)",
+        key:ptKey_(p._id,p.STANDID,p.PLOTNUM,lat,lon),
+        stand:(p.STANDID||"").trim()||standOrPolyAt_(lat,lon)||"(unattributed)"};
       imp.push(rec); if(p._done) impDone.push(rec); });
     if(imp.length) layers.push({layer:"Imported plots", pts:imp});
     if(impDone.length) layers.push({layer:"Imported plots — completed", pts:impDone});
   }
   if(refLabels && refLabels.length){ const ref=refLabels.filter(r=>isFinite(r.lat)&&isFinite(r.lng))
-      .map(r=>({lat:r.lat,lon:r.lng,stand:standOrPolyAt_(r.lat,r.lng)||"(outside compartments)"}));
+      .map(r=>({lat:r.lat,lon:r.lng,who:"", key:ptKey_(null,null,null,r.lat,r.lng),
+                stand:standOrPolyAt_(r.lat,r.lng)||"(outside compartments)"}));
     if(ref.length) layers.push({layer:"Reference points (loaded layer)", pts:ref}); }
   return layers;
+}
+/* How many DISTINCT plots are in these lists, and how many entries were repeats of one already
+   seen in an earlier layer. Adding the layer counts together is what produced a density of twice
+   the truth. */
+function distinctPts_(lists){
+  const seen=new Set(); let dup=0;
+  lists.forEach(pts=>pts.forEach(p=>{ const k=p.key||("xy:"+p.lat+"|"+p.lon);
+    if(seen.has(k)) dup++; else seen.add(k); }));
+  return {n:seen.size, dup:dup};
+}
+/* Who collected the distinct plots in these lists — the answer to "whose plots are these?" */
+function byWho_(lists){
+  const seen=new Set(), who={};
+  lists.forEach(pts=>pts.forEach(p=>{ const k=p.key||("xy:"+p.lat+"|"+p.lon);
+    if(seen.has(k)) return; seen.add(k);
+    const w=(p.who||"").trim()||"(not recorded)"; who[w]=(who[w]||0)+1; }));
+  return who;
 }
 function countByStand_(pts){ const m={}; pts.forEach(p=>{ const s=p.stand||"(unattributed)"; m[s]=(m[s]||0)+1; }); return m; }
 // Count everything on the map, per layer and per compartment.
@@ -7666,15 +7742,25 @@ function countPoints(){
   const layers=allPointLayers_();
   const total=layers.reduce((a,l)=>a+l.pts.length,0);
   if(!total){ toast("No points on the map yet — submit a plot, show crew plots, or import points",true); return; }
-  let html=`<div style="font:600 13px system-ui;margin-bottom:6px">${total} point${total===1?"":"s"} on the map</div>`;
-  const byStand={};
+  const d=distinctPts_(layers.map(l=>l.pts));
+  const who=byWho_(layers.map(l=>l.pts));
+  let html=`<div style="font:600 13px system-ui;margin-bottom:6px">${d.n} plot${d.n===1?"":"s"} on the map</div>`;
+  { const names=Object.keys(who).sort((a,b)=>who[b]-who[a]);
+    if(names.length) html+=`<div style="margin:2px 0 6px;font:12px system-ui;color:#dcefe0">Collected by: `+
+      names.map(n=>`${esc(n)} <b>${who[n]}</b>`).join(" · ")+`</div>`; }
+  const byStand={}, seenStand=new Set();
   layers.forEach(l=>{ html+=`<div style="margin:6px 0 2px;font:600 12px system-ui;color:#8fe6a0">${esc(l.layer)}: ${l.pts.length}</div>`;
     const cs=countByStand_(l.pts); html+=`<div style="font:12px 'Courier New',monospace;color:#dcefe0">`+
       Object.keys(cs).sort().map(s=>`&nbsp;&nbsp;${esc(s)}: ${cs[s]}`).join("<br>")+`</div>`;
-    l.pts.forEach(p=>{ byStand[p.stand]=(byStand[p.stand]||0)+1; }); });
-  html+=`<div style="margin:8px 0 2px;font:600 12px system-ui;color:#8fe6a0">All layers by compartment</div>`+
+    /* The roll-up counts each plot ONCE however many layers hold it. */
+    l.pts.forEach(p=>{ const k=p.key||("xy:"+p.lat+"|"+p.lon); if(seenStand.has(k)) return; seenStand.add(k);
+      byStand[p.stand]=(byStand[p.stand]||0)+1; }); });
+  html+=`<div style="margin:8px 0 2px;font:600 12px system-ui;color:#8fe6a0">By compartment — each plot counted once</div>`+
     `<div style="font:12px 'Courier New',monospace;color:#dcefe0">`+
     Object.keys(byStand).sort().map(s=>`&nbsp;&nbsp;${esc(s)}: ${byStand[s]}`).join("<br>")+`</div>`;
+  if(d.dup) html+=`<div style="margin-top:6px;font:11px system-ui;color:#8fae95">`+
+    `The layer rows add up to ${total}, but ${d.dup} of those are the same plot in two places — `+
+    `a plot restored from the Sheet is both on this device and in the Sheet. ${d.n} is the number of real plots.</div>`;
   showInfoSheet_("Point counts", html);
 }
 // Count points that fall inside the last-drawn (or currently-drawn) polygon.
@@ -7683,14 +7769,31 @@ function countInPolygon(){
   if(polyPts.length>=3){ ring=polyPts; where="current outline"; }
   else if(polys.length){ ring=polys[polys.length-1].pts; where=polys[polys.length-1].name; }
   if(!ring){ toast("Draw a polygon first (⬠), then tap Count-in-area",true); return; }
-  const layers=allPointLayers_(); let total=0;
-  let html=`<div style="font:600 13px system-ui;margin-bottom:6px">Inside ${esc(where)}</div>`;
+  const layers=allPointLayers_();
+  const insideOf=[]; let rows="";
   layers.forEach(l=>{ const inside=l.pts.filter(p=>pointInRing_(p.lat,p.lon,ring));
-    total+=inside.length; if(inside.length) html+=`<div style="font:12px system-ui;color:#dcefe0">${esc(l.layer)}: <b>${inside.length}</b> of ${l.pts.length}</div>`; });
-  html=`<div style="font:600 13px system-ui;margin-bottom:6px">${total} point${total===1?"":"s"} inside ${esc(where)}</div>`+
-       (total?html.split("</div>").slice(1).join("</div>"):"<div style='color:#a9c9b0'>No points fall inside this polygon.</div>");
+    insideOf.push(inside);
+    if(inside.length) rows+=`<div style="font:12px system-ui;color:#dcefe0">${esc(l.layer)}: <b>${inside.length}</b> of ${l.pts.length}</div>`; });
+  /* The headline and the density count DISTINCT plots. The same plot is commonly in two lists at
+     once — restore a colleague's plots from the Sheet and every one of them is both "on this
+     device" and "in the Sheet" — and adding the rows together reported twice the plots and twice
+     the density, with nothing on screen to hint at it. */
+  const d=distinctPts_(insideOf);
+  const who=byWho_(insideOf);
+  let html=`<div style="font:600 13px system-ui;margin-bottom:6px">${d.n} plot${d.n===1?"":"s"} inside ${esc(where)}</div>`;
+  if(!d.n) html+="<div style='color:#a9c9b0'>No points fall inside this polygon.</div>";
+  else {
+    const names=Object.keys(who).sort((a,b)=>who[b]-who[a]);
+    html+=`<div style="margin:2px 0 6px;font:12px system-ui;color:#dcefe0">Collected by: `+
+      names.map(n=>`${esc(n)} <b>${who[n]}</b>`).join(" · ")+`</div>`;
+    html+=`<div style="margin-top:6px;font:600 12px system-ui;color:#8fe6a0">Where they are held</div>`+rows;
+    if(d.dup) html+=`<div style="margin-top:5px;font:11px system-ui;color:#8fae95">`+
+      `The rows above add up to ${d.n+d.dup}, but ${d.dup} of those are the same plot listed in two places `+
+      `(a plot restored from the Sheet is both on this device and in the Sheet). `+
+      `${d.n} is the number of real plots.</div>`;
+  }
   const haP=polyAreaOf_(ring)/10000;
-  html+=`<div style="margin-top:8px;font:12px system-ui;color:#a9c9b0">Polygon area ≈ ${haP.toFixed(haP<10?2:1)} ha · density ≈ ${haP>0?(total/haP).toFixed(2):"—"} points/ha</div>`;
+  html+=`<div style="margin-top:8px;font:12px system-ui;color:#a9c9b0">Polygon area ≈ ${haP.toFixed(haP<10?2:1)} ha · density ≈ ${haP>0?(d.n/haP).toFixed(2):"—"} plots/ha</div>`;
   showInfoSheet_("Points in polygon", html);
 }
 // lightweight info sheet reused by both tools
