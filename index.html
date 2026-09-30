@@ -220,6 +220,8 @@
      26 analysis rows and swallow the map. */
   .bpop .leaflet-popup-content{ margin:9px 11px; }
   .bpop .leaflet-popup-content-wrapper{ max-height:46vh; }
+  /* Species and Marking carry real tables, so they get more of the screen than the Layer list. */
+  .bpop-wide .leaflet-popup-content-wrapper{ max-height:62vh; }
   /* Saved-plot pins carry two label states. "full" is every ticked field, one per line; "min" is the
      bare plot number, used when zoomed out or when a full label would land on one already drawn. */
   .pdot{ background:#e8b84b; box-sizing:border-box; font:700 10px/1.3 'Courier New',monospace; color:#1a2e18; }
@@ -1139,7 +1141,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-28 · v353";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-30 · v358";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1455,16 +1457,44 @@ function addSpeciesToList(name,isShrub,code){
   if(!pendingSpecies.some(p=>p.t===t&&p.n.toLowerCase()===name.toLowerCase())) pendingSpecies.push(isShrub?{t,n:name}:{t,n:name,c:code});
   persistCustom();
 }
+/* v356. This used to drop each entry from the queue in the .then() of the POST — and the POST is
+   mode:"no-cors", whose promise resolves with an opaque response that proves only that the browser
+   took the request. In the sort of reception the crews actually work in, that resolves while the
+   request dies in the air: the new plant was struck off the upload queue, stayed on the one phone
+   that added it, and never reached anybody else. The same false-positive that lost the W-1 plots.
+
+   Now the entry stays queued until the SHARED LIST ITSELF comes back containing it. Re-posting
+   costs nothing: addSpecies_ on the backend matches on (type, name) and appends only when absent,
+   so a duplicate send is a no-op. */
 function flushSpecies(){
   if(!connected || isOffline() || !pendingSpecies.length) return;
-  pendingSpecies.slice().forEach(p=>{
+  const batch=pendingSpecies.slice();
+  batch.forEach(p=>{
     fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({_action:"addspecies",type:p.t,name:p.n,code:p.c||""})})
-      .then(()=>{ pendingSpecies=pendingSpecies.filter(x=>!(x.t===p.t&&x.n.toLowerCase()===p.n.toLowerCase())); persistCustom(); })
       .catch(()=>{});
   });
+  // give the Sheet a moment to write, then ask it what it actually holds
+  setTimeout(()=>fetchSpecies(resp=>speciesConfirm_(batch,resp)), 1500);
 }
-function fetchSpecies(){
-  if(!connected || isOffline()) return;
+/* Remove from the queue only the names the shared list now really contains. Anything else stays
+   queued for the next pass, so an addition cannot be silently lost. */
+function speciesConfirm_(batch, resp){
+  if(!resp) return;                                  // no answer — keep everything queued
+  const has=(t,n)=>{
+    const list = t==="tree" ? ((resp.tree||[]).map(x=>String((x&&x.name)||x||"")))
+               : t==="shrub" ? (resp.shrub||[])
+               : t==="ground" ? (resp.ground||[])
+               : t==="pest" ? (resp.pest||[])
+               : t==="disease" ? (resp.disease||[]) : [];
+    return list.some(x=>String(x||"").trim().toLowerCase()===String(n||"").trim().toLowerCase());
+  };
+  const before=pendingSpecies.length;
+  pendingSpecies=pendingSpecies.filter(x=>!batch.some(b=>b.t===x.t
+        && String(b.n).toLowerCase()===String(x.n).toLowerCase() && has(x.t,x.n)));
+  if(pendingSpecies.length!==before) persistCustom();
+}
+function fetchSpecies(then){
+  if(!connected || isOffline()){ if(then) then(null); return; }
   const cb="__spp"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?";
   const sc=document.createElement("script");
   const cleanup=()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
@@ -1482,8 +1512,8 @@ function fetchSpecies(){
         addableBuild("PESTS"); addableBuild("DISEASE"); }
       persistCustom(); refreshSpeciesSelects();
       if(gChanged) renderGround(getGround());   // keep current selection, add the newly-known chips
-    }catch(e){} cleanup(); };
-  sc.onerror=cleanup;
+    }catch(e){} cleanup(); if(then) then(resp||null); };
+  sc.onerror=()=>{ cleanup(); if(then) then(null); };
   sc.src=SCRIPT_URL+sep+"action=species&callback="+cb;
   document.body.appendChild(sc);
 }
@@ -2027,13 +2057,51 @@ function loadPlot(d){
 let editingIndex=null;
 function genId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 
+/* v354. This used to do `.then(() => { d._sent = true; … })`, and that one line is the second
+   reason the crew lost a day's plots.
+
+   The POST is mode:"no-cors", so its promise resolves with an OPAQUE response — it tells you the
+   browser handed the request off, nothing more. On a bar and a half of signal that resolves while
+   the request dies in the air. The plot was then marked sent, the user was told "Submitted", and
+   the offline queue — which only ever retries plots with _sent false — never looked at it again.
+   A silent false positive is worse than an error: the retry machinery was working perfectly and
+   was simply never told there was anything to retry.
+
+   Now a POST only records that we POSTED it. Only the Sheet, asked afterwards, can say it arrived.
+   Re-posting is safe: the backend upserts on PlotID, so a plot that did land is updated, not
+   duplicated. */
 function send(d,isUpdate){
   if(!connected){ toast("Saved on device (not connected yet)",true); return; }
   fetch(SCRIPT_URL,{ method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain;charset=utf-8"}, body:JSON.stringify(d) })
-    .then(()=>{ d._sent=true; persist(); renderSaved(); netDot();
-      toast(`${isUpdate?"Updated":"Submitted"} · Stand ${d.STANDID||"—"} plot ${d.PLOTNUM||"—"}`);
-      scheduleAnalysisRefresh_(); })
-    .catch(()=>{ toast("Saved on device — no signal, will need re-send",true); renderSaved(); netDot(); });
+    .then(()=>{ d._posted=true; persist(); renderSaved(); netDot();
+      toast(`${isUpdate?"Sent":"Sent"} · Stand ${d.STANDID||"—"} plot ${d.PLOTNUM||"—"} — confirming…`);
+      plotConfirm_([d], ()=>{ renderSaved(); netDot();
+        if(d._sent) toast(`✓ In the Sheet · Stand ${d.STANDID||"—"} plot ${d.PLOTNUM||"—"}`);
+        scheduleAnalysisRefresh_(); }); })
+    .catch(()=>{ toast("Saved on device — no signal, will send when back in range",true); renderSaved(); netDot(); });
+}
+/* Ask the Sheet which of these plots it actually holds, by PlotID. `plotrow` answers for one plot
+   and has been in the backend since v333, so this needs no new deployment. Calls back with the
+   number confirmed; a plot that cannot be verified is simply left queued for the next pass —
+   never marked sent on a hope. */
+function plotConfirm_(list, then){
+  const want=(list||[]).filter(p=>p && p._id && !p._sent).slice(0,12);
+  if(!want.length || !connected || isOffline()){ if(then) then(0); return; }
+  let left=want.length, okN=0;
+  want.forEach(p=>{
+    const name="__pc"+Date.now()+Math.random().toString(36).slice(2,6);
+    const sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+    let settled=false;
+    const clean=()=>{ try{ delete window[name]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+    const fin=hit=>{ if(settled) return; settled=true; clean();
+      if(hit){ p._sent=true; okN++; }
+      if(--left===0){ persist(); if(then) then(okN); } };
+    window[name]=r=>fin(!!(r && r.ok && r.plot));
+    sc.onerror=()=>fin(false);
+    setTimeout(()=>fin(false), 15000);
+    sc.src=SCRIPT_URL+sep+"action=plotrow&id="+encodeURIComponent(p._id)+"&callback="+name;
+    document.body.appendChild(sc);
+  });
 }
 // After a plot reaches the Sheet, refresh the on-the-fly analysis so the new plot can be labelled with
 // its analyzed values right away. Debounced so a burst of submits triggers just one fetch.
@@ -2174,7 +2242,50 @@ function setEditMode(on,audit){
   document.querySelector(".btn.submit").textContent = on?"Update plot":"Submit plot";
 }
 
-function persist(){ if(STORE){ try{ STORE.setItem(PKEY, JSON.stringify(saved)); }catch(e){} } }
+/* ── Keeping the plots (v354) ──────────────────────────────────────────────────────────────────
+   A crew lost about ten plots: entered in the field on poor signal, the phone went flat, and on
+   restart they were neither on the device nor in the Sheet. Three things made that possible, and
+   this is the first of them.
+
+   localStorage holds the plots — and also the georeferenced PDF map (fi_pdf) and other caches, in
+   a bucket iOS caps at roughly 5 MB. Boundary shapefiles were moved to IndexedDB long ago for
+   exactly that reason (see LAYER_DB below, "localStorage's ~5 MB cap was too small"), but the one
+   irreplaceable thing on the phone was left behind in it. When the bucket fills, setItem throws
+   QuotaExceededError — and `catch(e){}` swallowed it. The plot stayed in the in-memory array, so
+   the list, the map and the counter all looked perfectly normal. Nothing was on disk. Pull the
+   battery and it is gone.
+
+   So: write to localStorage AND to IndexedDB, which has orders of magnitude more room and is where
+   the photos already live; then READ THE LOCAL WRITE BACK and say so out loud if it did not stick.
+   plotBackupSave_ is declared below and hoisted; it deliberately does not touch HAS_IDB, which is a
+   const defined further down the file and would be in its temporal dead zone during the load-time
+   persist() that migrateSentAudit_ performs. */
+let _lsFailed=false, _lsWarned=false;
+function persist(){
+  const json=JSON.stringify(saved);
+  let ok=false;
+  if(STORE){ try{ STORE.setItem(PKEY,json); ok=(STORE.getItem(PKEY)||"").length===json.length; }catch(e){ ok=false; } }
+  plotBackupSave_(saved);                        // durable second copy, always
+  if(!ok && (STORE||!_lsWarned)) storageFailed_();
+  else if(ok) _lsFailed=false;
+}
+/* Said once, and in the sheet that stays open — not a toast that clears itself in two seconds
+   while the user is looking at a tree. */
+function storageFailed_(){
+  _lsFailed=true;
+  if(_lsWarned) return;
+  _lsWarned=true;
+  const idb=!!(window.indexedDB);
+  try{ showInfoSheet_("This device's main storage is full",
+    `<div style="font-size:13px;line-height:1.55;color:#e8f0e6">`+
+    `Your plots could not be written to the phone's ordinary storage.`+
+    (idb ? ` They <b>are</b> being written to the larger backup store, so they are not lost — but please get them into the Sheet as soon as you have signal.`
+         : ` This device also has no backup store, so <b>a plot is only safe once it reaches the Sheet</b>. Send them as soon as you have signal.`)+
+    `</div>`+
+    `<div style="font-size:12px;line-height:1.5;color:#8fae95;margin-top:10px">`+
+    `To free the main storage: <b>+ Layers</b> &rsaquo; unload the PDF map, or Tools &rsaquo; This device &rsaquo; storage, and clear what you no longer need. `+
+    `Your plots are never cleared by that.</div>`); }catch(e){}
+}
 
 /* ---------- Import past-collected plots (audit set) ----------
    Reads a zipped shapefile (or .dbf/.geojson) of previously collected FRI plots, matches fields to
@@ -2628,7 +2739,11 @@ function renderSaved(){
   c.innerHTML=undoBar+sendAll+`<table class="saved"><thead><tr><th>Stand</th><th>Plot</th><th>Trees</th><th>Status</th><th></th></tr></thead><tbody>`+
     saved.map((p,i)=>`<tr><td class="num">${esc(p.STANDID||"—")}</td><td class="num">${esc(p.PLOTNUM||"—")}</td>
       <td class="num">${p._trees||0}</td>
-      <td>${p._sent?`<span class="st sent">sent</span>`:`<span class="st queued">queued</span>`}</td>
+      <!-- Three states, not two. "sent" now means the Sheet has confirmed it; a plot we posted but
+           could not confirm says so rather than claiming to be safe. -->
+      <td>${p._sent?`<span class="st sent">in Sheet</span>`
+            :(p._posted?`<span class="st queued" title="Posted, but the Sheet has not confirmed it yet — it will be sent again">confirming</span>`
+                       :`<span class="st queued">queued</span>`)}</td>
       <td style="text-align:right"><button class="tbtn" onclick="editPlot(${i})">Edit</button>${p._sent?"":`<button class="tbtn" onclick="resend(${i})">Send</button>`}<button class="tbtn del" onclick="delPlot(${i})" title="Delete this plot">🗑 Delete</button></td></tr>`).join("")+
     `</tbody></table>`;
   // Audit set (imported past plots) — shown separately, editable, with duplicate flags.
@@ -2698,15 +2813,33 @@ function flushQueue(manual){
   if(!q.length){ if(manual) toast("Nothing queued"); return; }
   if(isOffline()){ if(manual) toast("Still offline — will send when back in signal",true); return; }
   if(manual) toast(`Sending ${q.length} queued plot${q.length===1?"":"s"}…`);
+  /* Post them all, then ask the Sheet which ones actually arrived. Same reasoning as send(): the
+     opaque response cannot tell success from a request that died in the air, and marking them sent
+     on it is precisely what stopped this queue retrying the plots that were lost. Anything not
+     confirmed stays queued and comes round again on the 60-second timer. */
+  let posted=0, tried=0;
   q.forEach(d=>{
     fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(d)})
-      .then(()=>{ d._sent=true; persist(); renderSaved(); netDot(); })
-      .catch(()=>{});
+      .then(()=>{ d._posted=true; posted++; })
+      .catch(()=>{})
+      .then(()=>{ if(++tried<q.length) return;
+        persist(); renderSaved(); netDot();
+        setTimeout(()=>plotConfirm_(q, n=>{
+          renderSaved(); netDot();
+          const still=saved.filter(p=>!p._sent).length;
+          if(manual || n) toast(n?`✓ ${n} plot${n===1?"":"s"} confirmed in the Sheet`+(still?` · ${still} still to send`:"")
+                                  :`Sent ${posted}, but none confirmed yet — will keep trying`, !n);
+        }), 1200);
+      });
   });
 }
 window.addEventListener("online", ()=>{ toast("Back online — sending queued plots"); netDot(); renderSaved(); flushQueue(); flushSpecies(); fetchSpecies(); flushTracts(); fetchTracts(); flushPhotos(); flushDeletes_(); });
 window.addEventListener("offline", ()=>{ netDot(); renderSaved(); });
-setInterval(()=>{ if(saved.some(p=>!p._sent)) flushQueue(); if(pendingDeletes.length) flushDeletes_(); }, 60000); // safety retry every 60s
+/* Species and tracts were missing from this. An addition that failed to confirm only got another
+   chance on the next "online" event or the next time somebody added a plant — which on a phone
+   that never goes properly offline is never. */
+setInterval(()=>{ if(saved.some(p=>!p._sent)) flushQueue(); if(pendingDeletes.length) flushDeletes_();
+  if(pendingSpecies.length) flushSpecies(); if(typeof pendingTracts!=="undefined" && pendingTracts.length) flushTracts(); }, 60000); // safety retry every 60s
 setInterval(()=>{ try{ flushPhotos(); }catch(e){} }, 90000);            // retry any unconfirmed photo uploads
 
 /* ---------- GPS ---------- */
@@ -2733,6 +2866,62 @@ let currentPhotoNames=[];   // filenames of photos taken for the plot being ente
 function idbOpen(){ return new Promise((res,rej)=>{ const r=indexedDB.open(PHOTO_DB,1);
   r.onupgradeneeded=()=>{ const db=r.result; if(!db.objectStoreNames.contains(PHOTO_STORE)) db.createObjectStore(PHOTO_STORE,{keyPath:"filename"}); };
   r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+/* The plots' durable copy. Same reasoning that moved the boundary layers out of localStorage, only
+   this time for the data that cannot be re-created by reloading a file. Written on every persist(),
+   read back at startup, and used to restore anything localStorage has lost. Deliberately uses
+   window.indexedDB directly rather than HAS_IDB, which is declared after the first persist() runs. */
+const PLOT_DB="fi_plotsdb", PLOT_STORE="plots", PLOT_KEY="saved";
+function pdbOpen_(){ return new Promise((res,rej)=>{
+  try{
+    const r=indexedDB.open(PLOT_DB,1);
+    r.onupgradeneeded=()=>{ const db=r.result; if(!db.objectStoreNames.contains(PLOT_STORE)) db.createObjectStore(PLOT_STORE); };
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+  }catch(e){ rej(e); } }); }
+/* Coalesced: a burst of saves writes once. The copy is a snapshot of the whole array, so the last
+   write wins and a dropped intermediate one costs nothing. */
+let _pdbTimer=null, _pdbPending=null;
+function plotBackupSave_(arr){
+  if(!window.indexedDB) return;
+  try{ _pdbPending=JSON.parse(JSON.stringify(arr)); }catch(e){ _pdbPending=arr; }
+  if(_pdbTimer) return;
+  _pdbTimer=setTimeout(()=>{ const snap=_pdbPending; _pdbTimer=null; _pdbPending=null;
+    pdbOpen_().then(db=>{ const tx=db.transaction(PLOT_STORE,"readwrite");
+      tx.objectStore(PLOT_STORE).put(snap,PLOT_KEY);
+      tx.oncomplete=()=>db.close(); tx.onerror=()=>db.close();
+    }).catch(()=>{}); }, 400);
+}
+/* Start over has to be able to erase this too, or the backup would quietly put every plot back on
+   the next load — which is exactly what v354 would have done to "Start over" if this were missing. */
+function plotBackupClear_(){ return new Promise(res=>{
+  if(!window.indexedDB) return res();
+  pdbOpen_().then(db=>{ const tx=db.transaction(PLOT_STORE,"readwrite");
+    tx.objectStore(PLOT_STORE).clear();
+    tx.oncomplete=()=>{db.close();res();}; tx.onerror=()=>{db.close();res();};
+  }).catch(()=>res()); }); }
+function plotBackupAll_(){ return new Promise(res=>{
+  if(!window.indexedDB) return res(null);
+  pdbOpen_().then(db=>{ const tx=db.transaction(PLOT_STORE,"readonly");
+    const rq=tx.objectStore(PLOT_STORE).get(PLOT_KEY);
+    rq.onsuccess=()=>{ db.close(); res(rq.result||null); };
+    rq.onerror=()=>{ db.close(); res(null); };
+  }).catch(()=>res(null)); }); }
+/* At startup, put back anything the backup has that localStorage does not. This is what turns a
+   flat battery from "the day's work is gone" into "the app picks up where it was". */
+function plotBackupRestore_(){
+  plotBackupAll_().then(backup=>{
+    if(!backup || !backup.length) return;
+    const have=new Set(saved.map(p=>String((p&&p._id)||"")).filter(Boolean));
+    const back=[];
+    backup.forEach(p=>{ const id=String((p&&p._id)||""); if(id && !have.has(id)) back.push(p); });
+    if(!back.length) return;
+    saved=saved.concat(back);
+    persist(); renderSaved(); netDot();
+    try{ if(fmap) renderMapPins(); }catch(e){}
+    const q=back.filter(p=>!p._sent).length;
+    toast(`Recovered ${back.length} plot${back.length===1?"":"s"} from this device's backup`+(q?` · ${q} still to send`:""));
+    if(q && connected && !isOffline()) flushQueue();
+  }).catch(()=>{});
+}
 // Boundary layers live in their own IndexedDB store (localStorage's ~5 MB cap was too small for shapefiles).
 const LAYER_DB="fi_layers_db", LAYER_STORE="layers";
 function ldbOpen(){ return new Promise((res,rej)=>{ const r=indexedDB.open(LAYER_DB,1);
@@ -2891,20 +3080,36 @@ function renderArchive(){
       : "No photos saved on this phone yet.";
     grid.innerHTML = list.map(r=>`<div class="pcell">
       <span class="pstat ${r.uploaded?"up":"q"}">${r.uploaded?"✓ up":"⏳ queued"}</span>
-      <button class="pdel" type="button" onclick="deletePhoto('${esc(r.filename)}')">✕</button>
+      <button class="pdel" type="button" onclick="deletePhoto('${esc(r.filename)}',${r.uploaded?1:0})">✕</button>
       <img src="${r.data}" alt="${esc(r.filename)}">
       <div class="pcap">${esc(r.filename)}</div></div>`).join("");
   };
   if(HAS_IDB) idbAll().then(render).catch(()=>render([])); else render(pendingMem.slice());
 }
-function deletePhoto(fn){
+/* The ✕ used to delete without a word, whether or not the photo had reached Drive. A queued
+   photo exists nowhere else, so a mis-tap on a phone destroyed the only copy. An uploaded one is
+   safe on Drive and still deletes freely — the warning is only for the ones that matter. */
+function deletePhoto(fn, uploaded){
+  if(!uploaded && !confirm("This photo has NOT been backed up to Drive yet.\n\nIt exists only on this phone. Delete it permanently?")) return;
   const after=()=>{ updateArchiveBadge(); renderArchive(); };
   if(HAS_IDB) idbDelete(fn).then(after).catch(after); else { pendingMem=pendingMem.filter(x=>x.filename!==fn); after(); }
 }
+/* The old wording — "Photos already uploaded to Drive are not affected" — was true of the Drive
+   copies and quietly false about the phone: this clears EVERY on-device photo, including ones that
+   never made it to Drive and exist nowhere else. Count them and say so, at the moment it matters. */
 function clearArchive(){
-  if(!confirm("Delete all photos saved on this phone? Photos already uploaded to Drive are not affected.")) return;
-  const after=()=>{ updateArchiveBadge(); renderArchive(); toast("On-device photos cleared"); };
-  if(HAS_IDB) idbClearStore().then(after).catch(after); else { pendingMem=[]; after(); }
+  const go=list=>{
+    const q=list.filter(r=>!r.uploaded).length;
+    const msg = q
+      ? ("Delete all photos saved on this phone?\n\n" + q + " photo" + (q===1?" has":"s have") +
+         " NOT been backed up to Drive yet — " + (q===1?"it exists":"they exist") +
+         " nowhere else and will be lost for good.\n\nPhotos already on Drive stay on Drive.")
+      : "Delete all photos saved on this phone?\n\nEvery one of them is already backed up to Drive, so the Drive copies are unaffected.";
+    if(!confirm(msg)) return;
+    const after=()=>{ updateArchiveBadge(); renderArchive(); toast("On-device photos cleared"); };
+    if(HAS_IDB) idbClearStore().then(after).catch(after); else { pendingMem=[]; after(); }
+  };
+  if(HAS_IDB) idbAll().then(go).catch(()=>go([])); else go(pendingMem.slice());
 }
 // Re-back-up every on-device photo to Drive. The Sheet skips any that already exist there,
 // so this only re-creates ones that were removed — no duplicates.
@@ -2945,7 +3150,12 @@ function clearAllData(){
     if(STORE){ const keys=[]; for(let i=0;i<STORE.length;i++){ const k=STORE.key(i); if(k && k.indexOf("fi_")===0) keys.push(k); } keys.forEach(k=>STORE.removeItem(k)); }
   }catch(e){}
   const done=()=>{ toast("All on-device data erased — starting fresh"); setTimeout(()=>location.reload(),700); };
-  if(HAS_IDB) idbClearStore().then(done).catch(done); else { pendingMem=[]; done(); }
+  /* The plot backup must go too. It is a second, durable copy that survives localStorage being
+     cleared — which is the whole point of it — so without this line Start over would wipe the
+     phone and plotBackupRestore_ would put every plot straight back on the next load. */
+  const clearPlots=()=>{ try{ return plotBackupClear_(); }catch(e){ return Promise.resolve(); } };
+  if(HAS_IDB) clearPlots().then(()=>idbClearStore()).then(done).catch(done);
+  else { pendingMem=[]; clearPlots().then(done).catch(done); }
 }
 
 /* ---------- CSV backup ---------- */
@@ -4961,6 +5171,10 @@ $("STANDID").addEventListener("change", ()=>{
 $("PLOTNUM").addEventListener("change", updateHdrAt_);
 $("PLOTNUM").addEventListener("input", updateHdrAt_);
 setNow(); renderGround([]); renderSaved(); updateTally(); netDot(); autoGPS(); updateHdrAt_();   // no auto first tree — the "＋ Add new tree" button starts the tally (matches the map-capture flow)
+/* Restore anything the durable backup holds that localStorage has lost — a full quota, a cleared
+   site, or a phone that died before the write landed. Runs after the first render so the list is
+   already on screen, then refreshes it if plots come back. */
+try{ plotBackupRestore_(); }catch(e){}
 setField($("PLOTNUM"), nextPlotFor($("STANDID").value));
 // On a fresh open, go straight to the map (before first paint, so the form doesn't flash) — the user taps "＋ New plot" when ready.
 try{ requestAnimationFrame(()=>{ try{ openMap(); }catch(e){ setTimeout(()=>{ try{ openMap(); }catch(e2){} }, 200); } }); }catch(e){ setTimeout(()=>{ try{ openMap(); }catch(e2){} }, 200); }
@@ -5800,6 +6014,102 @@ function compRptOne_(stand){
   document.body.appendChild(sc);
 }
 function setBoundPopupView(v){ _bpView=v; if(v==="analysis") standAnFetch_(false); renderBoundPopup_(); }
+/* ── Species and Tree marking in the compartment popup (v357) ───────────────────────────────────
+   Both are built from computeStand over the plots THIS DEVICE holds for the compartment — the same
+   function, and so the same numbers, as the Stand summary screen and the Sheet's Size Class
+   Summary. That is a deliberate choice over the standanalysis feed, which the Analysis tab uses:
+   the feed carries the headline figures and baCls/stCls arrays but no per-species-per-band
+   breakdown, so a marking table from it would need a backend change and a deployment — and this is
+   a table you want in the stand, on a phone, with no signal.
+
+   The cost is that the device may hold fewer plots than the Sheet. That is not allowed to be
+   invisible: bpBasis_ prints what the figures were computed from and says so plainly when the
+   Sheet's analysis counts more. */
+function bpPlotsFor_(f){
+  const p=(f&&f.properties)||{};
+  const name=standField?String(p[standField]==null?"":p[standField]).trim():"";
+  if(!name) return {name:"",plots:[]};
+  const key=name.toLowerCase();
+  /* Deliberately NOT sumPlots_(): that honours whatever collector and tract the Stand summary
+     screen was last filtered to, so tapping a compartment could quietly show one cruiser's plots
+     with nothing on screen to say so. This pool is everything the device holds that is in the
+     analysis — the same rule every time, whatever another screen is set to. */
+  const pool=(saved||[]).concat(auditPlots||[])
+    .filter(q=>q && String(q.INANALYSIS||"Y").toUpperCase()!=="N");
+  /* Match the plot to the compartment the way the rest of the app does: its own STANDID, or the
+     compartment it was found to sit inside. */
+  const plots=pool.filter(q=>{
+    const a=String(q.STANDID||"").trim().toLowerCase();
+    const b=String(q.POLYNAME||"").trim().toLowerCase();
+    return a===key || b===key;
+  });
+  return {name,plots};
+}
+/* Where the figures in these two tabs came from. The Sheet is the answer we want — the Analysis tab
+   beside them is from the Sheet, and two tabs of one thing beside two of another is how a popup
+   ends up quietly contradicting itself. The device is the fallback, and it says so. */
+function bpBasis_(f, n, fromSheet){
+  if(fromSheet)
+    return `<div style="font-size:10px;color:#5a7a62;margin-top:6px;line-height:1.35">`+
+           `From the Sheet — <b>${n}</b> plot${n===1?"":"s"} in this compartment, the same set the Analysis tab uses.</div>`;
+  const a=standAnFor_(f);
+  const sheetN=a&&a.nplots?parseInt(a.nplots,10):null;
+  let s=`<div style="font-size:10px;color:#8a5a00;margin-top:6px;line-height:1.35">`+
+        `<b>From the ${n} plot${n===1?"":"s"} on this device</b>, not the Sheet — the Sheet could not be asked.`;
+  if(sheetN!=null && sheetN!==n) s+=` Its analysis counts ${sheetN}, so these figures may differ from the Analysis tab.`;
+  return s+`</div>`;
+}
+/* One compartment's species and size-class detail, from the Sheet. Cached per stand for the life of
+   the popup session; the backend hands back its own dbhClasses accumulator, whose cells are the
+   same {n,ba,ef,vol,nAgs} shape dbhBandApp_ already reads, so the tables stay one implementation. */
+let bpDetail={}, bpDetailBusy={};
+function bpDetailFetch_(stand, then){
+  const key=String(stand||"").trim().toLowerCase();
+  if(!key) { then(null); return; }
+  if(bpDetail[key]!==undefined){ then(bpDetail[key]); return; }
+  if(!connected || isOffline()){ then(null); return; }
+  if(bpDetailBusy[key]) return;                       // a render already asked; its reply repaints
+  bpDetailBusy[key]=true;
+  const cb="__sd"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  let settled=false;
+  const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  const fin=v=>{ if(settled) return; settled=true; clean(); bpDetailBusy[key]=false;
+    bpDetail[key]=v;                                   // null is cached too: an old backend is not re-asked all day
+    then(v); };
+  window[cb]=r=>fin((r&&r.ok&&r.dbhClasses)?r:null);
+  sc.onerror=()=>fin(null);
+  setTimeout(()=>fin(null), 15000);
+  sc.src=SCRIPT_URL+sep+"action=standdetail&stand="+encodeURIComponent(stand)+"&callback="+cb;
+  document.body.appendChild(sc);
+}
+/* Shape the Sheet's reply into what computeStand would have produced, so sizeClassHtml_ and
+   bpSpeciesHtml_ take it without knowing where it came from. */
+function bpStandFromSheet_(d){
+  return { nplots:d.nplots||0, baHa:+d.baHa||0, stemsHa:+d.stemsHa||0, vol:+d.volHa||0,
+           dbhClasses:d.dbhClasses||{} };
+}
+/* Species for the compartment: share of basal area, with stems and volume per hectare beside it.
+   dbhBandApp_ over the whole range gives the per-species figures the composition bars cannot. */
+function bpSpeciesHtml_(s){
+  if(!s || !s.nplots) return `<div style="color:#5a7a62;font-size:11px;margin-top:3px">No plots on this device for this compartment yet.</div>`;
+  const per=dbhBandApp_(s.dbhClasses||{}, s.nplots||1, 0, Infinity);
+  const names=Object.keys(per).sort((a,b)=>per[b].baHa-per[a].baHa);
+  if(!names.length) return `<div style="color:#5a7a62;font-size:11px;margin-top:3px">No live trees tallied in this compartment.</div>`;
+  const tot=names.reduce((t,sp)=>t+per[sp].baHa,0)||1;
+  const f1=x=>(x==null?"—":x.toFixed(1));
+  let rows=`<tr><td style="padding:2px 6px 2px 0;color:#5a7a62;font-size:10px">Species</td>`+
+    `<td style="text-align:right;padding:2px 6px;color:#5a7a62;font-size:10px">%BA</td>`+
+    `<td style="text-align:right;padding:2px 6px;color:#5a7a62;font-size:10px">m²/ha</td>`+
+    `<td style="text-align:right;padding:2px 6px;color:#5a7a62;font-size:10px">stems/ha</td>`+
+    `<td style="text-align:right;padding:2px 0;color:#5a7a62;font-size:10px">m³/ha</td></tr>`;
+  names.forEach(sp=>{ const e=per[sp];
+    rows+=`<tr><td style="padding:2px 6px 2px 0"><b>${esc(sp)}</b></td>`+
+      `<td style="text-align:right;padding:2px 6px">${(e.baHa/tot*100).toFixed(0)}</td>`+
+      `<td style="text-align:right;padding:2px 6px">${f1(e.baHa)}</td>`+
+      `<td style="text-align:right;padding:2px 6px">${Math.round(e.stemsHa)}</td>`+
+      `<td style="text-align:right;padding:2px 0">${f1(e.volHa)}</td></tr>`; });
+  return `<table style="border-collapse:collapse;font-size:12px;width:100%">${rows}</table>`;
+}
 function renderBoundPopup_(){
   const f=_bpFeat; if(!f) return;
   const p=f.properties||{};
@@ -5832,6 +6142,29 @@ function renderBoundPopup_(){
     } else {
       note=`<div style="color:#5a7a62;margin-top:3px;font-size:11px">No analysed plots in this compartment yet${(!connected||isOffline())?" (or you're offline)":""}.</div>`;
     }
+  } else if(_bpView==="species" || _bpView==="marking"){
+    const pick=bpPlotsFor_(f);
+    const key=String(pick.name||"").trim().toLowerCase();
+    const cached=key?bpDetail[key]:undefined;
+    let s=null, fromSheet=false;
+    if(cached){ s=bpStandFromSheet_(cached); fromSheet=true; }
+    else if(cached===undefined && key && connected && !isOffline()){
+      /* Not asked yet: show the device figures now so the tab is never blank in the bush, and
+         repaint from the Sheet when it answers. */
+      bpDetailFetch_(pick.name, ()=>{ if(_bpFeat===f) renderBoundPopup_(); });
+      s=computeStand(pick.plots, summaryInclSmall);
+    } else s=computeStand(pick.plots, summaryInclSmall);
+    if(_bpView==="species") note=bpSpeciesHtml_(s)+bpBasis_(f,s.nplots||0,fromSheet);
+    else {
+      const t=sizeClassHtml_(s);
+      /* sizeClassHtml_ is written for the dark Stand summary screen (pale greens on near-black) and
+         this popup is light, so its text would wash out. Wrapped in a dark card rather than forked
+         into a second copy: one implementation of the marking table, and the phone, this popup and
+         the Sheet's Size Class Summary cannot drift apart. */
+      note=(t?`<div style="background:#0f1e0d;border-radius:8px;padding:8px 9px;margin-top:4px">${t}</div>`
+             :`<div style="color:#5a7a62;font-size:11px;margin-top:3px">No live trees tallied in this compartment yet.</div>`)
+           +bpBasis_(f,s.nplots||0,fromSheet);
+    }
   } else {
     popupFields.forEach(k=>{ if(k===standField) return; const v=p[k];
       if(v==null||String(v).trim()==="") return; rows+=row(k,String(v)); });
@@ -5844,11 +6177,15 @@ function renderBoundPopup_(){
   const rpt = (_bpView==="analysis" && a && a.nplots)
     ? `<button type="button" onclick="compRptOne_('${String(a.stand||"").replace(/'/g,"&#39;")}')" style="display:block;width:100%;margin-top:10px;padding:10px;border-radius:8px;border:1px solid #9fb8a4;background:#f4f8f2;color:#16271a;font:inherit;font-size:12px">📄 PDF report for this compartment</button>`
     : "";
-  const body=`<div style="max-height:38vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${table}${ageMsg}${note}${rpt}</div>`;
-  L.popup({maxWidth:280,autoPan:true,className:"bpop"}).setLatLng(_bpLatLng)
+  /* The species table is five columns and the marking table is four bands plus a removed/kept
+     split — both need more room than the two-column Layer view. */
+  const wide=(_bpView==="species"||_bpView==="marking");
+  const body=`<div style="max-height:${wide?"52vh":"38vh"};overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${table}${ageMsg}${note}${rpt}</div>`;
+  L.popup({maxWidth:wide?340:280,autoPan:true,className:"bpop"+(wide?" bpop-wide":"")}).setLatLng(_bpLatLng)
     .setContent(`<div style="font-family:'Courier New',monospace;color:#16271a;line-height:1.4">`+
       `<b style="font-size:13px">${esc(title)}</b>`+
-      `<div style="margin:3px 0 1px;border-top:1px solid #cfe0d2;padding-top:3px">${seg("attr","Layer")}${seg("analysis","Analysis")}</div>`+
+      `<div style="margin:3px 0 1px;border-top:1px solid #cfe0d2;padding-top:3px;display:flex;flex-wrap:wrap;gap:1px">`+
+        `${seg("attr","Layer")}${seg("analysis","Analysis")}${seg("species","Species")}${seg("marking","Marking")}</div>`+
       `${body}</div>`)
     .openOn(fmap);
 }
