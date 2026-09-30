@@ -1141,7 +1141,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-30 · v358";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-30 · v359";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -4846,6 +4846,13 @@ const MARK_BANDS_APP_=[[10,25],[26,37],[38,49],[50,Infinity]];
 const MARK_DBH_APP_=["10-24","26-36","38-48","50+"];
 const MARK_NAMES_APP_=["Poles","Small","Medium","Large"];
 function treeBA(dbh){ return Math.PI/4*Math.pow(dbh/100,2); }   // m² per tree
+/* qmdFrom_() in Code.gs, character for character. One function so the stand figure and the per-species
+   figure on the popup cannot drift apart, and so neither can drift from the Sheet.
+   Feed it SIZED basal area — the BA of trees whose diameter is known. A prism tallies a tree whatever
+   its size, so a tree with no diameter recorded still contributes basal area, but it cannot contribute
+   the stems that expand from a diameter; dividing full BA by sized stems raises the mean diameter of a
+   tree nobody measured. */
+function qmdFromApp_(baHa,stemsHa){ return (baHa>0&&stemsHa>0)?100*Math.sqrt(baHa/(Math.PI/4*stemsHa)):0; }
 const HAB_LABEL={Sng:"Snags",CWD:"Coarse woody debris",CAV:"Cavity trees"};
 // Mirrors ageValue_ in Code.gs — keep the two in step or the phone and the Sheet will disagree on age.
 function ageValue_(v){
@@ -4892,12 +4899,18 @@ function computeStand(plots, includeSmall){
      character — the two must agree or the phone and the Sheet report different stands. The old RMS form
      read +64% on uneven-aged tolerant hardwood and +167% on post-harvest residual. */
   const baSizedHa=np?baSized/np:0;
-  const qmd=(baSizedHa>0&&stemsHa>0)?100*Math.sqrt(baSizedHa/(Math.PI/4*stemsHa)):0;
+  const qmd=qmdFromApp_(baSizedHa,stemsHa);
   const meanAge=ageN?ageSum/ageN:null, meanHt=htN?htSum/htN:null, volHa=np?volSum/np:0;
   const tot=Object.values(spBA).reduce((a,b)=>a+b,0);
   const comp=Object.entries(spBA).map(([sp,ba])=>({sp,pct:tot?ba/tot*100:0})).sort((a,b)=>b.pct-a.pct);
   const habOut=[...PETT_SKIP].map(h=>({label:HAB_LABEL[h]||h,count:hab[h].count,perHa:np?hab[h].stemsSum/np:0,baHa:np?hab[h].baSum/np:0})).filter(x=>x.count>0);
-  return {nplots:np,baHa,stemsHa,qmd,meanAge,meanHt,comp,vol:volHa,hab:habOut,dbhClasses:dcl,noDbh};
+  /* Full per-species basal area per hectare — every live tree the prism tallied, including one with no
+     diameter recorded. dbhClasses cannot supply this: a tree with no diameter has no diameter class, so
+     summing the classes gives the SIZED basal area and understates a species carrying an unmeasured
+     tree. That is right for QMD and wrong for composition, so the two are kept apart and the popup's
+     m²/ha and %BA read from here, exactly as the Sheet's species rows read from e.ba. */
+  const spBaHa={}; Object.keys(spBA).forEach(sp=>{ spBaHa[sp]=np?spBA[sp]/np:0; });
+  return {nplots:np,baHa,stemsHa,qmd,meanAge,meanHt,comp,vol:volHa,hab:habOut,dbhClasses:dcl,noDbh,spBaHa};
 }
 let summarySource="mine";   // "mine" | "audit" | "both"
 let summaryCollector = "__all__";
@@ -6086,29 +6099,46 @@ function bpDetailFetch_(stand, then){
    bpSpeciesHtml_ take it without knowing where it came from. */
 function bpStandFromSheet_(d){
   return { nplots:d.nplots||0, baHa:+d.baHa||0, stemsHa:+d.stemsHa||0, vol:+d.volHa||0,
-           dbhClasses:d.dbhClasses||{} };
+           dbhClasses:d.dbhClasses||{}, spBaHa:d.spBaHa||null };
 }
 /* Species for the compartment: share of basal area, with stems and volume per hectare beside it.
    dbhBandApp_ over the whole range gives the per-species figures the composition bars cannot. */
 function bpSpeciesHtml_(s){
   if(!s || !s.nplots) return `<div style="color:#5a7a62;font-size:11px;margin-top:3px">No plots on this device for this compartment yet.</div>`;
   const per=dbhBandApp_(s.dbhClasses||{}, s.nplots||1, 0, Infinity);
-  const names=Object.keys(per).sort((a,b)=>per[b].baHa-per[a].baHa);
+  /* Two bases, on purpose. spBaHa is every tallied tree of that species; per[sp] comes from the
+     diameter classes and so covers only the trees with a diameter. Composition (%BA, m²/ha) uses the
+     first — the prism counted the tree and the species was identified. QMD, stems/ha and volume use
+     the second, because all three need a diameter to expand. An older backend sends no spBaHa, in which
+     case the classes are all there is and this reads exactly as it did before. */
+  const spBa=s.spBaHa||null;
+  const baOf=sp=>(spBa&&spBa[sp]!=null)?(+spBa[sp]||0):((per[sp]&&per[sp].baHa)||0);
+  const names=[...new Set(Object.keys(per).concat(spBa?Object.keys(spBa):[]))]
+    .filter(sp=>baOf(sp)>0 || (per[sp]&&per[sp].n>0))
+    .sort((a,b)=>baOf(b)-baOf(a));
   if(!names.length) return `<div style="color:#5a7a62;font-size:11px;margin-top:3px">No live trees tallied in this compartment.</div>`;
-  const tot=names.reduce((t,sp)=>t+per[sp].baHa,0)||1;
+  const tot=names.reduce((t,sp)=>t+baOf(sp),0)||1;
   const f1=x=>(x==null?"—":x.toFixed(1));
   let rows=`<tr><td style="padding:2px 6px 2px 0;color:#5a7a62;font-size:10px">Species</td>`+
     `<td style="text-align:right;padding:2px 6px;color:#5a7a62;font-size:10px">%BA</td>`+
     `<td style="text-align:right;padding:2px 6px;color:#5a7a62;font-size:10px">m²/ha</td>`+
     `<td style="text-align:right;padding:2px 6px;color:#5a7a62;font-size:10px">stems/ha</td>`+
+    /* QMD, not the arithmetic mean of the tally. A prism samples each tree with probability
+       proportional to its basal area, so the raw tally is already BA-weighted; averaging it gives a
+       diameter no stand has. Same qmdFromApp_ as the stand figure on the Analysis tab, and the same
+       definition as the QMD column on the Sheet's Species Summary tab. */
+    `<td style="text-align:right;padding:2px 6px;color:#5a7a62;font-size:10px">QMD</td>`+
     `<td style="text-align:right;padding:2px 0;color:#5a7a62;font-size:10px">m³/ha</td></tr>`;
-  names.forEach(sp=>{ const e=per[sp];
+  names.forEach(sp=>{ const e=per[sp]||{baHa:0,stemsHa:0,volHa:0};
+    const ba=baOf(sp), q=qmdFromApp_(e.baHa,e.stemsHa);   // QMD over the SIZED basal area
     rows+=`<tr><td style="padding:2px 6px 2px 0"><b>${esc(sp)}</b></td>`+
-      `<td style="text-align:right;padding:2px 6px">${(e.baHa/tot*100).toFixed(0)}</td>`+
-      `<td style="text-align:right;padding:2px 6px">${f1(e.baHa)}</td>`+
-      `<td style="text-align:right;padding:2px 6px">${Math.round(e.stemsHa)}</td>`+
-      `<td style="text-align:right;padding:2px 0">${f1(e.volHa)}</td></tr>`; });
-  return `<table style="border-collapse:collapse;font-size:12px;width:100%">${rows}</table>`;
+      `<td style="text-align:right;padding:2px 6px">${(ba/tot*100).toFixed(0)}</td>`+
+      `<td style="text-align:right;padding:2px 6px">${f1(ba)}</td>`+
+      `<td style="text-align:right;padding:2px 6px">${e.stemsHa>0?Math.round(e.stemsHa):"—"}</td>`+
+      `<td style="text-align:right;padding:2px 6px">${q>0?f1(q):"—"}</td>`+
+      `<td style="text-align:right;padding:2px 0">${e.stemsHa>0?f1(e.volHa):"—"}</td></tr>`; });
+  return `<table style="border-collapse:collapse;font-size:12px;width:100%">${rows}</table>`+
+    `<div style="color:#5a7a62;font-size:10px;margin-top:3px">QMD = quadratic mean diameter (cm), the diameter of the tree of average basal area.</div>`;
 }
 function renderBoundPopup_(){
   const f=_bpFeat; if(!f) return;
