@@ -1141,7 +1141,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-30 · v359";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-09-30 · v360";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -5004,9 +5004,22 @@ function setSumThreshold(small){
    out?". One control rather than a band min/max pair, because on a phone in the stand that is the
    question being asked — the Sheet's DBH Range tab has the full band selector for desk work. */
 let summaryKeepCm = (function(){ try{ const v=parseInt(STORE&&STORE.getItem("fi_keepcm"),10); return isFinite(v)?v:40; }catch(e){ return 40; } })();
+/* One retention threshold, two places that draw a table from it: the Stand summary screen and the
+   Marking tab on the compartment popup, which reuses sizeClassHtml_ wholesale. This only ever
+   redrew the summary screen, so changing the size on the POPUP stored the new value, left the
+   dropdown showing it, and left the table beneath it computed at the old one — the control looked
+   dead. Redraw whichever of the two is actually on screen.
+   The popup is only redrawn when it is genuinely open: renderBoundPopup_ ends in openOn(fmap), and
+   _bpFeat still holds the last compartment after the popup is closed, so an unguarded call would
+   pop a closed popup back up on the map. */
 function setSummaryKeep(v){ summaryKeepCm=parseInt(v,10)||40;
   try{ if(STORE) STORE.setItem("fi_keepcm",String(summaryKeepCm)); }catch(e){}
-  renderSummary(); }
+  try{ const m=$("standSummary"); if(m && m.style.display!=="none") renderSummary(); }catch(e){}
+  try{ if(bpPopupOpen_()) renderBoundPopup_(); }catch(e){} }
+function bpPopupOpen_(){
+  return !!(typeof fmap!=="undefined" && fmap && typeof _bpPopup!=="undefined" && _bpPopup
+            && typeof _bpFeat!=="undefined" && _bpFeat && fmap.hasLayer(_bpPopup));
+}
 /* Stems and volume per hectare by marking size class, and the removed/kept split at the retention
    threshold. Built from computeStand's 2 cm accumulator, the same source the Sheet uses, so the
    phone and the Compartment Summary answer this identically. */
@@ -5921,6 +5934,9 @@ function boundaryFeatureAt(lat,lon){
   return null;
 }
 let _bpFeat=null, _bpLatLng=null, _bpView="attr";
+/* The popup object last opened, so anything that changes a setting the popup displays can ask
+   whether it is still on the map before redrawing it. */
+let _bpPopup=null;
 function showBoundPopup(latlng,f){ _bpFeat=f; _bpLatLng=latlng; renderBoundPopup_(); }
 /* Generating one compartment's summary from the map. The whole-property job belongs in the Sheet
    (43 compartments will not fit inside a web request), but one is quick, and a crew member standing
@@ -6211,7 +6227,7 @@ function renderBoundPopup_(){
      split — both need more room than the two-column Layer view. */
   const wide=(_bpView==="species"||_bpView==="marking");
   const body=`<div style="max-height:${wide?"52vh":"38vh"};overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${table}${ageMsg}${note}${rpt}</div>`;
-  L.popup({maxWidth:wide?340:280,autoPan:true,className:"bpop"+(wide?" bpop-wide":"")}).setLatLng(_bpLatLng)
+  _bpPopup=L.popup({maxWidth:wide?340:280,autoPan:true,className:"bpop"+(wide?" bpop-wide":"")}).setLatLng(_bpLatLng)
     .setContent(`<div style="font-family:'Courier New',monospace;color:#16271a;line-height:1.4">`+
       `<b style="font-size:13px">${esc(title)}</b>`+
       `<div style="margin:3px 0 1px;border-top:1px solid #cfe0d2;padding-top:3px;display:flex;flex-wrap:wrap;gap:1px">`+
