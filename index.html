@@ -978,6 +978,7 @@
 
       <details class="mgroup"><summary>⚙️ This device</summary>
         <button type="button" onclick="closeMore();openCruiser()">👤 Your name &amp; email — set this first</button>
+        <button type="button" onclick="closeMore();accountPanel_()">🔐 Account — log in or sign out</button>
         <button type="button" onclick="closeMore();appStatus_()">ℹ️ App status — build, storage, connection</button>
         <button type="button" onclick="closeMore();storagePanel_()">🧮 Storage — what&rsquo;s using space, and free it</button>
         <button type="button" onclick="closeMore();exportBackup()">⬆ Back up all data to a file</button>
@@ -1134,6 +1135,35 @@
 </div>
 <div class="toast" id="toast"></div>
 
+<!-- v366 login: hidden until asked for, or until the backend requires it. In the markup rather than
+     built in script so it exists before any script runs and is the same element every time. -->
+<div id="authBanner" onclick="loginOpen_()" style="display:none;position:fixed;left:0;right:0;bottom:0;z-index:5400;background:#7a4a00;color:#fff3d6;font:600 13px system-ui;padding:10px 14px;text-align:center;cursor:pointer;box-shadow:0 -2px 10px rgba(0,0,0,.4)"></div>
+<div id="loginSheet" style="display:none;position:fixed;inset:0;z-index:5700;align-items:center;justify-content:center;background:rgba(0,0,0,.72);padding:14px">
+  <div style="background:#0f1e0d;border:1px solid #33623a;border-radius:16px;max-width:360px;width:100%;padding:16px 16px 14px;box-shadow:0 10px 40px rgba(0,0,0,.6);max-height:96vh;overflow:auto">
+    <div style="font:700 17px system-ui;color:#eafae8">Log in</div>
+    <div id="loginMsg" style="font:13px system-ui;color:#a9c9b0;margin:4px 0 10px;line-height:1.4;min-height:18px"></div>
+    <label for="loginUser" style="font:600 11px system-ui;color:#8fae95;letter-spacing:.04em">USERNAME</label>
+    <input id="loginUser" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" style="margin:3px 0 12px">
+    <div style="font:600 11px system-ui;color:#8fae95;letter-spacing:.04em">PIN</div>
+    <div id="loginDots" aria-live="polite" style="font:700 30px/1 system-ui;letter-spacing:14px;color:#eafae8;text-align:center;height:34px;margin:6px 0 10px"></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+      <button type="button" class="lkey" onclick="loginKey_('1')" style="height:60px;border-radius:12px;border:1px solid #33623a;background:#16301a;color:#eafae8;font:600 24px system-ui;">1</button>
+      <button type="button" class="lkey" onclick="loginKey_('2')" style="height:60px;border-radius:12px;border:1px solid #33623a;background:#16301a;color:#eafae8;font:600 24px system-ui;">2</button>
+      <button type="button" class="lkey" onclick="loginKey_('3')" style="height:60px;border-radius:12px;border:1px solid #33623a;background:#16301a;color:#eafae8;font:600 24px system-ui;">3</button>
+      <button type="button" class="lkey" onclick="loginKey_('4')" style="height:60px;border-radius:12px;border:1px solid #33623a;background:#16301a;color:#eafae8;font:600 24px system-ui;">4</button>
+      <button type="button" class="lkey" onclick="loginKey_('5')" style="height:60px;border-radius:12px;border:1px solid #33623a;background:#16301a;color:#eafae8;font:600 24px system-ui;">5</button>
+      <button type="button" class="lkey" onclick="loginKey_('6')" style="height:60px;border-radius:12px;border:1px solid #33623a;background:#16301a;color:#eafae8;font:600 24px system-ui;">6</button>
+      <button type="button" class="lkey" onclick="loginKey_('7')" style="height:60px;border-radius:12px;border:1px solid #33623a;background:#16301a;color:#eafae8;font:600 24px system-ui;">7</button>
+      <button type="button" class="lkey" onclick="loginKey_('8')" style="height:60px;border-radius:12px;border:1px solid #33623a;background:#16301a;color:#eafae8;font:600 24px system-ui;">8</button>
+      <button type="button" class="lkey" onclick="loginKey_('9')" style="height:60px;border-radius:12px;border:1px solid #33623a;background:#16301a;color:#eafae8;font:600 24px system-ui;">9</button>
+      <button type="button" class="lkey" onclick="loginKey_('back')" style="height:60px;border-radius:12px;border:1px solid #33623a;background:#16301a;color:#eafae8;font:600 24px system-ui;font-size:20px">⌫</button>
+      <button type="button" class="lkey" onclick="loginKey_('0')" style="height:60px;border-radius:12px;border:1px solid #33623a;background:#16301a;color:#eafae8;font:600 24px system-ui;">0</button>
+      <button type="button" class="lkey" onclick="loginKey_('go')" style="height:60px;border-radius:12px;border:1px solid #33623a;background:#16301a;color:#eafae8;font:600 24px system-ui;font-size:15px;background:#2f7d46;border-color:#3f9a59">Log in</button>
+    </div>
+    <button type="button" onclick="loginClose_()" style="display:block;width:100%;margin-top:12px;padding:10px;border-radius:10px;border:1px solid #33623a;background:transparent;color:#a9c9b0;font:13px system-ui">Not now — keep working, sync later</button>
+  </div>
+</div>
+
 <script>
 "use strict";
 
@@ -1141,7 +1171,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-06 · v365";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-06 · v366";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1346,6 +1376,168 @@ let saved=[];
 if(STORE){ try{ const raw=STORE.getItem(PKEY); if(raw) saved=JSON.parse(raw)||[]; }catch(e){ saved=[]; } }
 const connected = SCRIPT_URL && !SCRIPT_URL.startsWith("PASTE_");
 
+/* ---------- login (v366 — Phase 1, step 4a) ----------
+   The backend (v365) can require a logged-in device: username + PIN once, a token after that. This is
+   the app's half. While the backend's switch is OFF and this phone has never logged in, NOTHING here
+   changes a single request: tokQ_() is "" and postBody_() is plain JSON.stringify.
+
+   Rules this is written to:
+     · Collecting plots never depends on being logged in. With login required and no token the phone
+       cannot SYNC — it can still record, and everything stays on the phone until it does log in.
+     · A refusal is its own state, not a failure to retry: the senders stand down (authBlocked) rather
+       than re-post every minute into a closed door, and start again the moment a login succeeds.
+     · Nothing local is cleared by logging in, logging out, or being refused.
+   The PIN goes in the BODY of a POST and the reply is read directly: a plain fetch to /exec with a
+   text/plain body comes back readable (verified against the live deployment 2026-10-06), unlike the
+   mode:"no-cors" posts the rest of the app still uses. */
+const _ls=(k)=>{ try{ return (STORE&&STORE.getItem(k))||""; }catch(e){ return ""; } };
+const _lsSet=(k,v)=>{ try{ if(STORE){ if(v===""||v==null) STORE.removeItem(k); else STORE.setItem(k,String(v)); } }catch(e){} };
+let authToken=_ls("fi_token"), authUser=_ls("fi_authuser"), authAccountName=_ls("fi_authacct");
+let authNeeded=_ls("fi_authreq")==="Y";      // what the backend last said; remembered for offline starts
+let authBlocked=authNeeded && !authToken;    // login is required and this phone is not logged in
+let authWhy="";
+function tokQ_(){ return authToken ? "token="+encodeURIComponent(authToken)+"&" : ""; }
+function postBody_(o){ return JSON.stringify(authToken ? Object.assign({}, o, {_token:authToken}) : o); }
+/* A POST whose reply can be read. Rejects on no signal, a timeout, or a reply that is not JSON. */
+function apiPost_(o, ms){
+  return new Promise((res,rej)=>{
+    const t=setTimeout(()=>rej(new Error("timeout")), ms||25000);
+    fetch(SCRIPT_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:postBody_(o)})
+      .then(r=>r.json()).then(j=>{ clearTimeout(t); res(j); }).catch(e=>{ clearTimeout(t); rej(e); });
+  });
+}
+/* A GET whose reply can be read. Used for the status check and for signing out, NOT a POST: a backend
+   older than v365 treats any POST it does not recognise as a plot to save, and would write a blank row
+   every time the app started. A GET it does not recognise is merely ignored. */
+function apiGet_(query, ms){
+  return new Promise((res,rej)=>{
+    const t=setTimeout(()=>rej(new Error("timeout")), ms||25000);
+    fetch(SCRIPT_URL+(SCRIPT_URL.includes("?")?"&":"?")+tokQ_()+query)
+      .then(r=>r.json()).then(j=>{ clearTimeout(t); res(j); }).catch(e=>{ clearTimeout(t); rej(e); });
+  });
+}
+let authBackendOk=false;     // the backend has answered authstatus properly, so it knows `login`
+function authSetBlocked_(b, why){
+  const was=authBlocked; authBlocked=!!b; authWhy=why||"";
+  authBanner_();
+  if(was && !authBlocked){ try{ flushQueue(); flushEditBatch_(); flushDeletes_(); flushTracts(); flushSpecies(); flushPhotos(); }catch(e){} }
+}
+function authForget_(){ authToken=""; _lsSet("fi_token",""); }
+/* Ask the backend where this phone stands. No answer (no signal, old backend) changes nothing. */
+let _authChecking=false, _authWaiters=[];
+function authCheck_(then){
+  if(!connected || isOffline()){ if(then) then(false); return; }
+  if(then) _authWaiters.push(then);
+  if(_authChecking) return;                       // one question in the air; everyone waiting hears the answer
+  _authChecking=true;
+  const done=ok=>{ _authChecking=false; const w=_authWaiters; _authWaiters=[]; w.forEach(f=>{ try{ f(ok); }catch(e){} }); };
+  apiGet_("action=authstatus").then(r=>{
+    if(!r || r.ok!==true || typeof r.authRequired!=="boolean"){ done(false); return; }   // a backend older than v365
+    authBackendOk=true;
+    authNeeded=r.authRequired; _lsSet("fi_authreq", authNeeded?"Y":"");
+    if(r.signedIn){
+      authUser=r.username||authUser; authAccountName=r.accountName||""; _lsSet("fi_authuser",authUser); _lsSet("fi_authacct",authAccountName);
+      authSetBlocked_(false);
+    } else {
+      /* A token the backend no longer knows is dead: keep the username for the login screen, drop the token. */
+      if(authToken && r.reason && r.reason!=="notoken") authForget_();
+      const wasBlocked=authBlocked;
+      authSetBlocked_(authNeeded, r.reason||"");
+      if(authBlocked && !wasBlocked) loginOpen_(authMsg_(r.reason));
+    }
+    done(true);
+  }).catch(()=>done(false));
+}
+function authMsg_(reason){
+  return reason==="expired" ? "This account has expired. Contact the administrator to renew it."
+       : reason==="inactive" ? "This login has been switched off. Contact the administrator."
+       : reason==="badtoken" ? "This phone has been signed out. Log in again to keep syncing."
+       : "Log in to sync your plots.";
+}
+/* The strip that says so, on every screen, for as long as it is true. */
+function authBanner_(){
+  const b=document.getElementById("authBanner"); if(!b) return;
+  if(!authBlocked){ b.style.display="none"; return; }
+  const n=(typeof saved!=="undefined"&&saved)?saved.filter(p=>!p._sent).length:0;
+  b.textContent="Not logged in — plots are safe on this phone but not syncing"+(n?" ("+n+" waiting)":"")+". Tap to log in.";
+  b.style.display="block";
+}
+/* The login screen: a username and a four-digit PIN on a keypad big enough for gloves. */
+let _loginPin="";
+function loginOpen_(msg){
+  const m=document.getElementById("loginSheet"); if(!m) return;
+  _loginPin=""; loginDraw_();
+  const u=document.getElementById("loginUser"); if(u && !u.value) u.value=authUser||(typeof cruiser!=="undefined"?cruiser:"")||"";
+  loginSay_(msg||(authBlocked?authMsg_(authWhy):"Enter your username and PIN."));
+  m.style.display="flex";
+}
+function loginClose_(){ const m=document.getElementById("loginSheet"); if(m) m.style.display="none"; _loginPin=""; authBanner_(); }
+function loginDraw_(){ const d=document.getElementById("loginDots"); if(d) d.textContent="●".repeat(_loginPin.length)+"○".repeat(Math.max(0,4-_loginPin.length)); }
+let _loginBusy=false;
+function loginKey_(k){
+  if(_loginBusy) return;
+  if(k==="back") _loginPin=_loginPin.slice(0,-1);
+  else if(k==="go"){ loginSubmit_(); return; }
+  else if(_loginPin.length<4) _loginPin+=k;
+  loginDraw_();
+  if(_loginPin.length===4) loginSubmit_();
+}
+function loginSay_(t, bad){ const e=document.getElementById("loginMsg"); if(e){ e.textContent=t; e.style.color=bad?"#f0b0a0":"#a9c9b0"; } }
+function loginSubmit_(){
+  const user=String((document.getElementById("loginUser")||{}).value||"").trim(), pin=_loginPin;
+  if(!user){ loginSay_("Type your username first.",true); return; }
+  if(pin.length!==4){ loginSay_("The PIN is four digits.",true); return; }
+  if(!connected || isOffline()){ loginSay_("No signal. You can keep working and log in when you are back in range.",true); return; }
+  /* Never post a PIN to a backend that has not said it understands `login` — an older one would file
+     the request as a plot. Ask first; this is one extra second, once. */
+  if(!authBackendOk){
+    _loginBusy=true; loginSay_("Checking…");
+    authCheck_(()=>{ _loginBusy=false;
+      if(authBackendOk) loginSubmit_();
+      else { _loginPin=""; loginDraw_(); loginSay_("The Sheet did not answer, or its script is older than this app. Check your signal; if it persists the script needs redeploying.",true); } });
+    return;
+  }
+  _loginBusy=true; loginSay_("Checking…");
+  /* The device label helps the administrator tell phones apart in the Sessions tab; nothing else is sent. */
+  const dev=(/iPhone|iPad/.test(navigator.userAgent)?"iPhone/iPad":/Android/.test(navigator.userAgent)?"Android":"Computer")+" · "+new Date().toISOString().slice(0,10);
+  apiPost_({_action:"login",username:user,pin:pin,device:dev}).then(r=>{
+    _loginBusy=false; _loginPin=""; loginDraw_();
+    if(r && r.ok && r.token){
+      authToken=String(r.token); authUser=r.username||user; authAccountName=r.accountName||"";
+      _lsSet("fi_token",authToken); _lsSet("fi_authuser",authUser); _lsSet("fi_authacct",authAccountName);
+      if(typeof r.authRequired==="boolean"){ authNeeded=r.authRequired; _lsSet("fi_authreq",authNeeded?"Y":""); }
+      loginClose_(); authSetBlocked_(false);
+      toast("Logged in as "+authUser+(authAccountName?" · "+authAccountName:""));
+      return;
+    }
+    loginSay_((r && r.message) || "That did not work. Try again.", true);
+  }).catch(()=>{ _loginBusy=false; _loginPin=""; loginDraw_();
+    loginSay_("Could not reach the Sheet. Check your signal and try again — nothing on this phone has changed.",true); });
+}
+function logout_(){
+  if(!authToken) return;
+  if(!confirm("Sign this phone out?\n\nYour plots stay on the phone."+(authNeeded?" They will not sync until someone logs in again.":""))) return;
+  const done=()=>{ authForget_(); closeInfoSheet_(); authSetBlocked_(authNeeded,"notoken"); toast("Signed out"); };
+  if(!connected || isOffline()){ done(); return; }
+  apiGet_("action=logout", 12000).then(done).catch(done);
+}
+function accountPanel_(){
+  const row=(k,v)=>`<tr><td style="color:#8fae95;padding:3px 12px 3px 0;white-space:nowrap">${k}</td><td style="color:#e8f0e6">${v}</td></tr>`;
+  const draw=()=>showInfoSheet_("Account",
+    `<table style="border-collapse:collapse;font-size:13px">`+
+    row("Login", authNeeded?`<span style="color:#e8a33a">required to sync</span>`:`<span style="color:#8fae95">not required yet</span>`)+
+    row("This phone", authToken?`<span style="color:#7fd0a0">logged in as ${esc(authUser||"—")}</span>`:`<span style="color:${authNeeded?"#e8a33a":"#8fae95"}">not logged in</span>`)+
+    (authToken&&authAccountName?row("Account", esc(authAccountName)):"")+
+    `</table>`+
+    `<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">`+
+      (authToken?`<button class="btn-mini" type="button" onclick="logout_()">Sign out</button>`
+                :`<button class="btn submit" type="button" onclick="closeInfoSheet_();loginOpen_()">Log in</button>`)+
+    `</div>`+
+    `<div style="color:#5a7a62;font-size:11px;margin-top:12px;line-height:1.4">Your plots and photos stay on this phone whether or not you are logged in.</div>`);
+  draw();
+  authCheck_(ok=>{ const m=document.getElementById("infoSheet"); if(ok && m && m.style.display!=="none" && document.getElementById("infoSheetTitle").textContent==="Account") draw(); });
+}
+
 // Custom species: merged shared list cached on-device; additions upload to the
 // shared sheet so every device gets them, and queue if added offline.
 let customTree=[], customShrub=[], pendingSpecies=[], customGround=[];
@@ -1467,10 +1659,11 @@ function addSpeciesToList(name,isShrub,code){
    costs nothing: addSpecies_ on the backend matches on (type, name) and appends only when absent,
    so a duplicate send is a no-op. */
 function flushSpecies(){
+  if(authBlocked) return;
   if(!connected || isOffline() || !pendingSpecies.length) return;
   const batch=pendingSpecies.slice();
   batch.forEach(p=>{
-    fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({_action:"addspecies",type:p.t,name:p.n,code:p.c||""})})
+    fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:postBody_({_action:"addspecies",type:p.t,name:p.n,code:p.c||""})})
       .catch(()=>{});
   });
   // give the Sheet a moment to write, then ask it what it actually holds
@@ -1514,7 +1707,7 @@ function fetchSpecies(then){
       if(gChanged) renderGround(getGround());   // keep current selection, add the newly-known chips
     }catch(e){} cleanup(); if(then) then(resp||null); };
   sc.onerror=()=>{ cleanup(); if(then) then(null); };
-  sc.src=SCRIPT_URL+sep+"action=species&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=species&callback="+cb;
   document.body.appendChild(sc);
 }
 /* shared tract list — uploads added tracts to the Sheet and pulls them back, like species */
@@ -1530,11 +1723,12 @@ function queueTract(name){ name=String(name||"").trim();
 let _tractBusy=false, _tractTries={};
 const TRACT_TRY_MAX=5;
 function flushTracts(){
+  if(authBlocked) return;
   if(_tractBusy || !connected || isOffline() || !pendingTracts.length) return;
   _tractBusy=true;
   const names=pendingTracts.slice(); let left=names.length;
   names.forEach(n=>{
-    fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({_action:"addtract",name:n})})
+    fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:postBody_({_action:"addtract",name:n})})
       .catch(()=>{})
       .then(()=>{ if(--left) return;
         setTimeout(()=>fetchTracts(list=>{
@@ -1567,7 +1761,7 @@ function fetchTracts(onList){
     }catch(e){} cleanup(); reply(resp && Array.isArray(resp.tracts) ? resp.tracts.map(String) : null); };
   sc.onerror=()=>{ cleanup(); reply(null); };
   setTimeout(()=>reply(null), 15000);
-  sc.src=SCRIPT_URL+sep+"action=tracts&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=tracts&callback="+cb;
   document.body.appendChild(sc);
 }
 
@@ -1723,7 +1917,7 @@ function editGround_(name){
   window[cb]=r=>{ clean(); groundEditSheet_(name, (r&&r.used)||0); };
   sc.onerror=()=>{ clean(); toast("Couldn't reach the Sheet",true); };
   setTimeout(()=>{ if(window[cb]){ clean(); toast("No answer from the Sheet",true); } },9000);
-  sc.src=SCRIPT_URL+sep+"action=grndusage&name="+encodeURIComponent(name)+"&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=grndusage&name="+encodeURIComponent(name)+"&callback="+cb;
   document.body.appendChild(sc);
 }
 function groundEditSheet_(name,used){
@@ -1751,7 +1945,7 @@ function groundDo_(op,name){
   window[cb]=r=>{ clean(); done_(r); };
   sc.onerror=()=>{ clean(); toast("Couldn't reach the Sheet",true); };
   setTimeout(()=>{ if(window[cb]){ clean(); toast("No answer from the Sheet",true); } },9000);
-  sc.src=SCRIPT_URL+sep+"action=groundedit&op="+encodeURIComponent(op)+"&name="+encodeURIComponent(name)+"&to="+encodeURIComponent(to)+"&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=groundedit&op="+encodeURIComponent(op)+"&name="+encodeURIComponent(name)+"&to="+encodeURIComponent(to)+"&callback="+cb;
   document.body.appendChild(sc);
   function done_(r){
     if(!r || r.ok===false){ toast((r&&r.error)?r.error:"Couldn't update the shared list",true); return; }
@@ -2097,7 +2291,8 @@ function genId(){ return Date.now().toString(36)+Math.random().toString(36).slic
    duplicated. */
 function send(d,isUpdate){
   if(!connected){ toast("Saved on device (not connected yet)",true); return; }
-  fetch(SCRIPT_URL,{ method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain;charset=utf-8"}, body:JSON.stringify(d) })
+  if(authBlocked){ toast("Saved on this phone — log in to sync it",true); authBanner_(); return; }
+  fetch(SCRIPT_URL,{ method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain;charset=utf-8"}, body:postBody_(d) })
     .then(()=>{ d._posted=true; persist(); renderSaved(); netDot();
       toast(`${isUpdate?"Sent":"Sent"} · Stand ${d.STANDID||"—"} plot ${d.PLOTNUM||"—"} — confirming…`);
       plotConfirm_([d], ()=>{ renderSaved(); netDot();
@@ -2171,10 +2366,12 @@ function plotrowGet_(params, cb){
   const name="__pc"+Date.now()+Math.random().toString(36).slice(2,6);
   const sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
   let settled=false;
-  const fin=r=>{ if(settled) return; settled=true; try{ delete window[name]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); cb(r||null); };
+  const fin=r=>{ if(settled) return; settled=true; try{ delete window[name]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc);
+    if(r && r.error==="auth") authCheck_();     // the door has closed since we last looked: find out why, once
+    cb(r||null); };
   window[name]=fin; sc.onerror=()=>fin(null); setTimeout(()=>fin(null), 15000);
   const q=Object.keys(params).map(k=>k+"="+encodeURIComponent(params[k])).join("&");
-  sc.src=SCRIPT_URL+sep+"action=plotrow&"+q+"&callback="+name;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=plotrow&"+q+"&callback="+name;
   document.body.appendChild(sc);
 }
 /* Same plot? The backend's natural key, from the phone's side: coordinates to 5 decimals (r5_) and
@@ -2563,7 +2760,7 @@ function pushAuditToSheet(){
   // Read the starting count, push once, then read again to confirm how many landed.
   sheetPlotCount_(before=>{
     fetch(SCRIPT_URL,{ method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain;charset=utf-8"},
-      body:JSON.stringify({ _action:"plotbatch", plots:batch }) })
+      body:postBody_({ _action:"plotbatch", plots:batch }) })
       .then(()=>{
         // give the Sheet a moment to finish writing, then verify
         setTimeout(()=>{ sheetPlotCount_(after=>{
@@ -2608,7 +2805,7 @@ function lastBatchResult_(cb){
   window[c]=r=>{ clean(); cb(r||null); };
   sc.onerror=()=>{ clean(); cb(null); };
   setTimeout(()=>{ if(window[c]){ clean(); cb(null); } },10000);
-  sc.src=SCRIPT_URL+sep+"action=lastbatch&callback="+c;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=lastbatch&callback="+c;
   document.body.appendChild(sc);
 }
 // Fetch the current FRIPLOTS data-row count via the readable sheetinfo endpoint (JSONP). cb(-1) on failure.
@@ -2620,7 +2817,7 @@ function sheetPlotCount_(cb){
     window[name]=r=>{ try{ fin(r&&typeof r.plotrows==="number"?r.plotrows:-1); }finally{ clean(); } };
     sc.onerror=()=>{ clean(); fin(-1); };
     setTimeout(()=>{ clean(); fin(-1); }, 12000);
-    sc.src=SCRIPT_URL+sep+"action=sheetinfo&callback="+name;
+    sc.src=SCRIPT_URL+sep+tokQ_()+"action=sheetinfo&callback="+name;
     document.body.appendChild(sc);
   }catch(e){ fin(-1); }
 }
@@ -2736,7 +2933,7 @@ function fetchJson_(action, cb){
   const name=amp>=0?action.slice(0,amp):action;         // the action itself
   const rest=amp>=0?action.slice(amp):"";               // any "&set=…" params, kept intact
   const sep=SCRIPT_URL.includes("?")?"&":"?";
-  const url=SCRIPT_URL+sep+"action="+encodeURIComponent(name)+rest;
+  const url=SCRIPT_URL+sep+tokQ_()+"action="+encodeURIComponent(name)+rest;
   let done=false; const to=setTimeout(()=>{ if(done)return; done=true; cb(null,"timeout"); }, 20000);
   fetch(url,{method:"GET"}).then(r=>r.text()).then(t=>{ if(done)return; done=true; clearTimeout(to);
     try{ cb(JSON.parse(t), null); }catch(err){ cb(null, "parse: "+(t||"").slice(0,80)); } })
@@ -2764,7 +2961,7 @@ function jsonpAction_(action, cb){
   // If the script loads but never calls back (old deployment returns plain text), catch it after a wait.
   setTimeout(()=>{ if(settled) return; settled=true; clean();
     toast("No response from the Sheet — the app's script may need redeploying (New version).",true); }, 12000);
-  sc.src=SCRIPT_URL+sep+"action="+encodeURIComponent(name_)+rest_+"&callback="+name;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action="+encodeURIComponent(name_)+rest_+"&callback="+name;
   document.body.appendChild(sc);
   toast("Working in the Sheet…");
 }
@@ -2822,6 +3019,8 @@ function autoAssignStands(){
 let _editBatchBusy=false;
 function pushEditsBatch_(changed, quiet){
   if(!changed || !changed.length) return;
+  if(authBlocked){   // held for the batch retry, which runs again after login
+    changed.forEach(p=>{ p._sent=false; p._batchRetry=true; }); persist(); persistAudit(); if(!quiet) toast("Saved on this phone — log in to sync",true); return; }
   if(_editBatchBusy){   // one batch in the air at a time; these go with the next one
     changed.forEach(p=>{ p._sent=false; p._batchRetry=true; }); persist(); persistAudit(); return; }
   _editBatchBusy=true;
@@ -2830,7 +3029,7 @@ function pushEditsBatch_(changed, quiet){
   changed.forEach(p=>{ p._sent=false; p._batchRetry=true; });
   persist(); persistAudit();
   fetch(SCRIPT_URL,{ method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain;charset=utf-8"},
-    body:JSON.stringify({ _action:"plotbatch", plots:plots }) })
+    body:postBody_({ _action:"plotbatch", plots:plots }) })
     .then(()=>{ changed.forEach(p=>{ p._posted=true; }); persist(); persistAudit(); renderSaved();
       if(!quiet) toast(`Sent ${plots.length} updated plot${plots.length===1?"":"s"} — confirming…`);
       setTimeout(()=>plotConfirm_(changed, n=>{
@@ -2846,6 +3045,7 @@ function pushEditsBatch_(changed, quiet){
 }
 /* The batch retry. Plots an edit batch could not confirm keep _batchRetry until a read-back matches. */
 function flushEditBatch_(){
+  if(authBlocked) return;
   if(_editBatchBusy || !connected || isOffline()) return;
   const all=saved.concat(typeof auditPlots!=="undefined"?auditPlots:[]);
   const q=all.filter(p=>p._batchRetry && !p._sent);
@@ -2938,13 +3138,14 @@ function queueDelete_(p, noFlush){ pendingDeletes.push({id:String(p._id||""),key
 const DEL_TRY_MAX=5;
 let _delBusy=false;
 function flushDeletes_(){
+  if(authBlocked) return;
   if(_delBusy || !connected || isOffline() || !pendingDeletes.length) return;
   _delBusy=true;
   const batch=pendingDeletes.slice();
   fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
     /* ids are the identity. A key goes only for an entry with no id, and as keysOnly, so the backend
        never matches a plot by Stand|Plot|Date when it has the PlotID (see deletePlotsWithBackup_). */
-    body:JSON.stringify({_action:"deleteplots",ids:batch.map(d=>d.id).filter(Boolean),keysOnly:batch.filter(d=>!d.id).map(d=>d.key).filter(Boolean),by:(batch[0]&&batch[0].by)||""})})
+    body:postBody_({_action:"deleteplots",ids:batch.map(d=>d.id).filter(Boolean),keysOnly:batch.filter(d=>!d.id).map(d=>d.key).filter(Boolean),by:(batch[0]&&batch[0].by)||""})})
     .then(()=>{ setTimeout(()=>deleteConfirm_(batch), 1500); })
     .catch(()=>{ _delBusy=false; });
 }
@@ -2969,7 +3170,7 @@ function deleteConfirm_(batch){
       else if(r && r.ok && r.plot){ d.n=(d.n||0)+1; if(d.n>=DEL_TRY_MAX){ gone.add(d); gaveUp.push(d); } }   // still there
       if(--left===0) finish(); };                                                            // no answer: keep it
     window[name]=fin; sc.onerror=()=>fin(null); setTimeout(()=>fin(null),15000);
-    sc.src=SCRIPT_URL+sep+"action=plotrow&id="+encodeURIComponent(d.id)+"&callback="+name;
+    sc.src=SCRIPT_URL+sep+tokQ_()+"action=plotrow&id="+encodeURIComponent(d.id)+"&callback="+name;
     document.body.appendChild(sc);
   });
 }
@@ -3010,6 +3211,7 @@ function netDot(){ const q=saved.filter(p=>!p._sent).length; const d=$("netDot")
 
 /* ---------- offline queue: auto-send when signal returns ---------- */
 function flushQueue(manual){
+  if(authBlocked){ if(manual) loginOpen_(); return; }
   /* Plots from an edit batch are retried as a batch (flushEditBatch_), not one post each. */
   if(saved.some(p=>p._batchRetry && !p._sent)) flushEditBatch_();
   if(_confirmBusy && !manual) return;   // the last pass is still reading plots back
@@ -3025,7 +3227,7 @@ function flushQueue(manual){
      confirmed stays queued and comes round again on the 60-second timer. */
   let posted=0, tried=0;
   q.forEach(d=>{
-    fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(d)})
+    fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:postBody_(d)})
       .then(()=>{ d._posted=true; posted++; })
       .catch(()=>{})
       .then(()=>{ if(++tried<q.length) return;
@@ -3041,11 +3243,13 @@ function flushQueue(manual){
       });
   });
 }
-window.addEventListener("online", ()=>{ toast("Back online — sending queued plots"); netDot(); renderSaved(); flushQueue(); flushEditBatch_(); flushSpecies(); fetchSpecies(); flushTracts(); fetchTracts(); flushPhotos(); flushDeletes_(); });
+window.addEventListener("online", ()=>{ toast("Back online — sending queued plots"); netDot(); renderSaved(); authCheck_(); flushQueue(); flushEditBatch_(); flushSpecies(); fetchSpecies(); flushTracts(); fetchTracts(); flushPhotos(); flushDeletes_(); });
 window.addEventListener("offline", ()=>{ netDot(); renderSaved(); });
 /* Species and tracts were missing from this. An addition that failed to confirm only got another
    chance on the next "online" event or the next time somebody added a plant — which on a phone
    that never goes properly offline is never. */
+let _authTick=0;
+setInterval(()=>{ if(++_authTick%5===0 || authBlocked) authCheck_(); }, 60000);   // every 5 minutes, or every minute while shut out
 setInterval(()=>{ if(saved.some(p=>!p._sent)) flushQueue(); flushEditBatch_(); if(pendingDeletes.length) flushDeletes_();
   if(pendingSpecies.length) flushSpecies(); if(typeof pendingTracts!=="undefined" && pendingTracts.length) flushTracts(); }, 60000); // safety retry every 60s
 setInterval(()=>{ try{ flushPhotos(); }catch(e){} }, 90000);            // retry any unconfirmed photo uploads
@@ -3187,6 +3391,7 @@ function addThumb(dataUrl,num){
 let _photoFlushing=false;
 function sleep_(ms){ return new Promise(r=>setTimeout(r,ms)); }
 function flushPhotos(){
+  if(authBlocked) return;
   if(_photoFlushing) return; if(!connected || isOffline()) return;
   _photoFlushing=true;
   (async ()=>{
@@ -3218,7 +3423,7 @@ function uploadPhotoOnce_(r){
     let done=false; const fin=()=>{ if(done)return; done=true; resolve(); };
     setTimeout(fin, 20000);   // never let one photo hang the queue
     fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
-      body:JSON.stringify({_action:"photo",filename:r.filename,data:r.data})}).then(fin).catch(fin);
+      body:postBody_({_action:"photo",filename:r.filename,data:r.data})}).then(fin).catch(fin);
   });
 }
 // Ask the Sheet which photo filenames are actually in Drive (via the Photos index). JSONP; empty set on failure.
@@ -3231,7 +3436,7 @@ function photoConfirmSet_(){
       window[name]=r=>{ try{ fin((r&&r.ok)? new Set(r.files||[]) : null); }finally{ clean(); } };   // null = couldn't verify
       sc.onerror=()=>{ clean(); fin(null); };
       setTimeout(()=>{ clean(); fin(null); }, 15000);
-      sc.src=SCRIPT_URL+sep+"action=photolist&callback="+name;
+      sc.src=SCRIPT_URL+sep+tokQ_()+"action=photolist&callback="+name;
       document.body.appendChild(sc);
     }catch(e){ fin(null); }
   });
@@ -3562,6 +3767,8 @@ function appStatus_(){
                         :(isOffline()?`<span style="color:#e8a33a">offline</span>`:`<span style="color:#7fd0a0">online</span>`)))+
       row("You", (cruiser||cruiserEmail)?esc((cruiser||"")+(cruiserEmail?" · "+cruiserEmail:"")) 
                  :`<span style="color:#e8a33a">not set — tap “Your name &amp; email”</span>`)+
+      row("Login", authToken?`<span style="color:#7fd0a0">logged in as ${esc(authUser||"—")}</span>`
+                  :(authNeeded?`<span style="color:#e8a33a">required — not logged in</span>`:`<span style="color:#8fae95">not required</span>`))+
       row("Location", mePos?`<span style="color:#7fd0a0">fix acquired</span>`
             :(navigator.geolocation?`<span style="color:#e8a33a">no fix — open the map to start it</span>`
             :`<span style="color:#e8a33a">not available on this device</span>`))+
@@ -3755,7 +3962,7 @@ function fetchMyAnalysis_(then){
   const cleanup=()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
   window[cb]=resp=>{ try{ _analysisByKey={}; _analysisByCoord={}; const arr=(resp&&resp.plots)||[]; arr.forEach(a=>{ _analysisByKey[analysisKey_(a.stand,a.plot)]=a; const ck=coordKey_(a.lat,a.lon); if(ck) _analysisByCoord[ck]=a; }); _analysisFetchedAt=Date.now(); _analysisFeedCount=arr.length; _analysisSampleKey=arr.length?analysisKey_(arr[0].stand,arr[0].plot):""; if(then) then(true); }catch(e){ if(then) then(false); } cleanup(); };
   sc.onerror=()=>{ cleanup(); if(then) then(false); };
-  sc.src=SCRIPT_URL+sep+"action=plotanalysis&set=all&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=plotanalysis&set=all&callback="+cb;
   document.body.appendChild(sc);
 }
 // One field's display value from an analysis row ("" if none).
@@ -3940,7 +4147,7 @@ function idFetch_(){
     idRender_(); };
   sc.onerror=()=>{ clean(); idRender_(_descItems.length?null:"Couldn't reach the Sheet."); };
   setTimeout(()=>{ if(window[cb]){ clean(); idRender_(_descItems.length?null:"No answer from the Sheet."); } },15000);
-  sc.src=SCRIPT_URL+sep+"action=inventorydesc&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=inventorydesc&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
   document.body.appendChild(sc);
 }
 function setDescPick(i){ _descPick=parseInt(i,10)||0; idRender_(); }
@@ -3964,7 +4171,7 @@ function genDesc_(tract){
   window[cb]=r=>{ clean(); done(r); };
   sc.onerror=()=>{ clean(); done(null); };
   setTimeout(()=>{ if(window[cb]){ clean(); done(null); } },90000);   // long prose takes a while
-  sc.src=SCRIPT_URL+sep+"action=gendesc&tract="+encodeURIComponent(tract)+"&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=gendesc&tract="+encodeURIComponent(tract)+"&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
   document.body.appendChild(sc);
 }
 function idRender_(err){
@@ -4046,7 +4253,7 @@ function ngBatch_(){
   /* 3 per batch, not 6. Each call is ~6.5 s plus the model's own time, and one rate-limit backoff
      adds up to 68 s — six of those outran the app's wait while the server carried on working, which
      looked like a failure and was not one. */
-  sc.src=SCRIPT_URL+sep+"action=gennotes&max=3&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=gennotes&max=3&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
   document.body.appendChild(sc);
 }
 /* Everything the crew has exported from the map, listed by who made it. The point is that a track
@@ -4065,7 +4272,7 @@ function openMapFiles(){
     mfRender_(); };
   sc.onerror=()=>{ clean(); mfRender_("Couldn't reach the Sheet."); };
   setTimeout(()=>{ if(window[cb]){ clean(); mfRender_("No answer from the Sheet."); } },15000);
-  sc.src=SCRIPT_URL+sep+"action=mapfiles&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=mapfiles&callback="+cb;
   document.body.appendChild(sc);
 }
 function setMfWho(v){ _mfWho=v; mfRender_(); }
@@ -4087,7 +4294,7 @@ function mfGet_(i){
   };
   sc.onerror=()=>{ clean(); toast("Couldn't fetch that file",true); };
   setTimeout(()=>{ if(window[cb]){ clean(); toast("Timed out — the file may be too large",true); } },60000);
-  sc.src=SCRIPT_URL+sep+"action=layerget&id="+encodeURIComponent(it.id)+"&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=layerget&id="+encodeURIComponent(it.id)+"&callback="+cb;
   document.body.appendChild(sc);
 }
 function mfRender_(err){
@@ -4128,7 +4335,7 @@ function openCompRpt(){
   window[cb]=r=>{ clean(); _crTracts=((r&&r.tracts)||[]); _crComps=((r&&r.compartments)||[]); crRender_(); };
   sc.onerror=()=>{ clean(); backendFailMsg_(294, m=>crRender_(m)); };
   setTimeout(()=>{ if(window[cb]){ clean(); backendFailMsg_(294, m=>crRender_(m)); } },15000);
-  sc.src=SCRIPT_URL+sep+"action=comprptlist&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=comprptlist&callback="+cb;
   document.body.appendChild(sc);
 }
 function setCrWant(v){ _crWant=v; }
@@ -4185,7 +4392,7 @@ function crBatch_(){
   window[cb]=r=>{ clean(); done(r); };
   sc.onerror=()=>{ clean(); done(null); };
   setTimeout(()=>{ if(window[cb]){ clean(); done(null); } },150000);
-  sc.src=SCRIPT_URL+sep+"action=comprpt&max=2&want="+encodeURIComponent(_crWant)+"&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=comprpt&max=2&want="+encodeURIComponent(_crWant)+"&callback="+cb;
   document.body.appendChild(sc);
 }
 function openPlotFinder(){
@@ -4204,7 +4411,7 @@ function pfFetch_(){
   sc.onerror=()=>{ clean(); pfRender_("Couldn't reach the Sheet — check your connection."); };
   // set=all: the feed defaults to the field set only, which silently drops every imported plot
   // and every collector who only ever did imported ones.
-  sc.src=SCRIPT_URL+sep+"action=plotanalysis&set=all&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=plotanalysis&set=all&callback="+cb;
   document.body.appendChild(sc);
 }
 function pfWho_(r){ return (String(r.cruiser||"").trim()) || shortEmail_(r.email) || "Unknown"; }
@@ -4287,7 +4494,7 @@ function fetchCrew(silent){
   const cleanup=()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
   window[cb]=resp=>{ try{ renderCrewPlots((resp&&resp.plots)||[], silent); }catch(e){ if(!silent) toast("Couldn't load crew plots",true); } cleanup(); };
   sc.onerror=()=>{ cleanup(); if(!silent) toast("Couldn't load crew plots — check connection",true); };
-  sc.src=SCRIPT_URL+sep+"action=plotanalysis&callback="+cb;   // analyzed per-plot feed (BA, vol, type, age, …)
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=plotanalysis&callback="+cb;   // analyzed per-plot feed (BA, vol, type, age, …)
   document.body.appendChild(sc);
 }
 // label text for a plot under the chosen analyzed field
@@ -4459,7 +4666,7 @@ function stopLive(){
 function broadcastLive(){
   if(!liveOn || !connected || isOffline() || !mePos) return;
   try{ fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
-    body:JSON.stringify({_action:"presence", email:cruiserEmail, name:(cruiser||shortEmail_(cruiserEmail)), lat:mePos.lat, lon:mePos.lon})}); }catch(e){}
+    body:postBody_({_action:"presence", email:cruiserEmail, name:(cruiser||shortEmail_(cruiserEmail)), lat:mePos.lat, lon:mePos.lon})}); }catch(e){}
 }
 function pollLive(){
   if(!liveOn || !connected || isOffline()) return;
@@ -4468,7 +4675,7 @@ function pollLive(){
   const cleanup=()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
   window[cb]=resp=>{ try{ renderLive((resp&&resp.crew)||[]); }catch(e){} cleanup(); };
   sc.onerror=cleanup;
-  sc.src=SCRIPT_URL+sep+"action=presence&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=presence&callback="+cb;
   document.body.appendChild(sc);
 }
 /* Crew positions are still collected the whole time — this only governs whether they're drawn.
@@ -4549,7 +4756,7 @@ function fetchCrewRoutes(silent){
   const cleanup=()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
   window[cb]=resp=>{ try{ renderCrewRoutes((resp&&resp.routes)||[], silent); }catch(e){ if(!silent) toast("Couldn't load crew routes",true); } cleanup(); };
   sc.onerror=()=>{ cleanup(); if(!silent) toast("Couldn't load crew routes — check connection",true); };
-  sc.src=SCRIPT_URL+sep+"action=routes&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=routes&callback="+cb;
   document.body.appendChild(sc);
 }
 function renderCrewRoutes(routes, silent){
@@ -4674,7 +4881,7 @@ function restoreFromSheet(quiet){
       },400);
     }catch(e){ toast("Restore failed",true); } cleanup(); };
   sc.onerror=()=>{ cleanup(); toast("Restore failed — check connection",true); };
-  sc.src=SCRIPT_URL+sep+"action=plots&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=plots&callback="+cb;
   document.body.appendChild(sc);
 }
 
@@ -4697,7 +4904,7 @@ function buildSheetSummary_(email,label){
       }
     }catch(e){ toast("Build failed",true); } cleanup(); };
   sc.onerror=()=>{ cleanup(); toast("Build failed — check connection",true); };
-  sc.src=SCRIPT_URL+sep+"action=rebuild&callback="+cb+(email?("&email="+encodeURIComponent(email)):"");
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=rebuild&callback="+cb+(email?("&email="+encodeURIComponent(email)):"");
   document.body.appendChild(sc);
 }
 function buildMySummary(){
@@ -4808,7 +5015,7 @@ function fetchTractList_(preselect){
       ((resp&&resp.tracts)||[]).forEach(t=>{ if(t && ![...sel.options].some(o=>o.value.toLowerCase()===String(t).toLowerCase()))
         sel.insertAdjacentHTML("beforeend",`<option value="${esc(t)}">${esc(t)}</option>`); });
       if(keep && [...sel.options].some(o=>o.value.toLowerCase()===String(keep).toLowerCase())) setSel(sel,keep); }catch(e){} cleanup(); };
-  sc.onerror=cleanup; sc.src=SCRIPT_URL+sep+"action=tractlist&callback="+cb; document.body.appendChild(sc);
+  sc.onerror=cleanup; sc.src=SCRIPT_URL+sep+tokQ_()+"action=tractlist&callback="+cb; document.body.appendChild(sc);
 }
 function runReport(){ const t=$("reportTractSel").value; closeReportModal(); emailReport(t); }
 function runReportPdf(){ const t=$("reportTractSel").value; closeReportModal(); emailSummaryPdf(t); }
@@ -4825,7 +5032,7 @@ function emailReport(tract){
   window[cb]=resp=>{ if(resp&&resp.ok) toast(`✓ Report emailed to ${resp.to}${resp.tract?` — ${resp.tract}`:""} — check your inbox`);
                      else toast("Couldn't email the report"+((resp&&resp.error)?": "+resp.error:""),true); cleanup(); };
   sc.onerror=()=>{ cleanup(); toast("Couldn't reach the Sheet — check your connection",true); };
-  sc.src=SCRIPT_URL+sep+"action=emailreport&to="+encodeURIComponent(cruiserEmail)+(t?"&tract="+encodeURIComponent(t):"")+"&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=emailreport&to="+encodeURIComponent(cruiserEmail)+(t?"&tract="+encodeURIComponent(t):"")+"&callback="+cb;
   document.body.appendChild(sc);
 }
 
@@ -5562,6 +5769,7 @@ document.addEventListener("change",e=>{
 $("addModalInput").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); confirmAddSpecies(); } });
 flushQueue(); // push anything left queued from a previous offline session
 flushSpecies(); fetchSpecies(); seedShrubsToSheet_(); // sync the shared species list; seed shrubs once
+authBanner_(); authCheck_();   // is login required, and is this phone logged in?
 flushTracts(); fetchTracts(); // sync the shared tract list
 flushPhotos(); updateArchiveBadge(); // upload any photos queued before the app was last closed, and show the on-device count
 if(pendingDeletes.length) flushDeletes_();   // finish any Sheet deletions queued offline
@@ -5781,7 +5989,7 @@ function openDriveLayers(){
     else backendFailMsg_(261, m=>dlRender_(m)); };
   sc.onerror=()=>{ clean(); backendFailMsg_(261, m=>dlRender_(m)); };
   setTimeout(()=>{ if(window[cb]){ clean(); dlRender_("Checking…"); backendFailMsg_(261, m=>dlRender_(m)); } },15000);
-  sc.src=SCRIPT_URL+sep+"action=layerlist&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=layerlist&callback="+cb;
   document.body.appendChild(sc);
 }
 function dlRender_(err){
@@ -5826,7 +6034,7 @@ function dlCheckMail_(){
   };
   sc.onerror=()=>{ clean(); dlRender_("Could not reach the backend to check the mailbox."); };
   setTimeout(()=>{ if(window[cb]){ clean(); dlRender_("Timed out checking the mailbox — try again."); } },60000);
-  sc.src=SCRIPT_URL+sep+"action=mailcheck&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=mailcheck&callback="+cb;
   document.body.appendChild(sc);
 }
 function dlPick_(i){
@@ -5861,7 +6069,7 @@ function dlPick_(i){
   };
   sc.onerror=()=>{ clean(); fail(); };
   setTimeout(()=>{ if(window[cb]){ clean(); fail("Timed out — the file may be too large"); } },60000);
-  sc.src=SCRIPT_URL+sep+"action=layerget&id="+encodeURIComponent(it.id)+"&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=layerget&id="+encodeURIComponent(it.id)+"&callback="+cb;
   document.body.appendChild(sc);
 }
 let _dlFile=null;
@@ -6129,7 +6337,7 @@ function sheetReachable_(then){
   window[cb]=r=>{ if(settled) return; settled=true; clean(); if(r&&r.build) _sheetBuild=String(r.build); then(true); };
   sc.onerror=()=>{ if(settled) return; settled=true; clean(); then(false); };
   setTimeout(()=>{ if(!settled){ settled=true; clean(); then(false); } },10000);
-  sc.src=SCRIPT_URL+sep+"action=standanalysis&callback="+cb+"&notes=0&email="+encodeURIComponent(cruiserEmail||"");
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=standanalysis&callback="+cb+"&notes=0&email="+encodeURIComponent(cruiserEmail||"");
   document.body.appendChild(sc);
 }
 /* One sentence that says which of the two it is, and what to do about it. */
@@ -6177,7 +6385,7 @@ function standAnFetch_(force){
     if(r && r.build) _sheetBuild=String(r.build);
     standAnAt=Date.now(); try{ renderLabels(); }catch(e){} };
   sc.onerror=clean; setTimeout(()=>{ if(window[cb]) clean(); },12000);
-  sc.src=SCRIPT_URL+sep+"action=standanalysis&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=standanalysis&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
   document.body.appendChild(sc);
 }
 function standAnFor_(f){
@@ -6272,7 +6480,7 @@ function genNote_(stand){
   window[cb]=r=>{ clean(); done(r); };
   sc.onerror=()=>{ clean(); done(null); };
   setTimeout(()=>{ if(window[cb]){ clean(); done(null); } },180000);   // a Gemini call with backoff, not a page fetch
-  sc.src=SCRIPT_URL+sep+"action=gennote&stand="+encodeURIComponent(stand)+"&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=gennote&stand="+encodeURIComponent(stand)+"&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
   document.body.appendChild(sc);
 }
 /* One compartment's report, from its popup. Same builder as the Tools panel and the Sheet menu. */
@@ -6321,7 +6529,7 @@ function jsonp_(query, done, ms){
   window[cb]=r=>{ if(settled) return; settled=true; clean(); done(r); };
   sc.onerror=()=>{ if(settled) return; settled=true; clean(); done(null); };
   setTimeout(()=>{ if(!settled){ settled=true; clean(); done(null); } }, ms||30000);
-  sc.src=SCRIPT_URL+sep+query+"&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+query+"&callback="+cb;
   document.body.appendChild(sc);
 }
 function compRptOne_(stand){
@@ -6336,7 +6544,7 @@ function compRptOne_(stand){
     else toast((r&&r.error)||"Couldn't build the report",true); };
   sc.onerror=()=>{ clean(); toast("Couldn't reach the Sheet",true); };
   setTimeout(()=>{ if(window[cb]){ clean(); toast("Timed out — it may still be building",true); } },90000);
-  sc.src=SCRIPT_URL+sep+"action=comprpt&max=1&force=1&want="+encodeURIComponent(stand)+"&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=comprpt&max=1&force=1&want="+encodeURIComponent(stand)+"&callback="+cb;
   document.body.appendChild(sc);
 }
 function setBoundPopupView(v){ _bpView=v; if(v==="analysis") standAnFetch_(false); renderBoundPopup_(); }
@@ -6405,7 +6613,7 @@ function bpDetailFetch_(stand, then){
   window[cb]=r=>fin((r&&r.ok&&r.dbhClasses)?r:null);
   sc.onerror=()=>fin(null);
   setTimeout(()=>fin(null), 15000);
-  sc.src=SCRIPT_URL+sep+"action=standdetail&stand="+encodeURIComponent(stand)+"&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=standdetail&stand="+encodeURIComponent(stand)+"&callback="+cb;
   document.body.appendChild(sc);
 }
 /* Shape the Sheet's reply into what computeStand would have produced, so sizeClassHtml_ and
@@ -7043,7 +7251,7 @@ function photoIndex_(){
     window[cb]=r=>{ _photoIdx=(r&&r.map)||{}; clean(); res(_photoIdx); };
     sc.onerror=()=>{ clean(); res(null); };
     setTimeout(()=>{ if(!_photoIdx){ clean(); res(null); } }, 8000);
-    sc.src=SCRIPT_URL+sep+"action=photoindex&callback="+cb;
+    sc.src=SCRIPT_URL+sep+tokQ_()+"action=photoindex&callback="+cb;
     document.body.appendChild(sc);
   });
 }
@@ -7818,7 +8026,7 @@ function clearRoute(){ routePts=[]; if(routeLine){ fmap.removeLayer(routeLine); 
 function shareRoute_(){
   if(!connected || isOffline() || !cruiserEmail) return;
   try{ fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
-    body:JSON.stringify({_action:"route", email:cruiserEmail, name:(cruiser||shortEmail_(cruiserEmail)), pts:routePts})}); }catch(e){}
+    body:postBody_({_action:"route", email:cruiserEmail, name:(cruiser||shortEmail_(cruiserEmail)), pts:routePts})}); }catch(e){}
 }
 function exportRoute(){
   if(routePts.length<2){ toast("Draw a route first (2+ points)",true); return; }
@@ -7987,7 +8195,7 @@ function pushCompartmentAreas_(silent){
     });
   }catch(e){}
   fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
-    body:JSON.stringify({_action:"standareas",areas:rounded,srcs:srcs,rings:rings})})
+    body:postBody_({_action:"standareas",areas:rounded,srcs:srcs,rings:rings})})
     .then(()=>{ if(!silent){ const off=Object.values(srcs).filter(s=>/official/.test(s)).length; toast(`Sent ${Object.keys(rounded).length} compartment area${Object.keys(rounded).length===1?"":"s"} to the Sheet${off?` · ${off} from the official field`:""}`); } })
     .catch(()=>{ if(!silent) toast("Couldn't reach the Sheet to send areas",true); });
 }
@@ -8250,7 +8458,7 @@ function driveSave_(blob,name,kind){
            while nothing at all was reaching Drive. Nothing is claimed here now: whether the file
            arrived is established by mapfileConfirm_, which asks the Sheet. */
         fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
-          body:JSON.stringify({_action:"mapfile", name:name, kind:kind||"export",
+          body:postBody_({_action:"mapfile", name:name, kind:kind||"export",
             mime:(blob.type||"application/octet-stream"), data:b64,
             cruiser:(cruiser||""), email:(cruiserEmail||"")})})
           .catch(()=>{});
@@ -8582,7 +8790,7 @@ function syncPolys(){
   if(!polys.length){ toast("Save at least one area first",true); return; }
   if(typeof connected!=="undefined" && !connected){ toast("Not connected — connect to sync areas",true); return; }
   const payload={ _action:"polygons", owner:(cruiserEmail||""), polys:polys.map(p=>({ name:p.name, tract:p.tract||"", pts:p.pts, area_ha:+(polyAreaOf_(p.pts)/10000).toFixed(4) })) };
-  fetch(SCRIPT_URL,{ method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain;charset=utf-8"}, body:JSON.stringify(payload) })
+  fetch(SCRIPT_URL,{ method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain;charset=utf-8"}, body:postBody_(payload) })
     .then(()=>toast(`Sent ${polys.length} area${polys.length==1?"":"s"} — plots & summary recalculating`))
     .catch(()=>toast("Sync failed — check signal",true));
 }
