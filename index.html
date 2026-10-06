@@ -1141,7 +1141,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-09-30 · v360";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-06 · v363";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1524,24 +1524,49 @@ function persistPendTracts(){ if(STORE){ try{ STORE.setItem("fi_pendtracts",JSON
 function queueTract(name){ name=String(name||"").trim();
   if(name && !pendingTracts.some(x=>x.toLowerCase()===name.toLowerCase())){ pendingTracts.push(name); persistPendTracts(); }
   flushTracts(); }
+/* v361. A tract left the queue on the opaque no-cors reply (trap 1), so a name lost on poor signal
+   never reached the shared list and nobody else could pick it. Now it is posted, the list is read
+   back, and only names the list really holds leave the queue. */
+let _tractBusy=false, _tractTries={};
+const TRACT_TRY_MAX=5;
 function flushTracts(){
-  if(!connected || isOffline() || !pendingTracts.length) return;
-  pendingTracts.slice().forEach(n=>{
+  if(_tractBusy || !connected || isOffline() || !pendingTracts.length) return;
+  _tractBusy=true;
+  const names=pendingTracts.slice(); let left=names.length;
+  names.forEach(n=>{
     fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({_action:"addtract",name:n})})
-      .then(()=>{ pendingTracts=pendingTracts.filter(x=>x.toLowerCase()!==n.toLowerCase()); persistPendTracts(); })
-      .catch(()=>{});
+      .catch(()=>{})
+      .then(()=>{ if(--left) return;
+        setTimeout(()=>fetchTracts(list=>{
+          _tractBusy=false;
+          if(!list) return;                                   // no answer: keep them all queued
+          /* Compared the way the Sheet stores a value (plotSheetSame_: "007" comes back as 7), and given
+             up on out loud after TRACT_TRY_MAX reads that do not show it — addTract_ appends a row on
+             every post it cannot match, so an endless retry would fill the Tracts tab. */
+          const before=pendingTracts.length, gaveUp=[];
+          pendingTracts=pendingTracts.filter(x=>{
+            if(list.some(l=>plotSheetSame_(String(x).trim(), String(l).trim()))){ delete _tractTries[String(x).toLowerCase()]; return false; }
+            const k=String(x).toLowerCase(); _tractTries[k]=(_tractTries[k]||0)+1;
+            if(_tractTries[k]>=TRACT_TRY_MAX){ delete _tractTries[k]; gaveUp.push(x); return false; }
+            return true; });
+          if(pendingTracts.length!==before) persistPendTracts();
+          if(gaveUp.length) toast(`Tract “${gaveUp[0]}” didn't appear in the shared list — add it in the Sheet's Tracts tab`,true);
+        }), 1200); });
   });
 }
-function fetchTracts(){
-  if(!connected || isOffline()) return;
+function fetchTracts(onList){
+  if(!connected || isOffline()){ if(typeof onList==="function") onList(null); return; }
   const cb="__trk"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?";
   const sc=document.createElement("script");
   const cleanup=()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
+  let answered=false;
+  const reply=list=>{ if(answered) return; answered=true; if(typeof onList==="function"){ try{ onList(list); }catch(e){} } };
   window[cb]=resp=>{ try{ let changed=false;
       ((resp&&resp.tracts)||[]).forEach(n=>{ if(n && !tracts.some(x=>x.toLowerCase()===String(n).toLowerCase())){ tracts.push(String(n)); changed=true; } });
       if(changed){ tracts.sort((a,b)=>a.localeCompare(b)); persistTracts(); tractSelect(); }
-    }catch(e){} cleanup(); };
-  sc.onerror=cleanup;
+    }catch(e){} cleanup(); reply(resp && Array.isArray(resp.tracts) ? resp.tracts.map(String) : null); };
+  sc.onerror=()=>{ cleanup(); reply(null); };
+  setTimeout(()=>reply(null), 15000);
   sc.src=SCRIPT_URL+sep+"action=tracts&callback="+cb;
   document.body.appendChild(sc);
 }
@@ -2076,32 +2101,128 @@ function send(d,isUpdate){
     .then(()=>{ d._posted=true; persist(); renderSaved(); netDot();
       toast(`${isUpdate?"Sent":"Sent"} · Stand ${d.STANDID||"—"} plot ${d.PLOTNUM||"—"} — confirming…`);
       plotConfirm_([d], ()=>{ renderSaved(); netDot();
-        if(d._sent) toast(`✓ In the Sheet · Stand ${d.STANDID||"—"} plot ${d.PLOTNUM||"—"}`);
+        if(d._sent && d._mismatch) toast(mismatchMsg_([d]),true);
+        else if(d._sent) toast(`✓ In the Sheet · Stand ${d.STANDID||"—"} plot ${d.PLOTNUM||"—"}`);
         scheduleAnalysisRefresh_(); }); })
     .catch(()=>{ toast("Saved on device — no signal, will send when back in range",true); renderSaved(); netDot(); });
 }
-/* Ask the Sheet which of these plots it actually holds, by PlotID. `plotrow` answers for one plot
-   and has been in the backend since v333, so this needs no new deployment. Calls back with the
-   number confirmed; a plot that cannot be verified is simply left queued for the next pass —
-   never marked sent on a hope. */
-function plotConfirm_(list, then){
-  const want=(list||[]).filter(p=>p && p._id && !p._sent).slice(0,12);
-  if(!want.length || !connected || isOffline()){ if(then) then(0); return; }
-  let left=want.length, okN=0;
-  want.forEach(p=>{
-    const name="__pc"+Date.now()+Math.random().toString(36).slice(2,6);
-    const sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
-    let settled=false;
-    const clean=()=>{ try{ delete window[name]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
-    const fin=hit=>{ if(settled) return; settled=true; clean();
-      if(hit){ p._sent=true; okN++; }
-      if(--left===0){ persist(); if(then) then(okN); } };
-    window[name]=r=>fin(!!(r && r.ok && r.plot));
-    sc.onerror=()=>fin(false);
-    setTimeout(()=>fin(false), 15000);
-    sc.src=SCRIPT_URL+sep+"action=plotrow&id="+encodeURIComponent(p._id)+"&callback="+name;
-    document.body.appendChild(sc);
+/* Ask the Sheet whether it holds each of these plots AS THEY NOW STAND on the phone. `plotrow`
+   answers for one plot and returns the whole row; it has been in the backend since v333, so this
+   needs no new deployment.
+
+   v361. Until now this only asked whether a row with the PlotID existed. For a new plot that is a
+   real confirmation. For an EDIT to a plot already in the Sheet it is no confirmation at all: the
+   old row answers yes, so a corrected DBH lost on one bar of signal was reported "✓ In the Sheet",
+   marked sent and never retried, while the Sheet kept the old figure. Now the row has to carry the
+   phone's values.
+
+   The comparison is tolerant only where the Sheet itself changes a value (see plotSheetSame_), and
+   leaves out the columns the backend owns. If a plot still disagrees after PLOT_MISMATCH_MAX reads
+   of a row the Sheet DID return, it stops being re-sent — every re-send costs a summary rebuild —
+   and is flagged "check in Sheet" with the field names, rather than either looping for ever or
+   being quietly called safe. Editing the plot again clears the flag. */
+const PLOT_MISMATCH_MAX=5;
+/* Columns the backend writes itself, so the phone's copy is not the reference:
+   DATE is normalised, AGECLASS derived, PHOTO_LINKS resolved from PHOTOS, and the area columns are
+   reassigned from the polygons by recomputeAreas_. */
+const PLOT_CONFIRM_SKIP=new Set(["PlotID","SubmittedAt","DATE","AGECLASS","PHOTO_LINKS","POLYNAME","POLYAREA","AREASRC"]);
+/* normalizeQuality_() in Code.gs: an imported quality of 0 / -1 is stored as AGS / UGS. */
+function plotQualNorm_(k,v){
+  if(!/^T\d+Q$/.test(k)) return v;
+  const s=String(v==null?"":v).trim().toUpperCase();
+  if(s==="AGS"||s==="UGS"||s==="") return s;
+  const f=parseFloat(s); return f===-1?"UGS":(f===0?"AGS":v);
+}
+/* Does the Sheet's text `b` hold the phone's value `a`? Allows only for what Sheets does to a value
+   on the way in: numbers re-formatted (34.50 → 34.5, 007 → 7), TRUE/true, a leading apostrophe
+   dropped, a percentage stored as a fraction. A value Sheets turned into a date or a formula result
+   cannot be compared, so it does not count against the plot. */
+function plotSheetSame_(a,b){
+  let A=String(a==null?"":a).trim(); const B=String(b==null?"":b).trim();
+  if(A===B) return true;
+  if(A.charAt(0)==="'") A=A.slice(1).trim();
+  if(A.toLowerCase()===B.toLowerCase()) return true;
+  const NUM=/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i;
+  if(NUM.test(A) && NUM.test(B)){ const x=+A, y=+B; return Math.abs(x-y)<=1e-9*Math.max(1,Math.abs(x)); }
+  const pc=/^([+-]?(\d+\.?\d*|\.\d+))%$/.exec(A);
+  if(pc && NUM.test(B)) return Math.abs(pc[1]/100 - +B)<=1e-9;
+  if(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z$/.test(B)) return true;   // Sheets made it a date
+  if(A.charAt(0)==="=") return true;                                     // ...or a formula
+  return false;
+}
+/* The fields where the row returned by plotrow disagrees with the phone. Only fields the phone
+   holds AND the Sheet has a column for are compared. */
+function plotMismatch_(p,row){
+  const out=[];
+  Object.keys(p).forEach(k=>{
+    if(k.charAt(0)==="_" || PLOT_CONFIRM_SKIP.has(k) || !Object.prototype.hasOwnProperty.call(row,k)) return;
+    const v=p[k]; if(v!==null && typeof v==="object") return;
+    if(!plotSheetSame_(plotQualNorm_(k,v), row[k])) out.push(k);
   });
+  return out;
+}
+/* A fingerprint of what the phone holds, so a fresh edit restarts the mismatch count. */
+function plotSig_(p){
+  const ks=Object.keys(p).filter(k=>k.charAt(0)!=="_" && !PLOT_CONFIRM_SKIP.has(k)).sort();
+  return ks.map(k=>k+"="+(p[k]!==null && typeof p[k]==="object"?"":String(p[k]==null?"":p[k]))).join("\u0001");
+}
+/* One plotrow read over JSONP. Calls back exactly once: the reply, or null on error / 15 s. */
+function plotrowGet_(params, cb){
+  const name="__pc"+Date.now()+Math.random().toString(36).slice(2,6);
+  const sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  let settled=false;
+  const fin=r=>{ if(settled) return; settled=true; try{ delete window[name]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); cb(r||null); };
+  window[name]=fin; sc.onerror=()=>fin(null); setTimeout(()=>fin(null), 15000);
+  const q=Object.keys(params).map(k=>k+"="+encodeURIComponent(params[k])).join("&");
+  sc.src=SCRIPT_URL+sep+"action=plotrow&"+q+"&callback="+name;
+  document.body.appendChild(sc);
+}
+/* Same plot? The backend's natural key, from the phone's side: coordinates to 5 decimals (r5_) and
+   the same instant (the app holds local time, plotrow returns the Date cell as UTC ISO). */
+function plotSamePlace_(p,row){
+  const r5=v=>{ const n=parseFloat(v); return isFinite(n)?n.toFixed(5):""; };
+  if(!r5(p.X) || !r5(p.Y) || r5(p.X)!==r5(row.X) || r5(p.Y)!==r5(row.Y)) return false;
+  const a=String(p.DATE||"").trim(), b=String(row.DATE||"").trim();
+  if(!a && !b) return true;
+  const ta=Date.parse(a), tb=Date.parse(b);
+  return isFinite(ta) && isFinite(tb) && Math.abs(ta-tb)<1000;
+}
+let _confirmBusy=0;
+function plotConfirm_(list, then){
+  const want=(list||[]).filter(p=>p && p._id && !p._sent);
+  if(!want.length || !connected || isOffline()){ if(then) then(0); return; }
+  _confirmBusy++;
+  let next=0, left=want.length, okN=0;
+  const done=()=>{ if(--left===0){ _confirmBusy=Math.max(0,_confirmBusy-1); persist(); if(then) then(okN); } else pump(); };
+  /* Four at a time, every plot in the list. The old cap of 12 per pass left the rest of a
+     150-plot renumbering to be re-sent before it had ever been checked. */
+  const pump=()=>{ if(next>=want.length) return; const p=want[next++];
+    const judge=r=>{
+      if(!(r && r.ok && r.plot)) return;
+      const mm=plotMismatch_(p, r.plot);
+      if(!mm.length){ p._sent=true; delete p._mismatch; delete p._mmN; delete p._mmSig; delete p._batchRetry; okN++; }
+      else {
+        const sig=plotSig_(p);
+        if(p._mmSig!==sig){ p._mmSig=sig; p._mmN=0; }
+        p._mmN=(p._mmN||0)+1;
+        if(p._mmN>=PLOT_MISMATCH_MAX){ p._sent=true; p._mismatch=mm.slice(0,12); delete p._batchRetry; }
+      } };
+    plotrowGet_({id:p._id}, r=>{
+      /* Not found by our id, though we posted it: the upsert may have matched an existing row on
+         stand + date + coordinates and kept THAT row's PlotID (an imported copy, a re-created plot).
+         Asking by id again would never find it, and the batch retry would post every minute for ever.
+         Look it up by stand and plot, and adopt the Sheet's PlotID only if the coordinates (to ~1 m,
+         the backend's own r5_) and the date say it is the same plot. */
+      if(r && r.ok===false && /not found/i.test(String(r.error||"")) && (p._posted || p._batchRetry)
+         && String(p.STANDID||"").trim() && String(p.PLOTNUM||"").trim()){
+        plotrowGet_({stand:String(p.STANDID).trim(), plot:String(p.PLOTNUM).trim()}, r2=>{
+          if(r2 && r2.ok && r2.plot && r2.id && plotSamePlace_(p, r2.plot)){ p._id=String(r2.id); judge(r2); }
+          done(); });
+        return;
+      }
+      judge(r); done(); });
+  };
+  for(let k=0;k<Math.min(4,want.length);k++) pump();
 }
 // After a plot reaches the Sheet, refresh the on-the-fly analysis so the new plot can be labelled with
 // its analyzed values right away. Debounced so a burst of submits triggers just one fetch.
@@ -2693,13 +2814,46 @@ function autoAssignStands(){
 }
 // Push a set of edited plots to the Sheet in ONE batch request (safe upsert by PlotID/natural key),
 // then mark them sent. Avoids the many-concurrent-requests failure that can silently drop updates.
-function pushEditsBatch_(changed){
-  const plots=changed.map(p=>{ const q=Object.assign({},p); delete q._audit; delete q._dup; delete q._src; return q; });
+/* v361. This used to set _sent on the opaque no-cors reply — trap 1 again, on the path that carries
+   Assign stands, renumbering and edits to selected or imported plots. Now it records that it posted,
+   reads every plot back, and leaves anything unconfirmed marked for another batch on the 60-second
+   timer. Retries stay in the batch channel on purpose: a 150-plot renumbering must not come back as
+   150 single posts, each with its own summary rebuild. */
+let _editBatchBusy=false;
+function pushEditsBatch_(changed, quiet){
+  if(!changed || !changed.length) return;
+  if(_editBatchBusy){   // one batch in the air at a time; these go with the next one
+    changed.forEach(p=>{ p._sent=false; p._batchRetry=true; }); persist(); persistAudit(); return; }
+  _editBatchBusy=true;
+  const plots=changed.map(p=>{ const q=Object.assign({},p); delete q._audit; delete q._dup; delete q._src;
+    delete q._mismatch; delete q._mmN; delete q._mmSig; delete q._batchRetry; return q; });
+  changed.forEach(p=>{ p._sent=false; p._batchRetry=true; });
+  persist(); persistAudit();
   fetch(SCRIPT_URL,{ method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain;charset=utf-8"},
     body:JSON.stringify({ _action:"plotbatch", plots:plots }) })
-    .then(()=>{ changed.forEach(p=>{ p._sent=true; }); persist(); persistAudit(); renderSaved();
-      toast(`✓ Synced ${plots.length} updated plot${plots.length===1?"":"s"} to the Sheet`); scheduleAnalysisRefresh_(); })
-    .catch(()=>{ toast("Updates saved on device — no signal. They'll sync on the next push.",true); });
+    .then(()=>{ changed.forEach(p=>{ p._posted=true; }); persist(); persistAudit(); renderSaved();
+      if(!quiet) toast(`Sent ${plots.length} updated plot${plots.length===1?"":"s"} — confirming…`);
+      setTimeout(()=>plotConfirm_(changed, n=>{
+        _editBatchBusy=false;
+        persist(); persistAudit(); renderSaved(); netDot();
+        const flagged=changed.filter(p=>p._sent && p._mismatch);
+        const still=changed.filter(p=>!p._sent).length;
+        if(flagged.length) toast(mismatchMsg_(flagged),true);
+        else if(n && !still) toast(`✓ ${n} updated plot${n===1?"":"s"} confirmed in the Sheet`);
+        else if(!quiet || n) toast(`${n} of ${plots.length} updated plot${plots.length===1?"":"s"} confirmed — ${still} will be sent again`,!n);
+        if(n) scheduleAnalysisRefresh_(); }), 1200); })
+    .catch(()=>{ _editBatchBusy=false; toast("Updates saved on device — no signal. They'll sync on the next push.",true); });
+}
+/* The batch retry. Plots an edit batch could not confirm keep _batchRetry until a read-back matches. */
+function flushEditBatch_(){
+  if(_editBatchBusy || !connected || isOffline()) return;
+  const all=saved.concat(typeof auditPlots!=="undefined"?auditPlots:[]);
+  const q=all.filter(p=>p._batchRetry && !p._sent);
+  if(q.length) pushEditsBatch_(q, true);
+}
+function mismatchMsg_(list){
+  const p=list[0], more=list.length>1?` (+${list.length-1} more)`:"";
+  return `Check in Sheet · Stand ${p.STANDID||"—"} plot ${p.PLOTNUM||"—"}${more}: the Sheet still holds a different ${(p._mismatch||[]).slice(0,4).join(", ")}`;
 }
 function clearAuditPlots(){
   if(!auditPlots.length){ toast("No imported plots",true); return; }
@@ -2741,7 +2895,8 @@ function renderSaved(){
       <td class="num">${p._trees||0}</td>
       <!-- Three states, not two. "sent" now means the Sheet has confirmed it; a plot we posted but
            could not confirm says so rather than claiming to be safe. -->
-      <td>${p._sent?`<span class="st sent">in Sheet</span>`
+      <td>${p._sent&&p._mismatch?`<span class="st queued" title="The Sheet still holds a different ${esc((p._mismatch||[]).join(", "))}. Open the plot and save it again, or correct the Sheet.">check in Sheet</span>`
+          :p._sent?`<span class="st sent">in Sheet</span>`
             :(p._posted?`<span class="st queued" title="Posted, but the Sheet has not confirmed it yet — it will be sent again">confirming</span>`
                        :`<span class="st queued">queued</span>`)}</td>
       <td style="text-align:right"><button class="tbtn" onclick="editPlot(${i})">Edit</button>${p._sent?"":`<button class="tbtn" onclick="resend(${i})">Send</button>`}<button class="tbtn del" onclick="delPlot(${i})" title="Delete this plot">🗑 Delete</button></td></tr>`).join("")+
@@ -2770,26 +2925,73 @@ let lastDeleted=null;
 let pendingDeletes=[];
 try{ if(STORE) pendingDeletes=JSON.parse(STORE.getItem("fi_penddel")||"[]")||[]; }catch(e){}
 function persistDeletes_(){ try{ if(STORE) STORE.setItem("fi_penddel",JSON.stringify(pendingDeletes)); }catch(e){} }
-function queueDelete_(p){ pendingDeletes.push({id:String(p._id||""),key:[p.STANDID||"",p.PLOTNUM||"",p.DATE||""].join("|"),by:cruiserEmail||cruiser||""}); persistDeletes_(); flushDeletes_(); }
-// Remove queued (submitted) plots from FRIPLOTS — the backend copies each to the DELETED_PLOTS tab first.
+function queueDelete_(p, noFlush){ pendingDeletes.push({id:String(p._id||""),key:[p.STANDID||"",p.PLOTNUM||"",p.DATE||""].join("|"),
+  lbl:`Stand ${p.STANDID||"—"} plot ${p.PLOTNUM||"—"}`,by:cruiserEmail||cruiser||""}); persistDeletes_(); if(!noFlush) flushDeletes_(); }
+/* Remove queued (submitted) plots from FRIPLOTS — the backend copies each to the DELETED_PLOTS tab first.
+
+   v361. The queue used to be emptied on the opaque no-cors reply (trap 1): a delete lost on poor
+   signal left the plot in the Sheet and in the stand figures, with nothing left to retry it. Now each
+   entry stays queued until plotrow says the PlotID is gone. One the Sheet still holds after
+   DEL_TRY_MAX passes is given up on out loud, so a delete the backend will not perform cannot cost a
+   summary rebuild every minute for ever. An entry with no PlotID cannot be checked; it is sent and
+   dropped, as before. */
+const DEL_TRY_MAX=5;
+let _delBusy=false;
 function flushDeletes_(){
-  if(!connected || isOffline() || !pendingDeletes.length) return;
+  if(_delBusy || !connected || isOffline() || !pendingDeletes.length) return;
+  _delBusy=true;
   const batch=pendingDeletes.slice();
   fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
-    body:JSON.stringify({_action:"deleteplots",ids:batch.map(d=>d.id).filter(Boolean),keys:batch.map(d=>d.key).filter(Boolean),by:(batch[0]&&batch[0].by)||""})})
-    .then(()=>{ pendingDeletes=[]; persistDeletes_(); }).catch(()=>{});
+    /* ids are the identity. A key goes only for an entry with no id, and as keysOnly, so the backend
+       never matches a plot by Stand|Plot|Date when it has the PlotID (see deletePlotsWithBackup_). */
+    body:JSON.stringify({_action:"deleteplots",ids:batch.map(d=>d.id).filter(Boolean),keysOnly:batch.filter(d=>!d.id).map(d=>d.key).filter(Boolean),by:(batch[0]&&batch[0].by)||""})})
+    .then(()=>{ setTimeout(()=>deleteConfirm_(batch), 1500); })
+    .catch(()=>{ _delBusy=false; });
 }
+function deleteConfirm_(batch){
+  const gone=new Set(), gaveUp=[];
+  batch.forEach(d=>{ if(!d.id) gone.add(d); });
+  const ask=batch.filter(d=>d.id);
+  let left=ask.length;
+  const finish=()=>{
+    pendingDeletes=pendingDeletes.filter(d=>!gone.has(d)); persistDeletes_(); _delBusy=false;
+    const ok=batch.filter(d=>gone.has(d) && d.id && gaveUp.indexOf(d)<0).length;
+    if(gaveUp.length) toast(`Couldn't remove ${gaveUp[0].lbl||"a plot"}${gaveUp.length>1?` (+${gaveUp.length-1} more)`:""} from the Sheet — delete it there`,true);
+    else if(ok) toast(`✓ ${ok} deleted plot${ok===1?"":"s"} removed from the Sheet · kept in DELETED_PLOTS`);
+    if(ok && typeof scheduleAnalysisRefresh_==="function") scheduleAnalysisRefresh_(); };
+  if(!left){ finish(); return; }
+  ask.forEach(d=>{
+    const name="__dc"+Date.now()+Math.random().toString(36).slice(2,6);
+    const sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+    let settled=false;
+    const fin=r=>{ if(settled) return; settled=true; try{ delete window[name]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc);
+      if(r && r.ok===false && /not found/i.test(String(r.error||""))) gone.add(d);           // the row is gone
+      else if(r && r.ok && r.plot){ d.n=(d.n||0)+1; if(d.n>=DEL_TRY_MAX){ gone.add(d); gaveUp.push(d); } }   // still there
+      if(--left===0) finish(); };                                                            // no answer: keep it
+    window[name]=fin; sc.onerror=()=>fin(null); setTimeout(()=>fin(null),15000);
+    sc.src=SCRIPT_URL+sep+"action=plotrow&id="+encodeURIComponent(d.id)+"&callback="+name;
+    document.body.appendChild(sc);
+  });
+}
+/* v361. Since v354 a plot is _sent only once the Sheet has confirmed it, so "not _sent" no longer
+   means "not in the Sheet": a plot posted and awaiting its read-back may well be there. Deleting one
+   of those as if it had never been submitted removed it from the phone and left the row in the Sheet.
+   Anything that has been posted is now deleted from the Sheet too; a delete for a row that never
+   arrived simply finds nothing. */
+function mayBeInSheet_(p){ return !!(p && (p._sent || p._posted || p._batchRetry)); }
 function delPlot(i){
   const p=saved[i]; if(!p) return;
   const lbl=`${p.STANDID||"—"} / plot ${p.PLOTNUM||"—"}`;
+  const inSheet=mayBeInSheet_(p);
   const note=p._sent
     ? "It was submitted, so it will be removed from the Google Sheet and kept in the Deleted Plots tab (Undo brings it back)."
-    : "It has NOT been submitted yet — deleting removes it from this phone.";
+    : (inSheet ? "It was sent but not yet confirmed, so it will also be removed from the Google Sheet if it arrived (Undo brings it back)."
+               : "It has NOT been submitted yet — deleting removes it from this phone.");
   if(!confirm(`Delete ${lbl}?\n\n${note}\n\nYou can tap Undo right afterwards.`)) return;
-  lastDeleted={plot:p, wasSent:!!p._sent};
+  lastDeleted={plot:p, wasSent:inSheet};
   saved.splice(i,1); persist(); renderSaved(); netDot();
   if(fmap) renderMapPins();          // drop the pin too, so no orphaned marker is left on the map
-  if(p._sent){ queueDelete_(p); }    // remove the submitted copy from the Sheet (backed up server-side)
+  if(inSheet){ queueDelete_(p); }    // remove the submitted copy from the Sheet (backed up server-side)
   toast(`Deleted ${lbl}`);
 }
 function undoDelete(){
@@ -2808,9 +3010,13 @@ function netDot(){ const q=saved.filter(p=>!p._sent).length; const d=$("netDot")
 
 /* ---------- offline queue: auto-send when signal returns ---------- */
 function flushQueue(manual){
-  const q=saved.filter(p=>!p._sent);
+  /* Plots from an edit batch are retried as a batch (flushEditBatch_), not one post each. */
+  if(saved.some(p=>p._batchRetry && !p._sent)) flushEditBatch_();
+  if(_confirmBusy && !manual) return;   // the last pass is still reading plots back
+  const q=saved.filter(p=>!p._sent && !p._batchRetry);
   if(!connected){ if(manual) toast("Set SCRIPT_URL first",true); return; }
-  if(!q.length){ if(manual) toast("Nothing queued"); return; }
+  if(!q.length){ if(manual){ const b=saved.filter(p=>p._batchRetry && !p._sent).length;
+      toast(b?`Re-sending ${b} edited plot${b===1?"":"s"} as one batch…`:"Nothing queued"); } return; }
   if(isOffline()){ if(manual) toast("Still offline — will send when back in signal",true); return; }
   if(manual) toast(`Sending ${q.length} queued plot${q.length===1?"":"s"}…`);
   /* Post them all, then ask the Sheet which ones actually arrived. Same reasoning as send(): the
@@ -2827,18 +3033,20 @@ function flushQueue(manual){
         setTimeout(()=>plotConfirm_(q, n=>{
           renderSaved(); netDot();
           const still=saved.filter(p=>!p._sent).length;
-          if(manual || n) toast(n?`✓ ${n} plot${n===1?"":"s"} confirmed in the Sheet`+(still?` · ${still} still to send`:"")
+          const flagged=q.filter(p=>p._sent && p._mismatch);
+          if(flagged.length) toast(mismatchMsg_(flagged),true);
+          else if(manual || n) toast(n?`✓ ${n} plot${n===1?"":"s"} confirmed in the Sheet`+(still?` · ${still} still to send`:"")
                                   :`Sent ${posted}, but none confirmed yet — will keep trying`, !n);
         }), 1200);
       });
   });
 }
-window.addEventListener("online", ()=>{ toast("Back online — sending queued plots"); netDot(); renderSaved(); flushQueue(); flushSpecies(); fetchSpecies(); flushTracts(); fetchTracts(); flushPhotos(); flushDeletes_(); });
+window.addEventListener("online", ()=>{ toast("Back online — sending queued plots"); netDot(); renderSaved(); flushQueue(); flushEditBatch_(); flushSpecies(); fetchSpecies(); flushTracts(); fetchTracts(); flushPhotos(); flushDeletes_(); });
 window.addEventListener("offline", ()=>{ netDot(); renderSaved(); });
 /* Species and tracts were missing from this. An addition that failed to confirm only got another
    chance on the next "online" event or the next time somebody added a plant — which on a phone
    that never goes properly offline is never. */
-setInterval(()=>{ if(saved.some(p=>!p._sent)) flushQueue(); if(pendingDeletes.length) flushDeletes_();
+setInterval(()=>{ if(saved.some(p=>!p._sent)) flushQueue(); flushEditBatch_(); if(pendingDeletes.length) flushDeletes_();
   if(pendingSpecies.length) flushSpecies(); if(typeof pendingTracts!=="undefined" && pendingTracts.length) flushTracts(); }, 60000); // safety retry every 60s
 setInterval(()=>{ try{ flushPhotos(); }catch(e){} }, 90000);            // retry any unconfirmed photo uploads
 
@@ -5000,30 +5208,102 @@ function setSumThreshold(small){
   const seg=$("sumDbhSeg"); if(seg){ [...seg.children].forEach((b,i)=>b.classList.toggle("on", i===(small?1:0))); }
   renderSummary();
 }
-/* Retention threshold for the size-class panel: "keep everything this size and larger, what comes
-   out?". One control rather than a band min/max pair, because on a phone in the stand that is the
-   question being asked — the Sheet's DBH Range tab has the full band selector for desk work. */
-let summaryKeepCm = (function(){ try{ const v=parseInt(STORE&&STORE.getItem("fi_keepcm"),10); return isFinite(v)?v:40; }catch(e){ return 40; } })();
-/* One retention threshold, two places that draw a table from it: the Stand summary screen and the
-   Marking tab on the compartment popup, which reuses sizeClassHtml_ wholesale. This only ever
-   redrew the summary screen, so changing the size on the POPUP stored the new value, left the
-   dropdown showing it, and left the table beneath it computed at the old one — the control looked
-   dead. Redraw whichever of the two is actually on screen.
+/* DBH range for the size-class panel: "what is standing between these two sizes, and what is the
+   rest of the stand?".
+
+   v363. Until now this was a single retention threshold ("Keep trees >= X", twelve fixed sizes),
+   chosen because on a phone in the stand that was the question being asked. Chris asked for a range
+   instead, so a band can be read off directly — the poles, the 38-48s, everything over 50 — from
+   10 cm up to 200. The old question is still one setting away: From 10, To the class below the size
+   you would keep.
+
+   Both ends are 2 cm DBH CLASSES, the same convention as the marking bands above ("10-24" is the
+   10 class to the 24 class, i.e. trees up to 25.9 cm). That is the resolution of computeStand's
+   accumulator; offering odd centimetres would promise a precision the data does not have. */
+const RANGE_MIN_CM=10, RANGE_MAX_CM=200;
+function rangeClamp_(v,dflt){ v=parseInt(v,10); if(!isFinite(v)) return dflt;
+  v=Math.floor(v/2)*2; return Math.max(RANGE_MIN_CM, Math.min(RANGE_MAX_CM, v)); }
+let summaryRangeLo = (function(){ try{ return rangeClamp_(STORE&&STORE.getItem("fi_rangelo"),RANGE_MIN_CM); }catch(e){ return RANGE_MIN_CM; } })();
+let summaryRangeHi = (function(){ try{ return rangeClamp_(STORE&&STORE.getItem("fi_rangehi"),RANGE_MAX_CM); }catch(e){ return RANGE_MAX_CM; } })();
+if(summaryRangeHi<summaryRangeLo) summaryRangeHi=summaryRangeLo;
+/* One range, two places that draw a table from it: the Stand summary screen and the Marking tab on
+   the compartment popup, which reuses sizeClassHtml_ wholesale. Redraw whichever is actually on
+   screen (v360: the old handler only ever redrew the summary screen, so on the popup the control
+   looked dead).
    The popup is only redrawn when it is genuinely open: renderBoundPopup_ ends in openOn(fmap), and
    _bpFeat still holds the last compartment after the popup is closed, so an unguarded call would
-   pop a closed popup back up on the map. */
-function setSummaryKeep(v){ summaryKeepCm=parseInt(v,10)||40;
-  try{ if(STORE) STORE.setItem("fi_keepcm",String(summaryKeepCm)); }catch(e){}
+   pop a closed popup back up on the map.
+   An end dragged past the other takes the other with it, so the range is never empty or inverted. */
+function setSummaryRange(which,v){
+  if(which==="lo"){ summaryRangeLo=rangeClamp_(v,RANGE_MIN_CM); if(summaryRangeHi<summaryRangeLo) summaryRangeHi=summaryRangeLo; }
+  else { summaryRangeHi=rangeClamp_(v,RANGE_MAX_CM); if(summaryRangeLo>summaryRangeHi) summaryRangeLo=summaryRangeHi; }
+  try{ if(STORE){ STORE.setItem("fi_rangelo",String(summaryRangeLo)); STORE.setItem("fi_rangehi",String(summaryRangeHi)); } }catch(e){}
   try{ const m=$("standSummary"); if(m && m.style.display!=="none") renderSummary(); }catch(e){}
   try{ if(bpPopupOpen_()) renderBoundPopup_(); }catch(e){} }
 function bpPopupOpen_(){
   return !!(typeof fmap!=="undefined" && fmap && typeof _bpPopup!=="undefined" && _bpPopup
             && typeof _bpFeat!=="undefined" && _bpFeat && fmap.hasLayer(_bpPopup));
 }
+/* The compartment a boundary feature belongs to, in hectares — by the SAME rule that sends areas to
+   the Sheet (compartmentAreas_): every polygon carrying this stand name (and tract) summed, the
+   official Area field where it is filled, the shape's own area where it is not. Null when the layer
+   gives no usable area. */
+function bpAreaFor_(f){
+  try{
+    const pr=(f&&f.properties)||{}; if(!standField) return null;
+    const stand=String(pr[standField]!=null?pr[standField]:"").trim(); if(!stand) return null;
+    const tract=(tractField?String(pr[tractField]!=null?pr[tractField]:"").trim():"") || manualTract || "";
+    const nm=tract?(tract+" \u00b7 "+stand):stand;
+    const ca=compartmentAreas_(), ha=ca.areas[nm];
+    if(!(ha>0)) return null;
+    const src=String(ca.srcs[nm]||"");
+    return {ha:ha, src:/mixed/.test(src)?"official + calculated":(/official/.test(src)?"official":"calculated from the shape")};
+  }catch(e){ return null; }
+}
+/* v363. Whole-compartment trees and volume: the per-hectare figures in the table above multiplied by
+   the compartment's hectares. Drawn only where a compartment and its area are known (the popup);
+   `area` is undefined on the Stand summary screen, false-y-with-a-note when the layer has no area.
+   "Rest of stand" is the compartment line minus the range, so the three lines always add up. Trees are those of 10 cm and over with a diameter — the
+   same trees as every figure above. */
+function compTotalsHtml_(area, rangeLbl, whole, R, K, s, split, spp){
+  if(area===undefined) return "";
+  if(!area || !(area.ha>0))
+    return `<div style="font-size:10px;color:#e8b04b;margin-top:8px">No hectares for this compartment in the boundary layer, so compartment totals cannot be shown. Pick the Area field under Map layers, or check the polygon.</div>`;
+  const ha=area.ha, n0=x=>Math.round(x).toLocaleString("en-CA");
+  /* The compartment line is summarizeStand_'s own totStems / totVol in Code.gs — the UNROUNDED
+     per-hectare figure times the area — so it reads the same as the Sheet's Compartment Summary.
+     It is then shared out over every species, inside the range and outside it, in proportion to
+     their per-hectare figures (largest remainder), so the species rows add up to the All-species row
+     and the range never exceeds the compartment. */
+  const allSt=Math.round((+s.stemsHa||0)*ha), allV=Math.round((+s.vol||0)*ha);
+  /* Weights are the UNROUNDED per-hectare figures (split), not the whole stems shown above: a species
+     at 4.2 stems/ha shown as 4 would otherwise lose 0.2 x the hectares. */
+  const cells=(split||[]).map(c=>({sp:c.sp,side:c.side,st:c.e.stemsHa,v:c.e.volHa}));
+  const cSt=apportionApp_(allSt,cells.map(c=>c.st)), cV=apportionApp_(allV,cells.map(c=>c.v));
+  const per={}; let inSt=0, inV=0;
+  cells.forEach((c,k)=>{ const p=per[c.sp]||(per[c.sp]={inSt:0,inV:0,st:0,v:0,has:false});
+    p.st+=cSt[k]; p.v+=cV[k]; if(c.side===0){ p.inSt+=cSt[k]; p.inV+=cV[k]; p.has=true; inSt+=cSt[k]; inV+=cV[k]; } });
+  const big='text-align:right;padding:3px 6px', sm='text-align:right;padding:1px 6px;color:#8fb89a;font-size:11px';
+  const rowAll=`<tr><td style="padding:3px 0;color:#cdebcf"><b>All species</b></td>`+
+    (whole?"":`<td style="${big}">${n0(inSt)}</td><td style="${big}">${n0(inV)}</td>`)+
+    `<td style="${big}">${n0(allSt)}</td><td style="${big};padding-right:0">${n0(allV)}</td></tr>`;
+  const rowsSp=(spp||[]).filter(sp=>per[sp]).map(sp=>{ const p=per[sp];
+    return `<tr><td style="padding:1px 0 1px 10px;color:#8fb89a;font-size:11px">${esc(sp)}</td>`+
+      (whole?"":`<td style="${sm}">${p.has?n0(p.inSt):"—"}</td><td style="${sm}">${p.has?n0(p.inV):"—"}</td>`)+
+      `<td style="${sm}">${n0(p.st)}</td><td style="${sm};padding-right:0">${n0(p.v)}</td></tr>`; }).join("");
+  const hd='color:#7a9a76;font-size:10px';
+  return `<div style="margin-top:12px"><b>Compartment totals</b> <span style="font-size:10px;color:#7a9a76">— ${ha.toFixed(2)} ha (${esc(area.src)}) · trees · volume m³</span>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:4px">
+      <tr style="${hd}"><td></td>${whole?"":`<td colspan="2" style="text-align:center">IN RANGE ${rangeLbl}</td>`}<td colspan="2" style="text-align:center">WHOLE COMPARTMENT</td></tr>
+      <tr style="${hd}"><td></td>${whole?"":`<td style="text-align:right;padding:0 6px">trees</td><td style="text-align:right;padding:0 6px">vol</td>`}<td style="text-align:right;padding:0 6px">trees</td><td style="text-align:right">vol</td></tr>
+      ${rowAll}${rowsSp}
+    </table>
+    <div style="font-size:10px;color:#7a9a76;margin-top:3px">Per-hectare figures above × ${ha.toFixed(2)} ha.</div></div>`;
+}
 /* Stems and volume per hectare by marking size class, and the removed/kept split at the retention
    threshold. Built from computeStand's 2 cm accumulator, the same source the Sheet uses, so the
    phone and the Compartment Summary answer this identically. */
-function sizeClassHtml_(s){
+function sizeClassHtml_(s, area){
   const dcl=s.dbhClasses||{}, np=s.nplots||1;
   if(!Object.keys(dcl).length) return "";
   const f1=x=>x==null?"—":x.toFixed(1), f0=x=>x==null?"—":Math.round(x);
@@ -5049,45 +5329,62 @@ function sizeClassHtml_(s){
       `<td style="text-align:right;padding:1px 6px;color:#8fb89a;font-size:11px">${f1(r.ba)}</td>`+
       `<td style="text-align:right;padding:1px 0;color:#8fb89a;font-size:11px">${f1(r.v)}</td></tr>`).join("");
   });
-  // removed / kept at the retention threshold — its own apportionment, also summing to the stand
-  const keep=summaryKeepCm;
-  const remP=dbhBandApp_(dcl,np,10,keep-1), keptP=dbhBandApp_(dcl,np,keep,Infinity);
+  // inside / outside the chosen DBH range — its own apportionment, also summing to the stand
+  const lo=summaryRangeLo, hi=summaryRangeHi;
+  /* The top of the scale is open-ended: "to 200" means 200 and anything larger, so no measured tree
+     can fall off the end of the selector. */
+  const hiB=hi>=RANGE_MAX_CM?Infinity:hi;
+  const inP=dbhBandApp_(dcl,np,lo,hiB), outP={};
+  /* Outside = the classes below the range plus the classes above it, per species. */
+  [lo>RANGE_MIN_CM?dbhBandApp_(dcl,np,RANGE_MIN_CM,lo-2):{}, isFinite(hiB)?dbhBandApp_(dcl,np,hiB+2,Infinity):{}].forEach(part=>{
+    Object.keys(part).forEach(sp=>{ const e=part[sp], o=outP[sp]||(outP[sp]={n:0,nAgs:0,baHa:0,stemsHa:0,volHa:0});
+      o.n+=e.n; o.nAgs+=e.nAgs; o.baHa+=e.baHa; o.stemsHa+=e.stemsHa; o.volHa+=e.volHa; }); });
   const split=[];
-  Object.keys(remP).forEach(sp=>split.push({sp,side:0,e:remP[sp]}));
-  Object.keys(keptP).forEach(sp=>split.push({sp,side:1,e:keptP[sp]}));
+  Object.keys(inP).forEach(sp=>split.push({sp,side:0,e:inP[sp]}));
+  Object.keys(outP).forEach(sp=>split.push({sp,side:1,e:outP[sp]}));
   const sSt=apportionApp_(Math.round(s.stemsHa),split.map(c=>c.e.stemsHa));
   const sVol=apportionDecApp_(s.vol,split.map(c=>c.e.volHa),1);
   const sBA=apportionDecApp_(s.baHa,split.map(c=>c.e.baHa),1);
-  const bySp={}; const R={st:0,v:0,ba:0}, K={st:0,v:0,ba:0};
+  const bySp={}; const R={st:0,v:0,ba:0}, K={st:0,v:0,ba:0};   // R = in range, K = rest of stand
   split.forEach((c,k)=>{ const e=bySp[c.sp]||(bySp[c.sp]={});
-    e[c.side]={st:sSt[k],v:sVol[k]};
+    e[c.side]={st:sSt[k],v:sVol[k],ba:sBA[k]};
     const T=c.side?K:R; T.st+=sSt[k]; T.v+=sVol[k]; T.ba+=sBA[k]; });
+  /* In-range species first, largest volume first; species with nothing in the range follow. */
   const spp=Object.keys(bySp).sort((a,b)=>{
-    const t=o=>((o[0]||{v:0}).v+(o[1]||{v:0}).v); return t(bySp[b])-t(bySp[a]); });
-  const opts=[20,24,26,30,34,38,40,44,48,50,56,60]
-    .map(v=>`<option value="${v}"${v===keep?" selected":""}>${v} cm</option>`).join("");
+    const i=o=>(o[0]||{v:-1}).v, t=o=>((o[0]||{v:0}).v+(o[1]||{v:0}).v);
+    return (i(bySp[b])-i(bySp[a])) || (t(bySp[b])-t(bySp[a])); });
+  const optsFor=sel=>{ let o=""; for(let v=RANGE_MIN_CM;v<=RANGE_MAX_CM;v+=2) o+=`<option value="${v}"${v===sel?" selected":""}>${v}</option>`; return o; };
+  const whole=(lo<=RANGE_MIN_CM && hi>=RANGE_MAX_CM);
+  const rangeLbl=hi>=RANGE_MAX_CM?`${lo}+ cm`:(lo===hi?`${lo} cm`:`${lo}–${hi} cm`);
+  const num='text-align:right;padding:1px 6px;color:#8fb89a;font-size:11px';
   return `<div style="margin-top:14px"><b>Size classes</b> <span style="font-size:10px;color:#7a9a76">— trees ≥10 cm · stems/ha · BA m²/ha · vol m³/ha</span>
     <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:4px">
       <tr style="color:#7a9a76;font-size:10px"><td></td><td style="text-align:right">stems</td><td style="text-align:right">BA</td><td style="text-align:right">vol</td></tr>
       ${cls}</table>
-    <div style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <b>Keep trees ≥</b>
-      <select onchange="setSummaryKeep(this.value)" style="padding:4px 6px">${opts}</select>
-      <span style="font-size:11px;color:#7a9a76">what comes out below that size</span>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:6px;flex-wrap:nowrap">
+      <b style="white-space:nowrap">DBH range</b>
+      <select id="rangeLoSel" aria-label="DBH range from" onchange="setSummaryRange('lo',this.value)" style="width:auto;flex:1 1 0;min-width:70px;max-width:104px;padding:4px 24px 4px 8px">${optsFor(lo)}</select>
+      <span>to</span>
+      <select id="rangeHiSel" aria-label="DBH range to" onchange="setSummaryRange('hi',this.value)" style="width:auto;flex:1 1 0;min-width:70px;max-width:104px;padding:4px 24px 4px 8px">${optsFor(hi)}</select>
+      <span>cm</span>
     </div>
+    <div style="font-size:10px;color:#7a9a76;margin-top:3px">2 cm classes, as in the bands above — “to 24” takes in trees up to 25.9 cm.</div>
     <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px">
-      <tr style="color:#7a9a76;font-size:10px"><td></td><td colspan="2" style="text-align:center">REMOVED &lt;${keep} cm</td><td colspan="2" style="text-align:center">KEPT ≥${keep} cm</td></tr>
-      <tr style="color:#7a9a76;font-size:10px"><td></td><td style="text-align:right">stems</td><td style="text-align:right">vol</td><td style="text-align:right">stems</td><td style="text-align:right">vol</td></tr>
+      <tr style="color:#7a9a76;font-size:10px"><td></td><td colspan="3" style="text-align:center">IN RANGE ${rangeLbl}</td><td colspan="2" style="text-align:center">REST OF STAND</td></tr>
+      <tr style="color:#7a9a76;font-size:10px"><td></td><td style="text-align:right">stems</td><td style="text-align:right">BA</td><td style="text-align:right">vol</td><td style="text-align:right">stems</td><td style="text-align:right">vol</td></tr>
       <tr><td style="padding:3px 0;color:#cdebcf"><b>All species</b></td>
-        <td style="text-align:right;padding:3px 6px">${R.st}</td><td style="text-align:right;padding:3px 6px">${f1(R.v)}</td>
+        <td style="text-align:right;padding:3px 6px">${R.st}</td><td style="text-align:right;padding:3px 6px">${f1(R.ba)}</td><td style="text-align:right;padding:3px 6px">${f1(R.v)}</td>
         <td style="text-align:right;padding:3px 6px">${K.st}</td><td style="text-align:right;padding:3px 0">${f1(K.v)}</td></tr>
       ${spp.map(sp=>{ const r=bySp[sp][0], k=bySp[sp][1]; return `<tr><td style="padding:1px 0 1px 10px;color:#8fb89a;font-size:11px">${esc(sp)}</td>`+
-        `<td style="text-align:right;padding:1px 6px;color:#8fb89a;font-size:11px">${r?r.st:"—"}</td>`+
-        `<td style="text-align:right;padding:1px 6px;color:#8fb89a;font-size:11px">${r?f1(r.v):"—"}</td>`+
-        `<td style="text-align:right;padding:1px 6px;color:#8fb89a;font-size:11px">${k?k.st:"—"}</td>`+
-        `<td style="text-align:right;padding:1px 0;color:#8fb89a;font-size:11px">${k?f1(k.v):"—"}</td></tr>`; }).join("")}
+        `<td style="${num}">${r?r.st:"—"}</td>`+
+        `<td style="${num}">${r?f1(r.ba):"—"}</td>`+
+        `<td style="${num}">${r?f1(r.v):"—"}</td>`+
+        `<td style="${num}">${k?k.st:"—"}</td>`+
+        `<td style="${num};padding-right:0">${k?f1(k.v):"—"}</td></tr>`; }).join("")}
     </table>
-    <div style="font-size:10px;color:#7a9a76;margin-top:4px">Residual BA after removal: ${f1(K.ba)} m²/ha of ${f1(K.ba+R.ba)}.</div>
+    <div style="font-size:10px;color:#7a9a76;margin-top:4px">${whole?`The range takes in every measured tree: ${f1(R.ba)} m²/ha.`
+      :`BA in range: ${f1(R.ba)} m²/ha of ${f1(K.ba+R.ba)} · ${f1(K.ba)} m²/ha in the rest of the stand.`}</div>
+    ${compTotalsHtml_(area, rangeLbl, whole, R, K, s, split, spp)}
     ${s.noDbh?`<div style="font-size:10px;color:#e8b04b;margin-top:4px">${s.noDbh} tree${s.noDbh===1?"":"s"} tallied with no diameter — counted in BA and in the composition, but not in stems, volume or any size class above.</div>`:""}</div>`;
 }
 function renderSummary(){
@@ -6202,12 +6499,15 @@ function renderBoundPopup_(){
     } else s=computeStand(pick.plots, summaryInclSmall);
     if(_bpView==="species") note=bpSpeciesHtml_(s)+bpBasis_(f,s.nplots||0,fromSheet);
     else {
-      const t=sizeClassHtml_(s);
+      const t=sizeClassHtml_(s, bpAreaFor_(f));
       /* sizeClassHtml_ is written for the dark Stand summary screen (pale greens on near-black) and
          this popup is light, so its text would wash out. Wrapped in a dark card rather than forked
          into a second copy: one implementation of the marking table, and the phone, this popup and
          the Sheet's Size Class Summary cannot drift apart. */
-      note=(t?`<div style="background:#0f1e0d;border-radius:8px;padding:8px 9px;margin-top:4px">${t}</div>`
+      /* v363: the card now sets its own text colour. Cells with no colour of their own — the band
+         totals, the All-species row, the bold headings — were inheriting the popup's dark ink and
+         sitting dark-on-dark, unreadable here though fine on the Stand summary screen. */
+      note=(t?`<div style="background:#0f1e0d;color:#e6f2e6;border-radius:8px;padding:8px 9px;margin-top:4px">${t}</div>`
              :`<div style="color:#5a7a62;font-size:11px;margin-top:3px">No live trees tallied in this compartment yet.</div>`)
            +bpBasis_(f,s.nplots||0,fromSheet);
     }
@@ -6519,21 +6819,20 @@ function editAuditFromMap(i){ closeMap(); editAudit(i); }
 function deleteAuditFromMap(i){
   const p=auditPlots[i]; if(!p) return;
   const lbl=`${p.STANDID||"—"} / plot ${p.PLOTNUM||"—"}`;
-  const inSheet=!!p._id;
+  /* v361: every imported plot has an _id (the importer mints one), so "has an id" never meant "is
+     in the Sheet". Only one that has been pushed is deleted there. */
+  const inSheet=!!p._id && mayBeInSheet_(p);
   if(!confirm(`Delete imported plot ${lbl}?\n\n`+(inSheet
     ?"Its row will be moved to the Sheet's DELETED_PLOTS backup (recoverable) and removed from this device."
     :"It will be removed from this device.")))return;
   auditPlots.splice(i,1); persistAudit(); renderSaved();
   if(fmap){ renderMapPins(); if(typeof renderLayerVis_==="function") renderLayerVis_(); if(typeof updateLayerStatus==="function") updateLayerStatus(); }
-  if(inSheet && connected && !isOffline()){
-    fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
-      body:JSON.stringify({_action:"deleteplots",ids:[String(p._id)],
-        keys:[[String(p.STANDID||""),String(p.PLOTNUM||""),String(p.DATE||"")].join("|")],
-        by:(typeof cruiserEmail!=="undefined"&&cruiserEmail)||(typeof cruiser!=="undefined"&&cruiser)||""})})
-      .then(()=>{ toast(`Deleted ${lbl} · moved to the Sheet's DELETED_PLOTS backup`); if(typeof scheduleAnalysisRefresh_==="function") scheduleAnalysisRefresh_(); })
-      .catch(()=>toast("Deleted on device; couldn't reach the Sheet to back up",true));
+  /* v361: through the confirmed delete queue, not a fire-and-forget post that announced success. */
+  if(inSheet){
+    queueDelete_(p);
+    toast(`Deleted ${lbl} from this device · removing it from the Sheet`+(connected && !isOffline()?"…":" when back in signal"));
   } else {
-    toast(`Deleted ${lbl} from this device`+(inSheet?" · connect to also remove it from the Sheet":""));
+    toast(`Deleted ${lbl} from this device`);
   }
 }
 // What to show inside audit dots. Default STANDID, falls back to PLOTNUM; user can pick any field.
@@ -7973,8 +8272,13 @@ function emailSelected(){
 }
 function deleteSelected(){
   const n=selected.length; if(!n) return;
-  // Match Sheet rows by the natural key (Stand|Plot|Date) since the app's _id isn't a Sheet column.
-  const sentKeys=selected.filter(s=>s.set==="mine"&&s.p._sent).map(s=>[String(s.p.STANDID||""),String(s.p.PLOTNUM||""),String(s.p.DATE||"")].join("|"));
+  /* v361. This matched Sheet rows by Stand|Plot|Date ONLY, on the belief that _id isn't a Sheet column.
+     It is — it is the PlotID, column A. And the backend built its side of that key from the DATE cell
+     with toISOString(), which can never equal the app's local date (trap 3): "none matched", every
+     time, while the toast said the plots had been moved to DELETED_PLOTS. Now the sent plots go
+     through the delete queue, which sends the PlotID and confirms the row is gone. */
+  const sentPlots=selected.filter(s=>s.set==="mine"&&mayBeInSheet_(s.p)).map(s=>s.p);
+  const sentKeys=sentPlots;   // count only, for the confirm text below
   if(!confirm(`Delete ${n} selected plot${n===1?"":"s"}?\n\n`+
     (sentKeys.length?`${sentKeys.length} already in the Sheet will be moved to a DELETED_PLOTS backup tab there (recoverable).\n`:"")+
     `They'll be removed from this device.`)) return;
@@ -7983,13 +8287,11 @@ function deleteSelected(){
   selected.filter(s=>s.set==="audit").sort((a,b)=>b.i-a.i).forEach(s=>auditPlots.splice(s.i,1));
   persist(); persistAudit(); renderSaved(); if(fmap) renderMapPins(); closeInfoSheet_();
   // back up + delete the sent ones from the Sheet
-  if(sentKeys.length && connected && !isOffline()){
-    fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
-      body:JSON.stringify({_action:"deleteplots",keys:sentKeys,by:cruiserEmail||cruiser||""})})
-      .then(()=>toast(`Deleted ${n} · ${sentKeys.length} moved to the Sheet's DELETED_PLOTS backup`))
-      .catch(()=>toast("Deleted on device; couldn't reach the Sheet to back up",true));
+  if(sentPlots.length){
+    sentPlots.forEach(p=>queueDelete_(p,true)); flushDeletes_();
+    toast(`Deleted ${n} plot${n===1?"":"s"} from this device · removing ${sentPlots.length} from the Sheet`+(connected && !isOffline()?"…":" when back in signal"));
   } else {
-    toast(`Deleted ${n} plot${n===1?"":"s"} from this device`+(sentKeys.length?" · connect to also back up in the Sheet":""));
+    toast(`Deleted ${n} plot${n===1?"":"s"} from this device`);
   }
 }
 
