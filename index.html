@@ -983,6 +983,7 @@
         <button type="button" onclick="closeMore();storagePanel_()">🧮 Storage — what&rsquo;s using space, and free it</button>
         <button type="button" onclick="closeMore();clearSyncedPanel_()">🧹 Clear synced data — plots and photos already safe</button>
         <button type="button" onclick="closeMore();tilesPanel_()">🛰 Offline imagery — download an area, or clear it</button>
+        <button type="button" onclick="closeMore();reportPanel_()">✉ Report a problem to the administrator</button>
         <button type="button" onclick="closeMore();exportBackup()">⬆ Back up all data to a file</button>
         <button type="button" onclick="closeMore();document.getElementById('restoreInput').click()">⬇ Restore from a backup file</button>
       </details>
@@ -1173,7 +1174,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-07 · v373";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-07 · v374";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1421,6 +1422,28 @@ function apiPost_(o, ms){
 const POST_REFUSED={};
 const POST_LABEL={photo:"Photo upload", mapfile:"Saving files to Drive", layerput:"Adding a shared layer"};
 let authLimited=false;       // an account other than the administrator's: summaries, emails, exports and AI are not open to it yet
+/* v374 — the account's plot limit. `full`: the Sheet has refused NEW plots (corrections still go). They
+   stay on the phone; the automatic resend holds off for ten minutes so a full account is not asked
+   again every minute. From 80% the Sheet sends a warning, shown once a day. */
+let _capFullAt=0, _capMsg="", _capTold=false;
+function capHold_(){ return _capFullAt && Date.now()-_capFullAt<600000; }
+function capSeen_(c, full){
+  if(full){
+    if(!capHold_()) _capFullAt=Date.now();          // the ten minutes are not restarted by each further plot, or corrections would never get their turn
+    _capMsg=String(c.message||("This account has reached its limit of "+(c.cap||"")+" plots."));
+    if(_capTold){ toast("Saved on this phone — the account is at its plot limit",true); return; }     // the full notice once; a short line after that
+    _capTold=true;
+    try{ showInfoSheet_("This account is at its plot limit",
+      `<div style="font-size:13px;line-height:1.55;color:#e8f0e6">${esc(_capMsg)}<br><br><b>Nothing is lost:</b> your new plots are saved on this phone and will go to the Sheet as soon as there is room. Corrections to plots already in the Sheet still go through.`+
+      `<div style="color:#8fae95;font-size:12px;margin-top:10px">Tell whoever manages the Sheet. The phone tries again every ten minutes, or use Tools → Send queued plots.</div></div>`); }catch(e){}
+    return;
+  }
+  if(!c || !c.cap) return;
+  const day=(typeof dayStamp_==="function")?dayStamp_():"";
+  if(_ls("fi_capwarnday")===day) return;
+  _lsSet("fi_capwarnday", day);
+  toast(`This account holds ${c.count} of its ${c.cap} plots — tell whoever manages the Sheet before it fills.`, true);
+}
 function postWhy_(e){ return (e && e.fiWhy) || ""; }
 function postFailMsg_(e, noSignal, byHand){     // byHand: a button the cruiser pressed, which nothing re-sends for them
   const w=postWhy_(e);
@@ -1430,6 +1453,7 @@ function postFailMsg_(e, noSignal, byHand){     // byHand: a button the cruiser 
   if(w==="auth") return "Saved on this phone — log in to sync it";
   if(w==="notavailable") return "Not available to this account yet — kept on this phone";
   if(w==="retry") return "The Sheet was busy — kept on this phone, will send again shortly";
+  if(w==="cap") return "Saved on this phone — the account is at its plot limit";
   return noSignal;
 }
 function postRefuse_(why){ const e=new Error(why); e.fiWhy=why; return e; }
@@ -1442,6 +1466,7 @@ function sheetPost_(o){
     let jp; try{ jp=r.json(); }catch(e){ return null; }
     return Promise.resolve(jp).then(j=>j, ()=>null);
   }).then(j=>{
+    if(j && typeof j==="object" && j.ok!==false){ if(j.capRefused) capSeen_(j, true); else if(j.capWarn) capSeen_(j.capWarn, false); }
     if(!j || typeof j!=="object" || j.ok!==false) return j||null;
     const err=String(j.error||"");
     if(err==="auth"){ try{ authCheck_(); }catch(e){} throw postRefuse_("auth"); }
@@ -1449,6 +1474,7 @@ function sheetPost_(o){
       try{ toast((POST_LABEL[act]||"That")+" is not available to this account yet"+(act==="photo"?" — your photos stay on this phone":""),true); }catch(e){}
       throw postRefuse_("notavailable"); }
     if(err==="changed" || /^busy/.test(err)) throw postRefuse_("retry");
+    if(err==="cap"){ capSeen_(j, true); throw postRefuse_("cap"); }
     return j;
   });
 }
@@ -3473,7 +3499,7 @@ window.addEventListener("offline", ()=>{ netDot(); renderSaved(); });
    that never goes properly offline is never. */
 let _authTick=0;
 setInterval(()=>{ if(++_authTick%5===0 || authBlocked) authCheck_(); }, 60000);   // every 5 minutes, or every minute while shut out
-setInterval(()=>{ if(saved.some(p=>!p._sent)) flushQueue(); flushEditBatch_(); if(pendingDeletes.length) flushDeletes_();
+setInterval(()=>{ if(!capHold_()){ if(saved.some(p=>!p._sent)) flushQueue(); flushEditBatch_(); } if(pendingDeletes.length) flushDeletes_();
   if(pendingSpecies.length) flushSpecies(); if(typeof pendingTracts!=="undefined" && pendingTracts.length) flushTracts(); }, 60000); // safety retry every 60s
 setInterval(()=>{ try{ flushPhotos(); }catch(e){} }, 90000);            // retry any unconfirmed photo uploads
 setTimeout(()=>{ try{ versionCheck_(true, true); }catch(e){} }, 8000);          // v373: a newer build? (then at most every half hour, when the app comes back to the front)
@@ -4214,6 +4240,29 @@ async function tilesDownload_(urls){
   return out;
 }
 
+/* v374 — report a problem: a few words from the cruiser, with the build and what is waiting on the phone. */
+function reportPanel_(){
+  showInfoSheet_("Report a problem",
+    `<div style="font-size:13px;line-height:1.5;color:#e8f0e6">Say what happened, in your own words. It goes to whoever manages the Sheet, with this phone's app version.`+
+    `<textarea id="reportText" rows="5" maxlength="1500" style="width:100%;margin-top:10px;border-radius:8px;border:1px solid #33623a;background:#0c1a0c;color:#e8f0e6;font:inherit;padding:8px"></textarea>`+
+    `<div style="margin-top:10px"><button class="btn submit" type="button" id="reportBtn" onclick="reportSend_()">Send</button></div>`+
+    `<div id="reportSay" style="color:#8fae95;font-size:12px;margin-top:8px"></div></div>`);
+}
+let _reportBusy=false;
+function reportSend_(){
+  const say=m=>{ const e=$("reportSay"); if(e) e.textContent=m; };
+  const text=String(($("reportText")||{}).value||"").trim();
+  if(text.length<5){ say("Write a few words first."); return; }
+  if(!connected || isOffline()){ say("No signal — this needs a connection. Your words are still here; send when you are back in range."); return; }
+  if(!authToken || authBlocked){ say("Log in first (Tools → Account) so the report says who sent it."); return; }
+  if(_reportBusy) return; _reportBusy=true; say("Sending…");
+  let about=""; try{ about="build "+APP_BUILD+"; "+(saved.filter(p=>!p._sent).length)+" plots waiting; "+String(navigator.userAgent||"").slice(0,120); }catch(e){}
+  sheetPost_({_action:"report", text:text, about:about}).then(j=>{ _reportBusy=false;
+    if(j && j.ok===false){ say("Not sent: "+(j.error||"the Sheet refused it")); return; }
+    if(!j){ say("Sent — but this phone could not read the Sheet's answer, so it cannot be sure it arrived."); return; }
+    closeInfoSheet_(); toast("Report sent"+(j.mailed?" — the administrator has been emailed":"")); })
+  .catch(e=>{ _reportBusy=false; say(postFailMsg_(e,"Could not send — check signal and try again",true)); });
+}
 function storagePanel_(){
   const items=[]; let total=0, known=0;
   try{
