@@ -1171,7 +1171,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-06 · v367";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-06 · v368";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1406,6 +1406,49 @@ function apiPost_(o, ms){
       .then(r=>r.json()).then(j=>{ clearTimeout(t); res(j); }).catch(e=>{ clearTimeout(t); rej(e); });
   });
 }
+/* v368 — every save goes through here. Once this phone has had one readable answer from the backend
+   (authBackendOk: the launch check came back), a save is sent so that its reply can be READ, and a
+   reply that says "not done" is treated as not done:
+     auth          this phone must log in            -> the login check runs, senders stand down
+     notavailable  this account may not do that      -> remembered; not asked again until restart
+     changed/busy  the Sheet was mid-change          -> nothing was written; the queues try again
+   Anything else — including a reply that cannot be read — counts as "it left the phone", exactly as
+   before: whether the Sheet really holds it is still settled by reading it back (plotConfirm_ etc.).
+   Until a readable answer has been seen, saves go the old way (no-cors), so nothing here can make a
+   phone that syncs today stop syncing. */
+const POST_REFUSED={};
+const POST_LABEL={photo:"Photo upload", mapfile:"Saving files to Drive"};
+let authLimited=false;       // an account other than the administrator's: summaries, emails, exports and AI are not open to it yet
+function postWhy_(e){ return (e && e.fiWhy) || ""; }
+function postFailMsg_(e, noSignal, byHand){     // byHand: a button the cruiser pressed, which nothing re-sends for them
+  const w=postWhy_(e);
+  if(byHand && w==="auth") return "Not sent — log in first";
+  if(byHand && w==="retry") return "The Sheet was busy — nothing was sent. Try again in a minute.";
+  if(w==="auth") return "Saved on this phone — log in to sync it";
+  if(w==="notavailable") return "Not available to this account yet — kept on this phone";
+  if(w==="retry") return "The Sheet was busy — kept on this phone, will send again shortly";
+  return noSignal;
+}
+function postRefuse_(why){ const e=new Error(why); e.fiWhy=why; return e; }
+function sheetPost_(o){
+  const act=String((o&&o._action)||"");
+  if(POST_REFUSED[act]) return Promise.reject(postRefuse_("notavailable"));
+  const init={method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:postBody_(o)};
+  if(!authBackendOk){ init.mode="no-cors"; return fetch(SCRIPT_URL,init).then(()=>null); }
+  return fetch(SCRIPT_URL,init).then(r=>{
+    let jp; try{ jp=r.json(); }catch(e){ return null; }
+    return Promise.resolve(jp).then(j=>j, ()=>null);
+  }).then(j=>{
+    if(!j || typeof j!=="object" || j.ok!==false) return j||null;
+    const err=String(j.error||"");
+    if(err==="auth"){ try{ authCheck_(); }catch(e){} throw postRefuse_("auth"); }
+    if(err==="notavailable"){ POST_REFUSED[act]=1;
+      try{ toast((POST_LABEL[act]||"That")+" is not available to this account yet"+(act==="photo"?" — your photos stay on this phone":""),true); }catch(e){}
+      throw postRefuse_("notavailable"); }
+    if(err==="changed" || /^busy/.test(err)) throw postRefuse_("retry");
+    return j;
+  });
+}
 /* A GET whose reply can be read. Used for the status check and for signing out, NOT a POST: a backend
    older than v365 treats any POST it does not recognise as a plot to save, and would write a blank row
    every time the app started. A GET it does not recognise is merely ignored. */
@@ -1437,6 +1480,7 @@ function authCheck_(then){
     authNeeded=r.authRequired; _lsSet("fi_authreq", authNeeded?"Y":"");
     if(r.signedIn){
       authUser=r.username||authUser; authAccountName=r.accountName||""; _lsSet("fi_authuser",authUser); _lsSet("fi_authacct",authAccountName);
+      authLimited=!!r.limited;
       authSetBlocked_(false);
     } else {
       /* A token the backend no longer knows is dead: keep the username for the login screen, drop the token. */
@@ -1503,7 +1547,7 @@ function loginSubmit_(){
   apiPost_({_action:"login",username:user,pin:pin,device:dev}).then(r=>{
     _loginBusy=false; _loginPin=""; loginDraw_();
     if(r && r.ok && r.token){
-      authToken=String(r.token); authUser=r.username||user; authAccountName=r.accountName||"";
+      authToken=String(r.token); authUser=r.username||user; authAccountName=r.accountName||""; authFresh_(r.limited);
       _lsSet("fi_token",authToken); _lsSet("fi_authuser",authUser); _lsSet("fi_authacct",authAccountName);
       if(typeof r.authRequired==="boolean"){ authNeeded=r.authRequired; _lsSet("fi_authreq",authNeeded?"Y":""); }
       loginClose_(); authSetBlocked_(false);
@@ -1514,10 +1558,11 @@ function loginSubmit_(){
   }).catch(()=>{ _loginBusy=false; _loginPin=""; loginDraw_();
     loginSay_("Could not reach the Sheet. Check your signal and try again — nothing on this phone has changed.",true); });
 }
+function authFresh_(limited){ Object.keys(POST_REFUSED).forEach(k=>{ delete POST_REFUSED[k]; }); authLimited=!!limited; }   // a different user may be a different account
 function logout_(){
   if(!authToken) return;
   if(!confirm("Sign this phone out?\n\nYour plots stay on the phone."+(authNeeded?" They will not sync until someone logs in again.":""))) return;
-  const done=()=>{ authForget_(); closeInfoSheet_(); authSetBlocked_(authNeeded,"notoken"); toast("Signed out"); };
+  const done=()=>{ authForget_(); authFresh_(false); closeInfoSheet_(); authSetBlocked_(authNeeded,"notoken"); toast("Signed out"); };
   if(!connected || isOffline()){ done(); return; }
   apiGet_("action=logout", 12000).then(done).catch(done);
 }
@@ -1529,6 +1574,7 @@ function accountPanel_(){
     row("This phone", authToken?`<span style="color:#7fd0a0">logged in as ${esc(authUser||"—")}</span>`:`<span style="color:${authNeeded?"#e8a33a":"#8fae95"}">not logged in</span>`)+
     (authToken&&authAccountName?row("Account", esc(authAccountName)):"")+
     `</table>`+
+    (authToken&&authLimited?`<div style="color:#e8a33a;font-size:12px;margin-top:10px;line-height:1.4">This account can collect and sync plots, tracts, areas and species. Photo upload, saving files to Drive, the summaries, emailed reports and written summaries are not open to it yet.</div>`:"")+
     `<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">`+
       (authToken?`<button class="btn-mini" type="button" onclick="logout_()">Sign out</button>`
                 :`<button class="btn submit" type="button" onclick="closeInfoSheet_();loginOpen_()">Log in</button>`)+
@@ -1663,7 +1709,7 @@ function flushSpecies(){
   if(!connected || isOffline() || !pendingSpecies.length) return;
   const batch=pendingSpecies.slice();
   batch.forEach(p=>{
-    fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:postBody_({_action:"addspecies",type:p.t,name:p.n,code:p.c||""})})
+    sheetPost_({_action:"addspecies",type:p.t,name:p.n,code:p.c||""})
       .catch(()=>{});
   });
   // give the Sheet a moment to write, then ask it what it actually holds
@@ -1728,7 +1774,7 @@ function flushTracts(){
   _tractBusy=true;
   const names=pendingTracts.slice(); let left=names.length;
   names.forEach(n=>{
-    fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:postBody_({_action:"addtract",name:n})})
+    sheetPost_({_action:"addtract",name:n})
       .catch(()=>{})
       .then(()=>{ if(--left) return;
         setTimeout(()=>fetchTracts(list=>{
@@ -2292,14 +2338,21 @@ function genId(){ return Date.now().toString(36)+Math.random().toString(36).slic
 function send(d,isUpdate){
   if(!connected){ toast("Saved on device (not connected yet)",true); return; }
   if(authBlocked){ toast("Saved on this phone — log in to sync it",true); authBanner_(); return; }
-  fetch(SCRIPT_URL,{ method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain;charset=utf-8"}, body:postBody_(d) })
+  sheetPost_(d)
     .then(()=>{ d._posted=true; persist(); renderSaved(); netDot();
       toast(`${isUpdate?"Sent":"Sent"} · Stand ${d.STANDID||"—"} plot ${d.PLOTNUM||"—"} — confirming…`);
       plotConfirm_([d], ()=>{ renderSaved(); netDot();
         if(d._sent && d._mismatch) toast(mismatchMsg_([d]),true);
         else if(d._sent) toast(`✓ In the Sheet · Stand ${d.STANDID||"—"} plot ${d.PLOTNUM||"—"}`);
         scheduleAnalysisRefresh_(); }); })
-    .catch(()=>{ toast("Saved on device — no signal, will send when back in range",true); renderSaved(); netDot(); });
+    .catch(e=>{ toast(postFailMsg_(e,"Saved on device — no signal, will send when back in range"),true); renderSaved(); netDot();
+      /* No readable reply is not proof nothing was written: the script can save the plot and then fail
+         (a timeout while rebuilding the summaries), and such a reply cannot be read. Look before the
+         queue sends it again — if the row is there and matches, it is in the Sheet. */
+      /* Only for a plot that is NEW to the Sheet: for a correction the old row is already there, and the
+         comparison skips a few fields (DATE among them), so an edit that never arrived could look like
+         a match. A correction simply waits for the queue, which sends it again. */
+      if(!postWhy_(e) && !isUpdate) setTimeout(()=>{ if(!d._sent && !authBlocked) plotConfirm_([d], n=>{ if(n){ renderSaved(); netDot(); toast(`✓ In the Sheet · Stand ${d.STANDID||"—"} plot ${d.PLOTNUM||"—"}`); } }); }, 4000); });
 }
 /* Ask the Sheet whether it holds each of these plots AS THEY NOW STAND on the phone. `plotrow`
    answers for one plot and returns the whole row; it has been in the backend since v333, so this
@@ -2759,8 +2812,7 @@ function pushAuditToSheet(){
   toast(`Pushing ${n} imported plot${n===1?"":"s"}…`);
   // Read the starting count, push once, then read again to confirm how many landed.
   sheetPlotCount_(before=>{
-    fetch(SCRIPT_URL,{ method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain;charset=utf-8"},
-      body:postBody_({ _action:"plotbatch", plots:batch }) })
+    sheetPost_({ _action:"plotbatch", plots:batch })
       .then(()=>{
         // give the Sheet a moment to finish writing, then verify
         setTimeout(()=>{ sheetPlotCount_(after=>{
@@ -2793,7 +2845,7 @@ function pushAuditToSheet(){
           });
         }); }, 1500);
       })
-      .catch(()=>{ toast("Push failed — no signal. Nothing was cleared; try again.",true); });
+      .catch(e=>{ toast(postFailMsg_(e,"Push failed — no signal. Nothing was cleared; try again.",true),true); });
   });
 }
 /* What the last batch write actually did. The push itself is a no-cors POST whose reply is opaque, so
@@ -3028,8 +3080,7 @@ function pushEditsBatch_(changed, quiet){
     delete q._mismatch; delete q._mmN; delete q._mmSig; delete q._batchRetry; return q; });
   changed.forEach(p=>{ p._sent=false; p._batchRetry=true; });
   persist(); persistAudit();
-  fetch(SCRIPT_URL,{ method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain;charset=utf-8"},
-    body:postBody_({ _action:"plotbatch", plots:plots }) })
+  sheetPost_({ _action:"plotbatch", plots:plots })
     .then(()=>{ changed.forEach(p=>{ p._posted=true; }); persist(); persistAudit(); renderSaved();
       if(!quiet) toast(`Sent ${plots.length} updated plot${plots.length===1?"":"s"} — confirming…`);
       setTimeout(()=>plotConfirm_(changed, n=>{
@@ -3041,7 +3092,7 @@ function pushEditsBatch_(changed, quiet){
         else if(n && !still) toast(`✓ ${n} updated plot${n===1?"":"s"} confirmed in the Sheet`);
         else if(!quiet || n) toast(`${n} of ${plots.length} updated plot${plots.length===1?"":"s"} confirmed — ${still} will be sent again`,!n);
         if(n) scheduleAnalysisRefresh_(); }), 1200); })
-    .catch(()=>{ _editBatchBusy=false; toast("Updates saved on device — no signal. They'll sync on the next push.",true); });
+    .catch(e=>{ _editBatchBusy=false; toast(postFailMsg_(e,"Updates saved on device — no signal. They'll sync on the next push."),true); });
 }
 /* The batch retry. Plots an edit batch could not confirm keep _batchRetry until a read-back matches. */
 function flushEditBatch_(){
@@ -3142,10 +3193,10 @@ function flushDeletes_(){
   if(_delBusy || !connected || isOffline() || !pendingDeletes.length) return;
   _delBusy=true;
   const batch=pendingDeletes.slice();
-  fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
+  sheetPost_(
     /* ids are the identity. A key goes only for an entry with no id, and as keysOnly, so the backend
        never matches a plot by Stand|Plot|Date when it has the PlotID (see deletePlotsWithBackup_). */
-    body:postBody_({_action:"deleteplots",ids:batch.map(d=>d.id).filter(Boolean),keysOnly:batch.filter(d=>!d.id).map(d=>d.key).filter(Boolean),by:(batch[0]&&batch[0].by)||""})})
+    {_action:"deleteplots",ids:batch.map(d=>d.id).filter(Boolean),keysOnly:batch.filter(d=>!d.id).map(d=>d.key).filter(Boolean),by:(batch[0]&&batch[0].by)||""})
     .then(()=>{ setTimeout(()=>deleteConfirm_(batch), 1500); })
     .catch(()=>{ _delBusy=false; });
 }
@@ -3225,14 +3276,16 @@ function flushQueue(manual){
      opaque response cannot tell success from a request that died in the air, and marking them sent
      on it is precisely what stopped this queue retrying the plots that were lost. Anything not
      confirmed stays queued and comes round again on the 60-second timer. */
-  let posted=0, tried=0;
+  let posted=0, tried=0; const refused=new Set();
   q.forEach(d=>{
-    fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:postBody_(d)})
+    sheetPost_(d)
       .then(()=>{ d._posted=true; posted++; })
-      .catch(()=>{})
+      .catch(e=>{ if(postWhy_(e)) refused.add(d); })
       .then(()=>{ if(++tried<q.length) return;
         persist(); renderSaved(); netDot();
-        setTimeout(()=>plotConfirm_(q, n=>{
+        /* A plot the Sheet REFUSED this pass was not written; reading the old row back would count
+           against it as a mismatch, and five of those would call it done. It just waits its turn. */
+        setTimeout(()=>plotConfirm_(q.filter(p=>!refused.has(p)), n=>{
           renderSaved(); netDot();
           const still=saved.filter(p=>!p._sent).length;
           const flagged=q.filter(p=>p._sent && p._mismatch);
@@ -3422,8 +3475,7 @@ function uploadPhotoOnce_(r){
   return new Promise(resolve=>{
     let done=false; const fin=()=>{ if(done)return; done=true; resolve(); };
     setTimeout(fin, 20000);   // never let one photo hang the queue
-    fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
-      body:postBody_({_action:"photo",filename:r.filename,data:r.data})}).then(fin).catch(fin);
+    sheetPost_({_action:"photo",filename:r.filename,data:r.data}).then(fin).catch(fin);
   });
 }
 // Ask the Sheet which photo filenames are actually in Drive (via the Photos index). JSONP; empty set on failure.
@@ -4664,9 +4716,8 @@ function stopLive(){
   liveOn=false; setLiveBtn();
 }
 function broadcastLive(){
-  if(!liveOn || !connected || isOffline() || !mePos) return;
-  try{ fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
-    body:postBody_({_action:"presence", email:cruiserEmail, name:(cruiser||shortEmail_(cruiserEmail)), lat:mePos.lat, lon:mePos.lon})}); }catch(e){}
+  if(!liveOn || !connected || isOffline() || !mePos || authBlocked) return;
+  try{ sheetPost_({_action:"presence", email:cruiserEmail, name:(cruiser||shortEmail_(cruiserEmail)), lat:mePos.lat, lon:mePos.lon}).catch(()=>{}); }catch(e){}
 }
 function pollLive(){
   if(!liveOn || !connected || isOffline()) return;
@@ -8024,9 +8075,8 @@ function clearRoute(){ routePts=[]; if(routeLine){ fmap.removeLayer(routeLine); 
   persistRoute(); updateRoute(); updateLayerStatus(); shareRoute_(); toast("Cruise route cleared"); }
 // Push this device's cruise route to the Sheet so the crew can see each other's routes (needs an email set).
 function shareRoute_(){
-  if(!connected || isOffline() || !cruiserEmail) return;
-  try{ fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
-    body:postBody_({_action:"route", email:cruiserEmail, name:(cruiser||shortEmail_(cruiserEmail)), pts:routePts})}); }catch(e){}
+  if(!connected || isOffline() || !cruiserEmail || authBlocked) return;
+  try{ sheetPost_({_action:"route", email:cruiserEmail, name:(cruiser||shortEmail_(cruiserEmail)), pts:routePts}).catch(()=>{}); }catch(e){}
 }
 function exportRoute(){
   if(routePts.length<2){ toast("Draw a route first (2+ points)",true); return; }
@@ -8194,10 +8244,10 @@ function pushCompartmentAreas_(silent){
       });
     });
   }catch(e){}
-  fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
-    body:postBody_({_action:"standareas",areas:rounded,srcs:srcs,rings:rings})})
-    .then(()=>{ if(!silent){ const off=Object.values(srcs).filter(s=>/official/.test(s)).length; toast(`Sent ${Object.keys(rounded).length} compartment area${Object.keys(rounded).length===1?"":"s"} to the Sheet${off?` · ${off} from the official field`:""}`); } })
-    .catch(()=>{ if(!silent) toast("Couldn't reach the Sheet to send areas",true); });
+  sheetPost_({_action:"standareas",areas:rounded,srcs:srcs,rings:rings})
+    .then(j=>{ if(j && j.ok===false){ if(!silent) toast("The Sheet did not save the areas: "+(j.error||"unknown reason"),true); return; }
+      if(!silent){ const off=Object.values(srcs).filter(s=>/official/.test(s)).length; toast(`Sent ${Object.keys(rounded).length} compartment area${Object.keys(rounded).length===1?"":"s"} to the Sheet${off?` · ${off} from the official field`:""}`); } })
+    .catch(e=>{ if(!silent) toast(postFailMsg_(e,"Couldn't reach the Sheet to send areas",true),true); });
 }
 function polyPerimOf_(pts){ if(pts.length<2) return 0; let t=0; for(let i=0;i<pts.length;i++){ const j=(i+1)%pts.length; t+=L.latLng(pts[i]).distanceTo(L.latLng(pts[j])); } return t; }
 function polyCentroid_(pts){ let la=0,lo=0; pts.forEach(p=>{ la+=p[0]; lo+=p[1]; }); return [la/pts.length, lo/pts.length]; }
@@ -8457,10 +8507,9 @@ function driveSave_(blob,name,kind){
            as well')" was not a result; it was an assertion, and it was wrong for a whole day
            while nothing at all was reaching Drive. Nothing is claimed here now: whether the file
            arrived is established by mapfileConfirm_, which asks the Sheet. */
-        fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},
-          body:postBody_({_action:"mapfile", name:name, kind:kind||"export",
+        sheetPost_({_action:"mapfile", name:name, kind:kind||"export",
             mime:(blob.type||"application/octet-stream"), data:b64,
-            cruiser:(cruiser||""), email:(cruiserEmail||"")})})
+            cruiser:(cruiser||""), email:(cruiserEmail||"")})
           .catch(()=>{});
       }catch(e){}
     };
@@ -8790,9 +8839,10 @@ function syncPolys(){
   if(!polys.length){ toast("Save at least one area first",true); return; }
   if(typeof connected!=="undefined" && !connected){ toast("Not connected — connect to sync areas",true); return; }
   const payload={ _action:"polygons", owner:(cruiserEmail||""), polys:polys.map(p=>({ name:p.name, tract:p.tract||"", pts:p.pts, area_ha:+(polyAreaOf_(p.pts)/10000).toFixed(4) })) };
-  fetch(SCRIPT_URL,{ method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain;charset=utf-8"}, body:postBody_(payload) })
-    .then(()=>toast(`Sent ${polys.length} area${polys.length==1?"":"s"} — plots & summary recalculating`))
-    .catch(()=>toast("Sync failed — check signal",true));
+  sheetPost_(payload)
+    .then(j=>{ if(j && j.ok===false) toast("The Sheet did not save the areas: "+(j.error||"unknown reason"),true);
+      else toast(`${j&&j.ok?"Saved":"Sent"} ${polys.length} area${polys.length==1?"":"s"} — plots & summary recalculating`); })
+    .catch(e=>toast(postFailMsg_(e,"Sync failed — check signal",true),true));
 }
 function allPolys_(){ const list=polys.slice(); if(polyPts.length>=3) list.push({name:"P-"+(polys.length+1), pts:polyPts.slice()}); return list; }
 function exportPoly(){
