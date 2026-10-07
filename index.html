@@ -1171,7 +1171,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-06 · v369";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-06 · v370";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1417,12 +1417,13 @@ function apiPost_(o, ms){
    Until a readable answer has been seen, saves go the old way (no-cors), so nothing here can make a
    phone that syncs today stop syncing. */
 const POST_REFUSED={};
-const POST_LABEL={photo:"Photo upload", mapfile:"Saving files to Drive"};
+const POST_LABEL={photo:"Photo upload", mapfile:"Saving files to Drive", layerput:"Adding a shared layer"};
 let authLimited=false;       // an account other than the administrator's: summaries, emails, exports and AI are not open to it yet
 function postWhy_(e){ return (e && e.fiWhy) || ""; }
 function postFailMsg_(e, noSignal, byHand){     // byHand: a button the cruiser pressed, which nothing re-sends for them
   const w=postWhy_(e);
   if(byHand && w==="auth") return "Not sent — log in first";
+  if(byHand && w==="notavailable") return "Not available to this account yet";
   if(byHand && w==="retry") return "The Sheet was busy — nothing was sent. Try again in a minute.";
   if(w==="auth") return "Saved on this phone — log in to sync it";
   if(w==="notavailable") return "Not available to this account yet — kept on this phone";
@@ -1574,7 +1575,7 @@ function accountPanel_(){
     row("This phone", authToken?`<span style="color:#7fd0a0">logged in as ${esc(authUser||"—")}</span>`:`<span style="color:${authNeeded?"#e8a33a":"#8fae95"}">not logged in</span>`)+
     (authToken&&authAccountName?row("Account", esc(authAccountName)):"")+
     `</table>`+
-    (authToken&&authLimited?`<div style="color:#e8a33a;font-size:12px;margin-top:10px;line-height:1.4">This account can collect and sync plots, photos, tracts, areas and species, and save its map files to Drive. The summaries, emailed reports, shared map layers and written summaries are not open to it yet.</div>`:"")+
+    (authToken&&authLimited?`<div style="color:#e8a33a;font-size:12px;margin-top:10px;line-height:1.4">This account can collect and sync plots, photos, tracts, areas and species, save its map files to Drive, and share map layers with its own crew. The summaries, emailed reports and written summaries are not open to it yet.</div>`:"")+
     `<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">`+
       (authToken?`<button class="btn-mini" type="button" onclick="logout_()">Sign out</button>`
                 :`<button class="btn submit" type="button" onclick="closeInfoSheet_();loginOpen_()">Log in</button>`)+
@@ -6049,18 +6050,56 @@ function dlRender_(err){
   if(_dlBusy){ box.innerHTML=`<div style="line-height:1.5">Loading <b>${esc(_dlBusy)}</b>…</div>`; return; }
   /* The empty folder is exactly when someone wants to pull a file out of their mail, so the button
      has to appear here too — hiding it behind a non-empty list was the first version's mistake. */
-  if(!_dlItems.length){ box.innerHTML=`<div style="color:#8fae95;line-height:1.5;margin-bottom:10px">Nothing in the shared layers folder yet.<br><br>Either put files into the <b>FRI Layers</b> folder in Drive, or email them in with <b>FRIPLOTS DATA</b> in the subject and press the button below.</div>`+dlMailBtn_(); return; }
+  if(!_dlItems.length){ box.innerHTML=`<div style="color:#8fae95;line-height:1.5;margin-bottom:10px">Nothing in the shared layers folder yet.<br><br>Either put files into the <b>FRI Layers</b> folder in Drive, or email them in with <b>FRIPLOTS DATA</b> in the subject and press the button below — or add one straight from this phone.</div>`+dlMailBtn_()+dlUpBtn_(); return; }
   const icon=k=>k==="pdf"?"🗺":(k==="shapefile"?"⬇":(k==="geojson"?"⬇":(k==="kml"?"⬇":"📄")));
   const rows=_dlItems.map((x,i)=>
     `<button type="button" onclick="dlPick_(${i})" style="display:block;width:100%;text-align:left;padding:10px;margin:0 0 6px;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#e8f0e6;font:inherit">`+
     `<div style="font-size:13px;word-break:break-all">${icon(x.kind)} ${esc(x.name)}</div>`+
     `<div style="color:#8fae95;font-size:11px;margin-top:2px">${esc(x.kind)}${x.kb?" · "+esc(String(x.kb))+" KB":""}${x.when?" · "+esc(x.when):""}</div></button>`).join("");
   box.innerHTML=`<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:8px">Tap a file to load it onto the map. It loads the same way as a file from this phone — and once it is loaded it stays on the phone, so it keeps working with no signal.</div>`+
-    dlMailBtn_()+
+    dlMailBtn_()+dlUpBtn_()+
     `<div style="max-height:52vh;overflow-y:auto;-webkit-overflow-scrolling:touch">${rows}</div>`;
 }
 /* Anyone allowed can email a file in with FRIPLOTS DATA in the subject; this asks the backend to go
    and look, then re-reads the list. The allow-list of senders lives on the Sheet, not here. */
+/* v370 — put a layer file that is on this phone into the shared layers folder, so the rest of the
+   crew can load it "From Drive" without anyone emailing anything. */
+function dlUpBtn_(){
+  return `<button type="button" id="dlUpBtn" onclick="dlUpload_()" style="display:block;width:100%;text-align:left;padding:10px;margin:0 0 10px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">`+
+    `⬆ Add a file from this phone`+
+    `<div style="color:#8fae95;font-size:11px;margin-top:2px">Shapefile (.zip), GeoJSON, KML/KMZ, CSV or a georeferenced PDF, up to about 6 MB — shared with your crew</div></button>`;
+}
+const DL_UP_MAX=6*1024*1024;      // what the Sheet can hand back to another phone
+let _dlUpBusy=false;
+function dlUpload_(){
+  if(!connected || isOffline()){ toast("Adding a file needs a connection",true); return; }
+  if(authBlocked){ toast("Log in first",true); authBanner_(); return; }
+  const inp=document.createElement("input"); inp.type="file"; inp.accept=".zip,.shp,.geojson,.json,.kml,.kmz,.csv,.tsv,.txt,.pdf";
+  inp.onchange=()=>{ const f=inp.files&&inp.files[0]; if(f) dlUploadFile_(f); };
+  inp.click();
+}
+function dlUploadFile_(f){
+  if(!/\.(zip|shp|geojson|json|kml|kmz|csv|tsv|txt|pdf)$/i.test(f.name||"")){ toast("That is not a layer file the app can open",true); return; }
+  if(f.size>DL_UP_MAX){ toast("That file is "+Math.round(f.size/1048576)+" MB — too big to send from the phone (the limit is about 6 MB).",true); return; }
+  if(_dlUpBusy) return;
+  if(!authToken){ toast("Log in first (Tools → Account) to add a shared layer",true); return; }
+  _dlUpBusy=true;
+  const b=$("dlUpBtn"); if(b){ b.disabled=true; b.style.opacity=.6; b.innerHTML="⬆ Sending "+esc(f.name)+"…"; }
+  const fr=new FileReader();
+  fr.onerror=()=>{ _dlUpBusy=false; toast("That file couldn't be read",true); dlRender_(); };
+  fr.onload=()=>{
+    const b64=String(fr.result).split(",")[1]||"";
+    sheetPost_({_action:"layerput",name:f.name,mime:f.type||"application/octet-stream",data:b64})
+      .then(j=>{ _dlUpBusy=false;
+        if(j && j.ok===false){ toast("Not added: "+(j.error||"the Sheet refused it"),true); dlRender_(); return; }
+        /* j is null when the reply could not be read (the old way of sending): do not claim it —
+           reload the list, which shows whether the file is there. */
+        toast(j&&j.ok ? "Added "+(j.name||f.name)+" to the shared layers" : "Sent "+f.name+" — checking the list…");
+        setTimeout(openDriveLayers, j&&j.ok?300:3000); })
+      .catch(e=>{ _dlUpBusy=false; toast(postFailMsg_(e,"Couldn't send the file — check signal",true),true); dlRender_(); });
+  };
+  fr.readAsDataURL(f);
+}
 function dlMailBtn_(){
   return `<button type="button" id="dlMailBtn" onclick="dlCheckMail_()" style="display:block;width:100%;text-align:left;padding:10px;margin:0 0 10px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">`+
     `✉ Check email for new files`+
