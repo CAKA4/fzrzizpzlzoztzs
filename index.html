@@ -1173,7 +1173,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-07 · v372";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-07 · v373";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1824,21 +1824,86 @@ opts($("TOPOGRAPHY"),DOM.TOPOGRAPHY); opts($("ROCKINESS"),DOM.ROCKINESS);
 
 // Tap the build stamp to pull the newest version: refresh the service worker, clear caches, reload.
 // Guarded to online only — clearing caches offline would wipe the cached app and leave a blank screen.
-async function forceUpdate(){
-  if(!navigator.onLine){ toast("No connection — updates need internet.", true); return; }
-  if(!confirm("Update to the latest version now?\nThe app will reload.")) return;
-  toast("Getting the latest version…");
+/* v373 (Phase 1, step 8) — is there a newer build than the one running? The service worker file
+   carries the build number and is small, so it is fetched fresh and read. When a newer one exists the
+   build line says so, and the cruiser can tap it at any time.
+   The app installs it BY ITSELF only in the one situation where a reload cannot cost anything:
+   at launch, before the cruiser has touched the screen, with nothing waiting on the phone. A form
+   being filled in is not always saved as a draft yet (a position, a stand, a photo just taken), so
+   "has anybody touched the app since it opened" is the test — not what happens to be in storage.
+   Downloaded imagery is kept either way. */
+let _userTouched=false;
+try{ ["pointerdown","touchstart","keydown","input","change"].forEach(ev=>document.addEventListener(ev, ()=>{ _userTouched=true; }, {capture:true, passive:true})); }catch(e){}
+function buildNum_(s){ const m=/v(\d+)\s*$/.exec(String(s||"").trim()); return m?+m[1]:0; }      // the LAST "v123" — the date in the stamp has digits too
+function swBuildNum_(text){ const m=/^\s*const\s+CACHE\s*=\s*"fi-plotcard-v(\d+)"\s*;/m.exec(String(text||"")); return m?+m[1]:0; }   // the real line, not a mention in a comment
+function pendingWork_(){
+  const why=[];
+  try{ const n=saved.filter(p=>!p._sent).length; if(n) why.push(n+" plot"+(n===1?"":"s")+" not yet in the Sheet"); }catch(e){}
+  try{ if(pendingDeletes.length) why.push("deletes to send"); }catch(e){}
+  try{ if(Object.keys(fieldsToSend).length) why.push("field settings to send"); }catch(e){}
+  try{ if(editingNow_()) why.push("a plot open for editing"); }catch(e){}
+  try{ if(STORE && STORE.getItem("fi_draft")) why.push("a plot being entered"); }catch(e){}
+  try{ if(_photoFlushing || (pendingMem && pendingMem.length)) why.push("photos uploading"); }catch(e){}
+  try{ if(_tileJob && !_tileJob.done) why.push("imagery downloading"); }catch(e){}
+  try{ if(_editBatchBusy || _confirmBusy || _purgeBusy || _delBusy) why.push("the Sheet being checked"); }catch(e){}
+  return why;
+}
+let _verChecking=false, _verLast=0, _verNewer=0;
+/* atLaunch: the only call that may install by itself. */
+function versionCheck_(force, atLaunch){
+  if(_verChecking || isOffline()) return Promise.resolve(null);
+  if(!force && Date.now()-_verLast<30*60000) return Promise.resolve(null);       // at most every half hour
+  _verChecking=true; _verLast=Date.now();
+  return fetch("./sw.js?v="+Date.now(), {cache:"no-store"}).then(r=>r && r.ok ? r.text() : "").then(t=>{
+    _verChecking=false;
+    const latest=swBuildNum_(t), mine=buildNum_(APP_BUILD);
+    if(!latest || !mine || latest<=mine){ _verNewer=0; return {latest, mine, newer:false}; }
+    _verNewer=latest;
+    const stamp=$("buildStamp"); if(stamp) stamp.textContent="Build "+APP_BUILD+" · v"+latest+" is ready — tap to update";
+    const why=pendingWork_();
+    if(!atLaunch || _userTouched || why.length){
+      toast("A newer version (v"+latest+") is ready — tap the build line at the bottom when you are between plots."+(why.length?" (Waiting: "+why[0]+".)":""),true);
+      return {latest, mine, newer:true, updated:false, why: why.length?why:[_userTouched?"the app is in use":"not at launch"]};
+    }
+    if(_ls("fi_updtried")===String(latest)) return {latest, mine, newer:true, updated:false, why:["already tried once"]};     // never loop: a second miss is left to the cruiser
+    _lsSet("fi_updtried", String(latest));
+    if(_ls("fi_updtried")!==String(latest)) return {latest, mine, newer:true, updated:false, why:["storage would not record the attempt"]};   // …and if the try cannot be remembered, do not try
+    toast("Updating to v"+latest+"…");
+    return appUpdate_(latest, true).then(done=>({latest, mine, newer:true, updated:!!done}));
+  }).catch(()=>{ _verChecking=false; return null; });
+}
+/* Fetch the new files and reload. Never touches plots, photos or imagery.
+   The new service worker is given time to finish installing BEFORE old files are dropped — dropping
+   them first deleted the files it was in the middle of saving, and left the app with nothing to open
+   on with no signal. `auto`: called without the cruiser asking; it backs out if they have started using the app. */
+async function appUpdate_(latest, auto){
   try{
     if("serviceWorker" in navigator){
       const regs = await navigator.serviceWorker.getRegistrations();
       await Promise.all(regs.map(r => r.update().catch(()=>{})));
+      await Promise.all(regs.map(r => new Promise(res=>{
+        const w=r.installing; if(!w){ res(); return; }
+        const t=setTimeout(res, 20000);
+        w.addEventListener("statechange", ()=>{ if(w.state==="installed" || w.state==="activated" || w.state==="redundant"){ clearTimeout(t); res(); } });
+      })));
     }
     if(window.caches){
+      const keep=new Set([TILE_CACHE_NAME]); if(latest) keep.add("fi-plotcard-v"+latest);
       const keys = await caches.keys();
-      await Promise.all(keys.filter(k => k !== TILE_CACHE_NAME).map(k => caches.delete(k)));   // v371: an update no longer throws away the downloaded imagery
+      /* with a known new build, only caches older than it go; the new worker's own cache stays */
+      await Promise.all(keys.filter(k => !keep.has(k) && (!latest || /^fi-plotcard-v\d+$/.test(k))).map(k => caches.delete(k)));
     }
   }catch(e){}
+  if(auto && (_userTouched || pendingWork_().length)){ toast("Update ready — tap the build line at the bottom when you are between plots.",true); return false; }
   setTimeout(()=>{ location.reload(); }, 350);
+  return true;
+}
+async function forceUpdate(){
+  if(!navigator.onLine){ toast("No connection — updates need internet.", true); return; }
+  const why=pendingWork_();
+  if(!confirm("Update to the latest version now?\nThe app will reload."+(why.length?"\n\nStill on this phone: "+why.join("; ")+". They are kept, but finish what you are entering first.":""))) return;
+  toast("Getting the latest version…");
+  await appUpdate_(_verNewer||0, false);
 }
 opts($("STBNDRY"),DOM.YESNO);
 document.querySelectorAll(".abund").forEach(abundSelect); sppSelect($("HTSPP"));
@@ -3411,6 +3476,8 @@ setInterval(()=>{ if(++_authTick%5===0 || authBlocked) authCheck_(); }, 60000); 
 setInterval(()=>{ if(saved.some(p=>!p._sent)) flushQueue(); flushEditBatch_(); if(pendingDeletes.length) flushDeletes_();
   if(pendingSpecies.length) flushSpecies(); if(typeof pendingTracts!=="undefined" && pendingTracts.length) flushTracts(); }, 60000); // safety retry every 60s
 setInterval(()=>{ try{ flushPhotos(); }catch(e){} }, 90000);            // retry any unconfirmed photo uploads
+setTimeout(()=>{ try{ versionCheck_(true, true); }catch(e){} }, 8000);          // v373: a newer build? (then at most every half hour, when the app comes back to the front)
+try{ document.addEventListener("visibilitychange", ()=>{ try{ if(!document.hidden) versionCheck_(false, false); }catch(e){} }); }catch(e){}     // back to the front: it only SAYS a newer build is ready
 setTimeout(()=>{ try{ sharedFieldsFetch_(); }catch(e){} }, 12000);       // v372: the crew's field choices for whatever boundaries are loaded
 setTimeout(()=>{ try{ photoPurgeDaily_(); }catch(e){} }, 25000);        // v371: uploaded photos over a day old leave the phone, once a day
 setInterval(()=>{ try{ photoPurgeDaily_(); if(Object.keys(fieldsToSend).length) sharedFieldsFetch_(); }catch(e){} }, 600000);      // …and again after midnight if the app is left open
@@ -5103,11 +5170,29 @@ function stopLive(){
   if(livePollTimer){ clearInterval(livePollTimer); livePollTimer=null; }
   if(liveLayer) liveLayer.clearLayers();
   const el=$("liveLegend"); if(el){ el.style.display="none"; el.innerHTML=""; }
-  liveOn=false; setLiveBtn();
+  liveOn=false; _liveSent=null; setLiveBtn();
+}
+/* v373 (Phase 1, step 7) — a position is sent only when it has moved 20 m since the last one that
+   was sent, so a cruiser standing at a plot does not write to the Sheet every minute. A cruiser who
+   stays put is still sent now and then (well inside the time after which the crew's map greys a dot
+   out), so standing still does not look like having gone. */
+const LIVE_MOVE_M=20;
+let _liveSent=null;      // {lat, lon, at} of the last position that went
+function metresBetween_(a,b){ const R=6371000, r=Math.PI/180, dLat=(b.lat-a.lat)*r, dLon=(b.lon-a.lon)*r;
+  const h=Math.sin(dLat/2)**2 + Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLon/2)**2; return 2*R*Math.asin(Math.min(1,Math.sqrt(h))); }
+function liveDue_(pos, now){
+  if(!_liveSent || _liveSent.who!==String(cruiserEmail||"")) return true;       // first beat, or a different name on this phone
+  if(metresBetween_(_liveSent,pos)>=LIVE_MOVE_M) return true;
+  return now-_liveSent.at >= Math.max(LIVE_MS, Math.floor(LIVE_FRESH_MS*0.4)) - 2000;     // the "still here" beat: every 2 minutes
 }
 function broadcastLive(){
   if(!liveOn || !connected || isOffline() || !mePos || authBlocked) return;
-  try{ sheetPost_({_action:"presence", email:cruiserEmail, name:(cruiser||shortEmail_(cruiserEmail)), lat:mePos.lat, lon:mePos.lon}).catch(()=>{}); }catch(e){}
+  const pos={lat:+mePos.lat, lon:+mePos.lon}, now=Date.now();
+  if(!isFinite(pos.lat) || !isFinite(pos.lon) || !liveDue_(pos, now)) return;
+  const mark={lat:pos.lat, lon:pos.lon, at:now, who:String(cruiserEmail||"")}; _liveSent=mark;
+  const undo=()=>{ if(_liveSent===mark) _liveSent=null; };       // not taken: the next beat sends, whatever it is
+  try{ sheetPost_({_action:"presence", email:cruiserEmail, name:(cruiser||shortEmail_(cruiserEmail)), lat:pos.lat, lon:pos.lon})
+        .then(j=>{ if(j && j.ok===false) undo(); }).catch(undo); }catch(e){ undo(); }
 }
 function pollLive(){
   if(!liveOn || !connected || isOffline()) return;
