@@ -1171,7 +1171,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-06 · v368";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-06 · v369";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1574,7 +1574,7 @@ function accountPanel_(){
     row("This phone", authToken?`<span style="color:#7fd0a0">logged in as ${esc(authUser||"—")}</span>`:`<span style="color:${authNeeded?"#e8a33a":"#8fae95"}">not logged in</span>`)+
     (authToken&&authAccountName?row("Account", esc(authAccountName)):"")+
     `</table>`+
-    (authToken&&authLimited?`<div style="color:#e8a33a;font-size:12px;margin-top:10px;line-height:1.4">This account can collect and sync plots, tracts, areas and species. Photo upload, saving files to Drive, the summaries, emailed reports and written summaries are not open to it yet.</div>`:"")+
+    (authToken&&authLimited?`<div style="color:#e8a33a;font-size:12px;margin-top:10px;line-height:1.4">This account can collect and sync plots, photos, tracts, areas and species, and save its map files to Drive. The summaries, emailed reports, shared map layers and written summaries are not open to it yet.</div>`:"")+
     `<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">`+
       (authToken?`<button class="btn-mini" type="button" onclick="logout_()">Sign out</button>`
                 :`<button class="btn submit" type="button" onclick="closeInfoSheet_();loginOpen_()">Log in</button>`)+
