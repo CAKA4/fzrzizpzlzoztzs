@@ -1173,7 +1173,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-07 · v371";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-07 · v372";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1561,7 +1561,9 @@ function loginSubmit_(){
   }).catch(()=>{ _loginBusy=false; _loginPin=""; loginDraw_();
     loginSay_("Could not reach the Sheet. Check your signal and try again — nothing on this phone has changed.",true); });
 }
-function authFresh_(limited){ Object.keys(POST_REFUSED).forEach(k=>{ delete POST_REFUSED[k]; }); authLimited=!!limited; }   // a different user may be a different account
+function authFresh_(limited){ Object.keys(POST_REFUSED).forEach(k=>{ delete POST_REFUSED[k]; }); authLimited=!!limited;
+  /* another user may be another account: the last crew's field settings are not theirs */
+  try{ sharedFields={}; fieldsToSend={}; _lsSet("fi_sharedfields",""); _lsSet("fi_fieldstosend",""); }catch(e){} }   // a different user may be a different account
 function logout_(){
   if(!authToken) return;
   if(!confirm("Sign this phone out?\n\nYour plots stay on the phone."+(authNeeded?" They will not sync until someone logs in again.":""))) return;
@@ -2404,7 +2406,30 @@ function plotSheetSameStrict_(a,b){
 }
 /* Columns the Sheet fills in by itself; the phone never holds them. */
 const PLOT_SERVER_COLS=new Set(["PlotID","SubmittedAt","ACCOUNT","AGECLASS","PHOTO_LINKS","POLYNAME","POLYAREA","AREASRC"]);
+/* Is the phone's date the one the Sheet shows? `b` is the Sheet's CLOCK text (yyyy-MM-dd HH:mm:ss in
+   the Sheet's own time zone), which is what the phone sent — so no time-zone arithmetic. A phone date
+   that is an instant ("…Z", from an import) is rewritten by the Sheet into its own zone and cannot be
+   checked from here: it does not count either way. */
+function plotDateNorm_(x){
+  const s=String(x==null?"":x).trim();
+  const m=/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?$/.exec(s);
+  if(!m) return {raw:s};
+  const p=n=>("0"+n).slice(-2);
+  return {day:m[1]+"-"+p(m[2])+"-"+p(m[3]), sec:m[4]==null?0:(+m[4]*3600 + +m[5]*60 + +(m[6]||0))};
+}
+/* Only a phone date written the app's own way (yyyy-mm-dd, with or without a time) is judged. An
+   imported "06-Oct-2026" or "10/6/2026 2:30 PM" is rewritten by Sheets in ways the phone cannot
+   predict; it does not count either way — as before v372. */
 function plotDateSame_(a,b){
+  const A=String(a==null?"":a).trim(), B=String(b==null?"":b).trim();
+  if(A===B) return true;
+  const x=plotDateNorm_(A); if(x.raw!=null) return true;
+  const y=plotDateNorm_(B); if(y.raw!=null) return false;
+  return x.day===y.day && Math.abs(x.sec-y.sec)<=1;
+}
+/* Against a backend older than v372 the feed gives an instant, not clock text: the same moment, as this
+   phone's clock reads it (right when the phone and the Sheet share a time zone; otherwise "different", and the plot stays). */
+function plotDateInstantSame_(a,b){
   const A=String(a==null?"":a).trim(), B=String(b==null?"":b).trim();
   if(A===B) return true;
   const ta=Date.parse(A.replace(" ","T")), tb=Date.parse(B);
@@ -2420,7 +2445,9 @@ function plotClearDiff_(p,row){
     const pv=Object.prototype.hasOwnProperty.call(p,k) ? p[k] : "";
     if(String(row[k]==null?"":row[k]).trim()!=="" && String(pv==null?"":pv).trim()==="") out.push(k);
   });
-  if(String(p.DATE==null?"":p.DATE).trim()!=="" && Object.prototype.hasOwnProperty.call(row,"DATE") && !plotDateSame_(p.DATE,row.DATE)) out.push("DATE");
+  /* row.DATE is the Sheet's clock text when the feed says so (backend v372+). An older backend sends
+     an instant, which cannot be compared across time zones: then the date is a difference — the plot stays. */
+  if(String(p.DATE==null?"":p.DATE).trim()!=="" && Object.prototype.hasOwnProperty.call(row,"DATE") && !(row.__dateText ? plotDateSame_(p.DATE,row.DATE) : plotDateInstantSame_(p.DATE,row.DATE))) out.push("DATE");
   Object.keys(p).forEach(k=>{
     if(k.charAt(0)==="_" || PLOT_CONFIRM_SKIP.has(k)) return;
     const v=p[k]; if(v!==null && typeof v==="object") return;
@@ -2444,12 +2471,28 @@ function plotSheetSame_(a,b){
 }
 /* The fields where the row returned by plotrow disagrees with the phone. Only fields the phone
    holds AND the Sheet has a column for are compared. */
-function plotMismatch_(p,row){
+/* v372 — compared BOTH WAYS, and the date too. A correction that only takes something away (a tree
+   removed) or only changes the date used to be "confirmed" by the old row: nothing the phone held
+   contradicted it. The save writes the whole row, so after a save that arrived the Sheet holds
+   nothing the phone does not — anything extra means the save did not arrive.
+   `dateText` is the Sheet's clock text for DATE (backend v372+); without it the date is not judged. */
+let _appFields=null;
+function appField_(k){ if(!_appFields){ try{ _appFields=new Set(HEADER); }catch(e){ _appFields=new Set(); } } return _appFields.has(k); }
+function plotMismatch_(p,row,dateText){
   const out=[];
+  Object.keys(row).forEach(k=>{
+    /* Only the app's own fields. A column somebody added to the Sheet (an office note) is not
+       written by a save and not the phone's to answer for. */
+    if(!appField_(k) || PLOT_SERVER_COLS.has(k) || PLOT_CONFIRM_SKIP.has(k)) return;
+    const pv=Object.prototype.hasOwnProperty.call(p,k) ? p[k] : "";
+    if(pv!==null && typeof pv==="object") return;
+    if(String(row[k]==null?"":row[k]).trim()!=="" && String(pv==null?"":pv).trim()==="") out.push(k);
+  });
+  if(typeof dateText==="string" && String(p.DATE==null?"":p.DATE).trim()!=="" && !plotDateSame_(p.DATE,dateText)) out.push("DATE");
   Object.keys(p).forEach(k=>{
     if(k.charAt(0)==="_" || PLOT_CONFIRM_SKIP.has(k) || !Object.prototype.hasOwnProperty.call(row,k)) return;
     const v=p[k]; if(v!==null && typeof v==="object") return;
-    if(!plotSheetSame_(plotQualNorm_(k,v), row[k])) out.push(k);
+    if(!plotSheetSame_(plotQualNorm_(k,v), row[k]) && out.indexOf(k)<0) out.push(k);
   });
   return out;
 }
@@ -2493,7 +2536,7 @@ function plotConfirm_(list, then){
   const pump=()=>{ if(next>=want.length) return; const p=want[next++];
     const judge=r=>{
       if(!(r && r.ok && r.plot)) return;
-      const mm=plotMismatch_(p, r.plot);
+      const mm=plotMismatch_(p, r.plot, r.hasDateText ? String(r.dateText||"") : undefined);
       if(!mm.length){ p._sent=true; delete p._mismatch; delete p._mmN; delete p._mmSig; delete p._batchRetry; okN++; }
       else {
         const sig=plotSig_(p);
@@ -3358,7 +3401,7 @@ function flushQueue(manual){
       });
   });
 }
-window.addEventListener("online", ()=>{ toast("Back online — sending queued plots"); netDot(); renderSaved(); authCheck_(); flushQueue(); flushEditBatch_(); flushSpecies(); fetchSpecies(); flushTracts(); fetchTracts(); flushPhotos(); flushDeletes_(); });
+window.addEventListener("online", ()=>{ toast("Back online — sending queued plots"); netDot(); renderSaved(); authCheck_(); try{ setTimeout(sharedFieldsFetch_, 4000); }catch(e){} flushQueue(); flushEditBatch_(); flushSpecies(); fetchSpecies(); flushTracts(); fetchTracts(); flushPhotos(); flushDeletes_(); });
 window.addEventListener("offline", ()=>{ netDot(); renderSaved(); });
 /* Species and tracts were missing from this. An addition that failed to confirm only got another
    chance on the next "online" event or the next time somebody added a plant — which on a phone
@@ -3368,8 +3411,9 @@ setInterval(()=>{ if(++_authTick%5===0 || authBlocked) authCheck_(); }, 60000); 
 setInterval(()=>{ if(saved.some(p=>!p._sent)) flushQueue(); flushEditBatch_(); if(pendingDeletes.length) flushDeletes_();
   if(pendingSpecies.length) flushSpecies(); if(typeof pendingTracts!=="undefined" && pendingTracts.length) flushTracts(); }, 60000); // safety retry every 60s
 setInterval(()=>{ try{ flushPhotos(); }catch(e){} }, 90000);            // retry any unconfirmed photo uploads
+setTimeout(()=>{ try{ sharedFieldsFetch_(); }catch(e){} }, 12000);       // v372: the crew's field choices for whatever boundaries are loaded
 setTimeout(()=>{ try{ photoPurgeDaily_(); }catch(e){} }, 25000);        // v371: uploaded photos over a day old leave the phone, once a day
-setInterval(()=>{ try{ photoPurgeDaily_(); }catch(e){} }, 600000);      // …and again after midnight if the app is left open
+setInterval(()=>{ try{ photoPurgeDaily_(); if(Object.keys(fieldsToSend).length) sharedFieldsFetch_(); }catch(e){} }, 600000);      // …and again after midnight if the app is left open
 
 /* ---------- GPS ---------- */
 function captureGPS(auto){
@@ -3931,7 +3975,8 @@ function sheetPlotsById_(done){
     if(!r || !r.ok || !Array.isArray(r.head) || !Array.isArray(r.plots)){ done(null); return; }
     const idI=r.head.indexOf("PlotID"), by=Object.create(null), twice=Object.create(null);
     if(idI<0){ done(null); return; }
-    r.plots.forEach(a=>{ const o={}; r.head.forEach((h,i)=>{ if(h!=="PlotID" && h!=="SubmittedAt") o[h]=a[i]; }); const id=String(a[idI]||"").trim(); if(!id) return; if(by[id]) twice[id]=1; by[id]=o; });
+    r.plots.forEach(a=>{ const o={}; r.head.forEach((h,i)=>{ if(h!=="PlotID" && h!=="SubmittedAt") o[h]=a[i]; });
+      if(r.dateText===true) Object.defineProperty(o,"__dateText",{value:true,enumerable:false}); const id=String(a[idI]||"").trim(); if(!id) return; if(by[id]) twice[id]=1; by[id]=o; });
     Object.keys(twice).forEach(id=>{ delete by[id]; });        // the same PlotID on two rows: which one is "the" plot cannot be said, so it stays on the phone
     done(by); }, 60000);
 }
@@ -6522,9 +6567,15 @@ function loadBoundaries(file){
   toast("Reading boundaries…");
   const lower=file.name.toLowerCase();
   const add=gj=>{ const fc=normalizeFC(gj); if(!fc.features.length){ toast("No polygons found",true); return; }
-    boundFiles.push({id:genId(), name:file.name||"shapefile", features:fc.features});
-    rebuildBound(); pickStandField(); cacheBoundaries(); renderBoundaries(); renderLayerList(); updateLayerStatus(); fitBoundaries(fc.features);
-    document.querySelector(".map-load").classList.add("has"); toast(`Added ${fc.features.length} polygons from ${file.name}`); scheduleAreaPush_(); };
+    const bf={id:genId(), name:file.name||"shapefile", features:fc.features};
+    boundFiles.push(bf);
+    rebuildBound();
+    /* v372: the crew's field choices for this file, if it is the only one loaded (the copy this phone last fetched; a fresh one is asked for below). */
+    const tookShared=applySharedFields_();
+    pickStandField(); cacheBoundaries(); renderBoundaries(); renderLayerList(); updateLayerStatus(); fitBoundaries(fc.features);
+    document.querySelector(".map-load").classList.add("has"); toast(`Added ${fc.features.length} polygons from ${file.name}`+(tookShared?" — using your crew's field settings":"")); scheduleAreaPush_();
+    if(tookShared && tookShared.standWas && tookShared.standWas!==tookShared.standNow) setTimeout(()=>sharedFieldsTell_(tookShared,true), 900);
+    try{ sharedFieldsFetch_(); }catch(e){} };
   if(lower.endsWith(".geojson")||lower.endsWith(".json")){ file.text().then(t=>ensureWGS84(JSON.parse(t))).then(add).catch(()=>toast("Bad GeoJSON",true)); }
   else if(lower.endsWith(".shp")||lower.endsWith(".zip")){ file.arrayBuffer().then(buf=>shp(buf)).then(ensureWGS84).then(add).catch(e=>toast("Shapefile error: "+e.message,true)); }
   else { toast("Use a .zip, .shp, .geojson or .json file",true); }
@@ -6721,14 +6772,85 @@ function populatePopupFields(keys){
 function togglePopupField(k,on){
   if(on){ if(!popupFields.includes(k)) popupFields.push(k); }
   else popupFields = popupFields.filter(x=>x!==k);
-  cacheBoundaries();
+  cacheBoundaries(); shareFieldsSoon_();
 }
-function setStandField(k){ standField=k; cacheBoundaries(); renderBoundaries(); updateInStand(); scheduleAreaPush_(); }
-function setAgeField(k){ ageField=k||null; cacheBoundaries(); toast(ageField?`New plots will auto-fill AGE from “${ageField}”`:"Age auto-fill turned off"); }
-function setTractField(k){ tractField=k||null; cacheBoundaries(); toast(tractField?`Auto-assign will fill TRACT from “${tractField}”`:"Tract auto-fill turned off"); scheduleAreaPush_(); }
+/* ---------- v372 — field settings shared per boundary file, across the account's phones ----------
+   The app holds ONE set of field choices for whatever boundaries are loaded, so sharing is kept to the
+   case where it cannot mislead: exactly ONE boundary file loaded, on a LOGGED-IN phone.
+     · Loading that file takes the crew's choices for its file name, if the file really has those fields.
+     · Changing a choice saves it for the crew under that file's name (last change wins). A change made
+       with no signal is kept as "to send" and goes when signal returns; until then the crew's older
+       choice is not allowed to replace it.
+     · If the crew's choice changes the STAND field under a cruiser, it says so in a notice that stays
+       on screen until dismissed, naming the old and the new field.
+   With two or more boundary files loaded, or logged out, nothing is taken or sent: the phone's own choices stand. */
+const _fj=(k)=>{ try{ return JSON.parse(_ls(k)||"{}")||{}; }catch(e){ return {}; } };
+let sharedFields=_fj("fi_sharedfields"), fieldsToSend=_fj("fi_fieldstosend");
+let _shareTimer=null;
+function fieldsNow_(){ return {stand:standField||"", age:ageField||"", tract:tractField||"", area:areaField||"", popup:(popupFields||[]).slice(0,12)}; }
+function fileKeys_(f){ try{ return Object.keys(((f&&f.features&&f.features[0])||{}).properties||{}); }catch(e){ return []; } }
+function fkey_(name){ return "f:"+String(name||"").trim().toLowerCase(); }
+function sharingFile_(){ return (boundFiles.length===1 && authToken && !authBlocked && boundFiles[0] && boundFiles[0].name) ? boundFiles[0] : null; }
+function fieldsFor_(f, fields){ const keys=fileKeys_(f), has=v=>v && keys.indexOf(v)>=0;
+  return {stand:fields.stand, age:has(fields.age)?fields.age:"", tract:has(fields.tract)?fields.tract:"", area:has(fields.area)?fields.area:"", popup:(fields.popup||[]).filter(k=>keys.indexOf(k)>=0)}; }
+/* Take the crew's choices for the one loaded file. Returns {changed, standWas} or null if nothing applied. */
+function applySharedFields_(){
+  const f=sharingFile_(); if(!f) return null;
+  const k=fkey_(f.name);
+  if(Object.prototype.hasOwnProperty.call(fieldsToSend,k)) return null;          // this phone has a newer choice waiting to go
+  const m=Object.prototype.hasOwnProperty.call(sharedFields,k) ? sharedFields[k] : null;
+  if(!m || !m.stand || fileKeys_(f).indexOf(m.stand)<0) return null;              // none saved, or not the same file after all
+  const want=fieldsFor_(f,m), before=fieldsNow_();
+  if(JSON.stringify(want)===JSON.stringify(before)) return null;
+  standField=want.stand; ageField=want.age||null; tractField=want.tract||null; areaField=want.area||null; popupFields=want.popup.slice();
+  return {changed:true, standWas:before.stand, standNow:want.stand, file:f.name};
+}
+function sharedFieldsRefreshUI_(){ try{ pickStandField(); cacheBoundaries(); renderBoundaries(); updateInStand(); scheduleAreaPush_(); }catch(e){} }
+function sharedFieldsTell_(r, quiet){
+  if(!r) return;
+  if(r.standWas && r.standWas!==r.standNow){
+    try{ showInfoSheet_("Stand field changed by your crew",
+      `<div style="font-size:13px;line-height:1.55;color:#e8f0e6">For <b>${esc(r.file)}</b> your crew's setting is now in use on this phone.<br><br>Stand names come from <b>${esc(r.standNow)}</b> (this phone was using <b>${esc(r.standWas)}</b>).`+
+      `<div style="color:#8fae95;font-size:12px;margin-top:10px">New plots take their stand from this field. If it is wrong, change it under + Layers — your change is then shared with the crew.</div></div>`); }catch(e){}
+  } else if(!quiet) toast("Using your crew's field settings for "+r.file);
+}
+function fieldsPost_(name, fields){
+  return sheetPost_({_action:"layerfields", file:name, fields:fields}).then(j=>{
+    if(j && j.ok===false) return false;                       // refused: keep it waiting only if it was a "try again"
+    sharedFields[fkey_(name)]=fields; _lsSet("fi_sharedfields", JSON.stringify(sharedFields));
+    delete fieldsToSend[fkey_(name)]; _lsSet("fi_fieldstosend", JSON.stringify(fieldsToSend));
+    return true; });
+}
+/* Send anything waiting, then ask the Sheet for the crew's choices and take them for the loaded file. */
+function sharedFieldsFetch_(then){
+  if(!connected || isOffline() || !authToken || authBlocked){ if(then) then(false); return; }
+  const waiting=Object.keys(fieldsToSend).map(k=>fieldsToSend[k]).filter(x=>x && x.file && x.fields);
+  Promise.all(waiting.map(x=>fieldsPost_(x.file,x.fields).catch(()=>false))).then(()=>{
+    jsonp_("action=layerfields", r=>{
+      if(!r || r.ok!==true || !r.map || typeof r.map!=="object"){ if(then) then(false); return; }
+      sharedFields=r.map; _lsSet("fi_sharedfields", JSON.stringify(sharedFields));
+      const ap=applySharedFields_();
+      if(ap){ sharedFieldsRefreshUI_(); setTimeout(()=>sharedFieldsTell_(ap), 900); }       // after pickStandField's own messages
+      if(then) then(true); }, 20000);
+  });
+}
+/* A choice made on this phone, for the one loaded file: note it as "to send" at once, send it shortly. */
+function shareFieldsSoon_(){
+  const f=sharingFile_(); if(!f || !standField) return;
+  if(fileKeys_(f).indexOf(standField)<0) return;
+  const name=f.name, fields=fieldsFor_(f, fieldsNow_());
+  fieldsToSend[fkey_(name)]={file:name, fields:fields}; _lsSet("fi_fieldstosend", JSON.stringify(fieldsToSend));
+  if(_shareTimer) clearTimeout(_shareTimer);
+  _shareTimer=setTimeout(()=>{ _shareTimer=null;
+    const w=fieldsToSend[fkey_(name)]; if(!w || !connected || isOffline() || !authToken || authBlocked) return;     // stays waiting
+    fieldsPost_(w.file, w.fields).catch(()=>{}); }, 1500);
+}
+function setStandField(k){ standField=k; cacheBoundaries(); renderBoundaries(); updateInStand(); scheduleAreaPush_(); shareFieldsSoon_(); }
+function setAgeField(k){ ageField=k||null; cacheBoundaries(); shareFieldsSoon_(); toast(ageField?`New plots will auto-fill AGE from “${ageField}”`:"Age auto-fill turned off"); }
+function setTractField(k){ tractField=k||null; cacheBoundaries(); shareFieldsSoon_(); toast(tractField?`Auto-assign will fill TRACT from “${tractField}”`:"Tract auto-fill turned off"); scheduleAreaPush_(); }
 let manualTract = (function(){ try{ return (STORE&&STORE.getItem("fi_manualtract"))||""; }catch(e){ return ""; } })();
 function setManualTract(v){ manualTract=String(v||"").trim(); try{ if(STORE) STORE.setItem("fi_manualtract",manualTract); }catch(e){} scheduleAreaPush_(); }
-function setAreaField(k){ areaField=k||null; cacheBoundaries(); scheduleAreaPush_(); toast(areaField?`Using “${areaField}” as official area (ha) where filled`:"Areas will be calculated from shape"); }
+function setAreaField(k){ areaField=k||null; cacheBoundaries(); shareFieldsSoon_(); scheduleAreaPush_(); toast(areaField?`Using “${areaField}” as official area (ha) where filled`:"Areas will be calculated from shape"); }
 function cacheBoundaries(){
   try{ if(STORE){ STORE.setItem("fi_standfield",standField||""); STORE.setItem("fi_agefield",ageField||""); STORE.setItem("fi_tractfield",tractField||""); STORE.setItem("fi_areafield",areaField||""); STORE.setItem("fi_popupfields",JSON.stringify(popupFields)); STORE.removeItem("fi_boundaries"); STORE.removeItem("fi_boundfiles"); } }catch(e){}
   try{ ldbPut("boundfiles", boundFiles).catch(()=>{ toast("Couldn't save boundaries to device storage",true); }); }catch(e){}
