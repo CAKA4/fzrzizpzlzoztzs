@@ -922,14 +922,14 @@
     <div class="modal-title" style="display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--card);padding:6px 0 12px;margin:0 0 8px;z-index:2">Tools <button type="button" onclick="closeMore()" style="background:#16271a;border:1px solid #33623a;border-radius:8px;color:#cdebcf;width:40px;height:40px;font-size:20px;line-height:1;cursor:pointer;flex:none" aria-label="Close">✕</button></div>
       <details class="mgroup" open><summary>📈 View the analysis</summary>
         <button type="button" onclick="closeMore();openSummary()">📊 Stand summary — quick totals per stand</button>
-        <button type="button" onclick="closeMore();openFullAnalysis('main')">📈 Full analysis — every summary tab</button>
+        <button type="button" data-office="1" onclick="closeMore();openFullAnalysis('main')">📈 Full analysis — every summary tab</button>
         <button type="button" onclick="closeMore();openDataTable()">▦ Plot data table — every field, every plot</button>
         <button type="button" onclick="closeMore();openPlotFinder()">🔎 Who did what, and when — by crew &amp; date</button>
       </details>
 
       <details class="mgroup"><summary>✍️ Written summaries</summary>
-        <button type="button" onclick="closeMore();openInventoryDesc()">📖 Inventory description — a page per tract</button>
-        <button type="button" onclick="closeMore();openNoteGen()">✎ Write compartment summaries (all missing)</button>
+        <button type="button" data-office="1" onclick="closeMore();openInventoryDesc()">📖 Inventory description — a page per tract</button>
+        <button type="button" data-office="1" onclick="closeMore();openNoteGen()">✎ Write compartment summaries (all missing)</button>
       </details>
 
       <details class="mgroup"><summary>📤 Send &amp; export</summary>
@@ -952,10 +952,10 @@
              tract — and the next question was "how do I email the Excel summaries for the tract I
              finished today?", which is exactly what this button does. Say all four things it does:
              summaries, Excel or PDF, one tract or all, emailed. -->
-        <button type="button" onclick="closeMore();openReportModal()">📗 Email me the summaries — Excel or PDF, by tract</button>
+        <button type="button" data-office="1" onclick="closeMore();openReportModal()">📗 Email me the summaries — Excel or PDF, by tract</button>
         <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:4px 2px 2px">Plot data plus every summary tab, for one property or all of them. Rebuilt from the Sheet first, so it includes today's plots once they have synced.</div>
         <button type="button" onclick="closeMore();openMapFiles()">🗂 Map files on Drive — tracks, routes, areas</button>
-        <button type="button" onclick="closeMore();openCompRpt()">📄 Compartment PDF reports — one, a tract, or all</button>
+        <button type="button" data-office="1" onclick="closeMore();openCompRpt()">📄 Compartment PDF reports — one, a tract, or all</button>
       </details>
 
       <details class="mgroup"><summary>🗂 Plots &amp; stands</summary>
@@ -963,13 +963,13 @@
         <button type="button" onclick="closeMore();openTractAssign()">🏷 Assign tract / property to plots</button>
         <button type="button" onclick="closeMore();openDeletedPlots()">↩ Restore deleted plots</button>
         <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:6px 2px 2px">Rebuilding the Sheet&rsquo;s summary tabs takes a few minutes and is best started from the Sheet itself.</div>
-        <button type="button" onclick="closeMore();buildAllSummary()">🗂 Rebuild the Sheet&rsquo;s summary tabs</button>
+        <button type="button" data-office="1" onclick="closeMore();buildAllSummary()">🗂 Rebuild the Sheet&rsquo;s summary tabs</button>
       </details>
 
       <details class="mgroup" id="auditGroup"><summary>🔍 Imported plots</summary>
         <button type="button" id="pushAuditBtn" onclick="closeMore();pushAuditToSheet()" style="display:none">📤 Push imported plots to the Sheet</button>
-        <button type="button" id="auditSumBtn" onclick="closeMore();buildAuditSummary()" style="display:none">📊 Build imported-set summary (separate)</button>
-        <button type="button" onclick="closeMore();openFullAnalysis('audit')">📈 Full analysis — imported set only</button>
+        <button type="button" id="auditSumBtn" data-office="1" onclick="closeMore();buildAuditSummary()" style="display:none">📊 Build imported-set summary (separate)</button>
+        <button type="button" data-office="1" onclick="closeMore();openFullAnalysis('audit')">📈 Full analysis — imported set only</button>
         <button type="button" onclick="closeMore();exportPlotsAnalysisShp('audit')">📍 Imported plots + analysis → shapefile</button>
         <button type="button" onclick="closeMore();exportCompartmentsAnalysisShp('audit')">⬠ Imported compartments + analysis → shapefile</button>
         <button type="button" id="auditLabelBtn" onclick="closeMore();openAuditLabelPicker()" style="display:none">🏷 Label imported plots by…</button>
@@ -1174,7 +1174,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-07 · v374";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-07 · v376";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1397,10 +1397,18 @@ const _ls=(k)=>{ try{ return (STORE&&STORE.getItem(k))||""; }catch(e){ return ""
 const _lsSet=(k,v)=>{ try{ if(STORE){ if(v===""||v==null) STORE.removeItem(k); else STORE.setItem(k,String(v)); } }catch(e){} };
 let authToken=_ls("fi_token"), authUser=_ls("fi_authuser"), authAccountName=_ls("fi_authacct");
 let authNeeded=_ls("fi_authreq")==="Y";      // what the backend last said; remembered for offline starts
-let authBlocked=authNeeded && !authToken;    // login is required and this phone is not logged in
+/* v375: a phone that has been on an account other than the office's stays that account's phone. If
+   its login stops working (expired, removed, signed out) it waits for a login even when login is
+   switched off — otherwise it would be treated as the office account and file its plots there. */
+function limitedPhone_(){ return _ls("fi_limited")==="Y"; }
+function authMust_(){ return authNeeded || limitedPhone_(); }
+let authBlocked=authMust_() && !authToken;    // login is required and this phone is not logged in
 let authWhy="";
-function tokQ_(){ return authToken ? "token="+encodeURIComponent(authToken)+"&" : ""; }
-function postBody_(o){ return JSON.stringify(authToken ? Object.assign({}, o, {_token:authToken}) : o); }
+/* v375: a phone that belongs to another account and has no working login never asks as "nobody" —
+   with login switched off, nobody means the office account. It sends a marker the Sheet refuses. */
+function tokenOut_(){ return authToken || (limitedPhone_() ? "signed-out" : ""); }
+function tokQ_(){ const t=tokenOut_(); return t ? "token="+encodeURIComponent(t)+"&" : ""; }
+function postBody_(o){ const t=tokenOut_(); return JSON.stringify(t ? Object.assign({}, o, {_token:t}) : o); }
 /* A POST whose reply can be read. Rejects on no signal, a timeout, or a reply that is not JSON. */
 function apiPost_(o, ms){
   return new Promise((res,rej)=>{
@@ -1422,6 +1430,8 @@ function apiPost_(o, ms){
 const POST_REFUSED={};
 const POST_LABEL={photo:"Photo upload", mapfile:"Saving files to Drive", layerput:"Adding a shared layer"};
 let authLimited=false;       // an account other than the administrator's: summaries, emails, exports and AI are not open to it yet
+function isLimited_(){ return !!((authToken&&authLimited) || (!authToken&&limitedPhone_())); }
+function limitedNo_(){ if(isLimited_()){ toast("Not available to this account yet — it belongs to the office account",true); return true; } return false; }
 /* v374 — the account's plot limit. `full`: the Sheet has refused NEW plots (corrections still go). They
    stay on the phone; the automatic resend holds off for ten minutes so a full account is not asked
    again every minute. From 80% the Sheet sends a warning, shown once a day. */
@@ -1456,6 +1466,30 @@ function postFailMsg_(e, noSignal, byHand){     // byHand: a button the cruiser 
   if(w==="cap") return "Saved on this phone — the account is at its plot limit";
   return noSignal;
 }
+/* v376: the Sheet kept a value this phone sent empty (an age, tract, compartment or photo name that
+   was filled in at the office). Take it up here too, so the phone and the Sheet agree and the next
+   edit does not send it empty again. Only ever fills an EMPTY field on the phone. */
+function adoptKept_(kept){
+  if(!kept || typeof kept!=="object") return;
+  let n=0, na=0;
+  const take=(list)=>{ let c=0; (list||[]).forEach(p=>{ const k=p&&p._id&&kept[p._id]; if(!k || typeof k!=="object") return;
+    Object.keys(k).forEach(f=>{ if(KEPT_OK_.indexOf(f)<0) return; if(Array.isArray(p._cleared)&&p._cleared.indexOf(f)>=0) return; const v=p[f]; if(v===undefined||v===null||String(v).trim()===""){ p[f]=k[f]; c++; } }); }); return c; };
+  n=take(saved); try{ na=take(auditPlots); }catch(e){}
+  if(n){ try{ persist(); }catch(e){} }
+  if(na){ try{ persistAudit(); }catch(e){} }
+  if(n||na){ try{ renderSaved(); }catch(e){} }
+}
+/* What the cruiser emptied on purpose: the plot held a value and this edit removed it. The Sheet is
+   told, so it writes the cell empty instead of keeping its own value. The note stays with the plot
+   until the field is filled again. */
+const CLEARABLE_=["AGE","TRACT","PHOTONUM"];
+function clearedNote_(before, d){
+  const has=v=>!(v===undefined||v===null||String(v).trim()==="");
+  const was=Array.isArray(before&&before._cleared)?before._cleared:[];
+  const now=CLEARABLE_.filter(f=>!has(d[f]) && ((before&&has(before[f])) || was.indexOf(f)>=0));
+  if(now.length) d._cleared=now; else delete d._cleared;
+}
+const KEPT_OK_=["AGE","TRACT","PLOTSRC","POLYNAME","POLYAREA","AREASRC","PHOTOS","PHOTONUM"];
 function postRefuse_(why){ const e=new Error(why); e.fiWhy=why; return e; }
 function sheetPost_(o){
   const act=String((o&&o._action)||"");
@@ -1466,7 +1500,8 @@ function sheetPost_(o){
     let jp; try{ jp=r.json(); }catch(e){ return null; }
     return Promise.resolve(jp).then(j=>j, ()=>null);
   }).then(j=>{
-    if(j && typeof j==="object" && j.ok!==false){ if(j.capRefused) capSeen_(j, true); else if(j.capWarn) capSeen_(j.capWarn, false); }
+    if(j && typeof j==="object" && j.ok!==false){ if(j.capRefused) capSeen_(j, true); else if(j.capWarn) capSeen_(j.capWarn, false);
+      if(j.kept) { try{ adoptKept_(j.kept); }catch(e){} } }
     if(!j || typeof j!=="object" || j.ok!==false) return j||null;
     const err=String(j.error||"");
     if(err==="auth"){ try{ authCheck_(); }catch(e){} throw postRefuse_("auth"); }
@@ -1509,13 +1544,13 @@ function authCheck_(then){
     authNeeded=r.authRequired; _lsSet("fi_authreq", authNeeded?"Y":"");
     if(r.signedIn){
       authUser=r.username||authUser; authAccountName=r.accountName||""; _lsSet("fi_authuser",authUser); _lsSet("fi_authacct",authAccountName);
-      authLimited=!!r.limited;
+      authLimited=!!r.limited; _lsSet("fi_limited",authLimited?"Y":"");
       authSetBlocked_(false);
     } else {
       /* A token the backend no longer knows is dead: keep the username for the login screen, drop the token. */
       if(authToken && r.reason && r.reason!=="notoken") authForget_();
       const wasBlocked=authBlocked;
-      authSetBlocked_(authNeeded, r.reason||"");
+      authSetBlocked_(authMust_(), r.reason||"");
       if(authBlocked && !wasBlocked) loginOpen_(authMsg_(r.reason));
     }
     done(true);
@@ -1576,7 +1611,7 @@ function loginSubmit_(){
   apiPost_({_action:"login",username:user,pin:pin,device:dev}).then(r=>{
     _loginBusy=false; _loginPin=""; loginDraw_();
     if(r && r.ok && r.token){
-      authToken=String(r.token); authUser=r.username||user; authAccountName=r.accountName||""; authFresh_(r.limited);
+      authToken=String(r.token); authUser=r.username||user; authAccountName=r.accountName||""; authFresh_(r.limited); _lsSet("fi_limited",r.limited?"Y":"");
       _lsSet("fi_token",authToken); _lsSet("fi_authuser",authUser); _lsSet("fi_authacct",authAccountName);
       if(typeof r.authRequired==="boolean"){ authNeeded=r.authRequired; _lsSet("fi_authreq",authNeeded?"Y":""); }
       loginClose_(); authSetBlocked_(false);
@@ -1592,8 +1627,8 @@ function authFresh_(limited){ Object.keys(POST_REFUSED).forEach(k=>{ delete POST
   try{ sharedFields={}; fieldsToSend={}; _lsSet("fi_sharedfields",""); _lsSet("fi_fieldstosend",""); }catch(e){} }   // a different user may be a different account
 function logout_(){
   if(!authToken) return;
-  if(!confirm("Sign this phone out?\n\nYour plots stay on the phone."+(authNeeded?" They will not sync until someone logs in again.":""))) return;
-  const done=()=>{ authForget_(); authFresh_(false); closeInfoSheet_(); authSetBlocked_(authNeeded,"notoken"); toast("Signed out"); };
+  if(!confirm("Sign this phone out?\n\nYour plots stay on the phone."+(authMust_()?" They will not sync until someone logs in again.":""))) return;
+  const done=()=>{ authForget_(); authFresh_(false); closeInfoSheet_(); authSetBlocked_(authMust_(),"notoken"); toast("Signed out"); };
   if(!connected || isOffline()){ done(); return; }
   apiGet_("action=logout", 12000).then(done).catch(done);
 }
@@ -2708,7 +2743,7 @@ function finalizeSubmit(d){
   }
   const isUpdate = editingIndex!=null;
   if(!String(d.PLOTSRC||"").trim()) d.PLOTSRC="FIELD";   // note the source of a field-collected plot (imported plots use "IMPORTED")
-  if(isUpdate){ d._id = saved[editingIndex]._id || genId(); saved[editingIndex]=d; }
+  if(isUpdate){ d._id = saved[editingIndex]._id || genId(); clearedNote_(saved[editingIndex], d); saved[editingIndex]=d; }
   else { d._id = genId(); saved.push(d); }
   persist();
   send(d,isUpdate);
@@ -2984,6 +3019,7 @@ function pushAuditToSheet(){
     (dups?`\n\n${dups} are flagged as possible duplicates of plots you already have — they'll be sent too.`:"")+
     `\n\nThey'll be kept as imported plots so you can analyze them apart from your own (and combine later).`)) return;
   // Build the batch: strip local-only flags, tag as IMPORTED, carry the DONE completion marker.
+  { let named=0; auditPlots.forEach(p=>{ if(p && !p._id){ p._id=genId(); named++; } }); if(named) persistAudit(); }      // v376: so the pushed plot can be told from the ones still waiting
   const batch=auditPlots.filter(p=>!p._sent).map(p=>{ const q=Object.assign({},p); delete q._audit; delete q._dup; delete q._src; q._sent=false;
     q.PLOTSRC="IMPORTED";
     if(p._done){ q.FLAG=(String(q.FLAG||"").replace(/\bDONE\b/g,"").trim()+" DONE").trim(); }
@@ -2993,7 +3029,16 @@ function pushAuditToSheet(){
   // Read the starting count, push once, then read again to confirm how many landed.
   sheetPlotCount_(before=>{
     sheetPost_({ _action:"plotbatch", plots:batch })
-      .then(()=>{
+      .then(jr=>{
+        /* v376: when the Sheet's own answer can be read, use it. It says exactly what was written,
+           and it is the only answer an account other than the office's can get. */
+        const direct=(jr && typeof jr==="object" && jr.ok===true && jr.received===n) ? jr : null;
+        if(jr && typeof jr==="object" && jr.ok===false){      // the Sheet answered, and the answer was no
+          toast("The Sheet could not take them: "+String(jr.error||jr.message||"unknown reason").slice(0,120)+". Nothing was cleared from this phone.",true);
+          return; }
+        if(direct && direct.capRefused){
+          toast(`The account is at its plot limit: ${direct.capRefused} of ${n} were not written. Nothing was cleared from this phone — push again once the limit is raised.`,true);
+          return; }
         // give the Sheet a moment to finish writing, then verify
         setTimeout(()=>{ sheetPlotCount_(after=>{
           const added=(after>=0&&before>=0)?(after-before):-1;
@@ -3003,13 +3048,20 @@ function pushAuditToSheet(){
              the same mistake in another place: blue must mean "not in the Sheet yet", or a plot stays
              blue on that device for ever and keeps asking to be pushed. */
           auditPlots.filter(p=>p._sent).forEach(p=>{ if(!batch.some(b=>b._id===p._id)) saved.push(p); });
+          /* v376: the plots just pushed were sent as COPIES, so the originals here never got marked
+             and stayed blue, still asking to be pushed, with a second copy in the saved list. */
           auditPlots=auditPlots.filter(p=>!p._sent);
+          /* v376: the plots just pushed were sent as COPIES, so the originals here never got marked
+             and stayed blue, still asking to be pushed, with a second copy in the saved list. They
+             leave the blue set — but only once the Sheet has said it received every one of them. */
+          const dropPushed_=()=>{ const ids=new Set(batch.map(b=>b._id)); auditPlots=auditPlots.filter(p=>!ids.has(p._id)); persistAudit(); renderSaved(); };
           persistAudit(); persist(); renderSaved(); netDot();
           /* Ask the Sheet what it actually did, rather than inferring from a row count. A plot that
              matched an existing row on stand + date + coordinates is an update, not an addition —
              the count does not move and the plots look like they vanished. */
-          lastBatchResult_(res=>{
+          (direct ? (f=>f(direct)) : lastBatchResult_)(res=>{
             if(res && res.received===n){
+              dropPushed_();
               const a=res.appended||0, u=res.updated||0;
               if(a===n) toast(`✓ ${a} plot${a>1?"s":""} added — the Sheet now has ${res.rows} rows.`);
               else if(u) showInfoSheet_("Pushed — but mostly updates",
@@ -3054,7 +3106,7 @@ function sheetPlotCount_(cb){
   }catch(e){ fin(-1); }
 }
 // Trigger the separate AUDIT summary in the Sheet (analyzes only the AUDIT-tagged plots).
-function buildAuditSummary(){
+function buildAuditSummary(){ if(limitedNo_()) return;
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   jsonpAction_("auditsummary", r=>{
     if(r&&r.ok) toast(`Imported-set summary built (${r.plots} plots) — see the “Imported — …” tabs in the Sheet`);
@@ -3065,7 +3117,7 @@ function buildAuditSummary(){
 // Reversible: include audit plots in the main summary, or keep them separate. Audit rows stay tagged
 // either way, so you can flip this any time.
 let _auditIncluded=false;
-function setIncludeAudit_(on){
+function setIncludeAudit_(on){ if(limitedNo_()) return;
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   jsonpAction_("includeaudit&on="+(on?"1":"0"), r=>{
     if(r&&r.ok){ _auditIncluded=!!r.included; renderSaved();
@@ -3087,7 +3139,7 @@ function downloadSheet(){
 // everyone (runs as owner) and works offline once fetched.
 let _analysisSet="main";
 let _anCruiser="__all__";
-function openFullAnalysis(set){
+function openFullAnalysis(set){ if(limitedNo_()) return;
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   _analysisSet=set||"main"; _anCruiser="__all__";
   showDataSheet_("Full analysis — "+(_analysisSet==="audit"?"Imported plots":"Field plots"),
@@ -3155,7 +3207,7 @@ function emailSummaryPdf(tract){
     else { toast("PDF failed: "+((r&&r.error)||err||"unknown"),true); }
   });
 }
-function refreshAuditState_(){ if(!connected) return; jsonpAction_("auditstate", r=>{ if(r&&r.ok){ _auditIncluded=!!r.included; const b=$("includeAuditBtn"); if(b) b.textContent=_auditIncluded?"🔀 Imported in main: ON (tap for separate)":"🔀 Imported in main: OFF (tap to include)"; } }); }
+function refreshAuditState_(){ if(!connected) return; if(isLimited_()) return; jsonpAction_("auditstate", r=>{ if(r&&r.ok){ _auditIncluded=!!r.included; const b=$("includeAuditBtn"); if(b) b.textContent=_auditIncluded?"🔀 Imported in main: ON (tap for separate)":"🔀 Imported in main: OFF (tap to include)"; } }); }
 // Small JSONP helper for GET actions that return a result.
 // For LARGE data endpoints (full analysis), fetch the JSON directly instead of JSONP <script> injection —
 // script injection breaks if any Sheet cell contains a character that isn't valid mid-script. A normal
@@ -3354,7 +3406,7 @@ function renderSaved(){
     { const pbm=$("pushAuditBtnMore"); if(pbm) pbm.style.display=auditPlots.length?"block":"none"; }
     if(cb) cb.style.display=auditPlots.length?"block":"none";
     if(lb) lb.style.display=auditPlots.length?"block":"none";
-    if(asb) asb.style.display=connected?"block":"none";
+    if(asb && !asb._offHid) asb.style.display=connected?"block":"none";
     if(iab){ iab.style.display=connected?"block":"none"; iab.textContent=_auditIncluded?"🔀 Imported in main: ON (tap for separate)":"🔀 Imported in main: OFF (tap to include)"; } }
   if(auditPlots.length){
     c.innerHTML += `<div class="layer-hd" style="margin:14px 0 4px;color:#7ab0d8">Imported plots (${auditPlots.length})</div>`+
@@ -3963,6 +4015,8 @@ function zipStore(files){   // ZIP with "stored" (uncompressed) entries — enou
 
 /* ---------- More menu ---------- */
 function openMore(){ const mm=$("moreMenu"); mm.style.display="flex";
+  /* v375: tools that only the office account can run are not shown to any other account. */
+  try{ const lim=isLimited_(); mm.querySelectorAll("[data-office]").forEach(b=>{ if(lim){ if(!b._offHid){ b._offHid=true; b._offWas=b.style.display; } b.style.display="none"; } else if(b._offHid){ b._offHid=false; b.style.display=b._offWas||""; } }); }catch(e){}
   try{ const pbm=$("pushAuditBtnMore"); if(pbm) pbm.style.display=auditPlots.length?"block":"none"; }catch(e){}
   try{ const groups=mm.querySelectorAll("details.mgroup");
     groups.forEach(d=>{ d.open=false;
@@ -4687,7 +4741,7 @@ let _finderRows=[];
    device after the first load so it can be reread in the bush with no signal — it is a page of prose
    and the crew may well want it standing in the stand it describes. */
 let _descItems=[], _descPick=0, _descTracts=[], _descHasKey=false, _descMayGen=false, _descBusy="";
-function openInventoryDesc(){
+function openInventoryDesc(){ if(limitedNo_()) return;
   try{ if(STORE){ const c=STORE.getItem("fi_invdesc"); if(c) _descItems=JSON.parse(c)||[]; } }catch(e){}
   showDataSheet_("Inventory description",
     `<div id="idBody" style="font-size:13px;color:#cfe3d2">`+(_descItems.length?"Loading the latest…":"Loading…")+`</div>`);
@@ -4768,7 +4822,7 @@ function idRender_(err){
    server reports nothing left, showing progress as it goes. Stoppable, because it is a long job and
    the person holding the phone should be able to change their mind. */
 let _ngRun=false, _ngDone=0, _ngLeft=null, _ngErr="";
-function openNoteGen(){
+function openNoteGen(){ if(limitedNo_()) return;
   showDataSheet_("Write compartment summaries",`<div id="ngBody" style="font-size:13px;color:#cfe3d2"></div>`);
   _ngDone=0; _ngLeft=null; _ngErr=""; _ngRun=false; ngRender_();
 }
@@ -4884,7 +4938,7 @@ function mfRender_(err){
    the next few until none are left, and hands back links. Batched because one request cannot carry a
    whole property, and each PDF takes a few seconds to render. */
 let _crRun=false, _crDone=0, _crLeft=null, _crErr="", _crWant="all", _crTracts=[], _crComps=[], _crFiles=[], _crFolder="";
-function openCompRpt(){
+function openCompRpt(){ if(limitedNo_()) return;
   _crDone=0; _crLeft=null; _crErr=""; _crFiles=[]; _crRun=false;
   showDataSheet_("Compartment PDF reports",`<div id="crBody" style="font-size:13px;color:#cfe3d2">Loading…</div>`);
   if(!connected || isOffline()){ crRender_("Offline — the Sheet builds these, so this needs a connection."); return; }
@@ -5487,11 +5541,11 @@ function buildSheetSummary_(email,label){
   sc.src=SCRIPT_URL+sep+tokQ_()+"action=rebuild&callback="+cb+(email?("&email="+encodeURIComponent(email)):"");
   document.body.appendChild(sc);
 }
-function buildMySummary(){
+function buildMySummary(){ if(limitedNo_()) return;
   if(!cruiserEmail){ toast("Add your email first so we can find your plots",true); openCruiser(); return; }
   buildSheetSummary_(cruiserEmail,"your summary");
 }
-function buildAllSummary(){ buildSheetSummary_("","the full summary"); }
+function buildAllSummary(){ if(limitedNo_()) return; buildSheetSummary_("","the full summary"); }
 // Re-assign every saved plot's Stand/compartment from its GPS location (boundary file wins, else a drawn
 // polygon). Use after a compartment number/boundary changes. Sent plots are updated in the Sheet in place.
 // Bulk-assign the Tract / property name to plots already collected (e.g. it was missed in the field).
@@ -5576,7 +5630,7 @@ function restoreDeletedPlot(btn){
     else { toast("Restore failed: "+esc((r&&r.error)||err||"error"),true); btn.disabled=false; btn.textContent="↩ Restore"; }
   });
 }
-function openReportModal(){
+function openReportModal(){ if(limitedNo_()) return;
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   if(!cruiserEmail){ toast("Add your email in “Entered by” first — that's where the report goes",true); openCruiser(); return; }
   if(isOffline()){ toast("Need internet to build and email the report",true); return; }
@@ -7152,7 +7206,7 @@ function noteGenPrompt_(stand){
     `<div style="font-size:11px;color:#5a7a62">No crew-note summary for this compartment yet.</div>`+
     `<button type="button" onclick="genNote_('${safe}')" style="margin-top:5px;padding:6px 10px;border-radius:6px;border:1px solid #2f7a44;background:#123a1c;color:#eafae8;font:inherit;font-size:12px">Write it now</button></div>`;
 }
-function genNote_(stand){
+function genNote_(stand){ if(limitedNo_()) return;
   if(!connected || isOffline()){ toast("Need a connection to write the summary",true); return; }
   _genBusy=stand; renderBoundPopup_();
   const cb="__gn"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
@@ -7227,7 +7281,7 @@ function jsonp_(query, done, ms){
   sc.src=SCRIPT_URL+sep+tokQ_()+query+"&callback="+cb;
   document.body.appendChild(sc);
 }
-function compRptOne_(stand){
+function compRptOne_(stand){ if(limitedNo_()) return;
   if(!stand) return;
   if(!connected || isOffline()){ toast("Need a connection — the Sheet builds the report",true); return; }
   toast("Building the report for "+stand+"…");
@@ -9784,7 +9838,7 @@ function mailExportFailed_(msg, inDrive){
         `and run <b>friEmailExports</b> from the add-on.`)+
     `</div>`);
 }
-function mailExport_(base){
+function mailExport_(base){ if(limitedNo_()) return;
   closeInfoSheet_();
   const to=String(cruiserEmail||"").trim();
   if(!to){ toast("Set your email under \"Entered by\" first",true); return; }
