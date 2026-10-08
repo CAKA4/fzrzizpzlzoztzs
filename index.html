@@ -709,6 +709,10 @@
     <div id="layerStatus" class="layer-status"></div>
     <div id="layerVisList"></div>
 
+    <details class="lgroup" id="lgroupImg"><summary>🛰 Aerial photo — <span id="imgName">Esri world imagery</span></summary>
+      <div class="lgroup-body" id="imgList"></div>
+    </details>
+
     <details class="lgroup"><summary>📁 Load &amp; import layers</summary>
       <div class="lgroup-body">
         <button type="button" onclick="closeLayersMenu();openImportPlots()">📥 Import plots (another device / source)</button>
@@ -767,6 +771,17 @@
       </div>
     </details>
 
+    <details class="lgroup" id="lgroupProp"><summary>🏠 Property &amp; provincial layers</summary>
+      <div class="lgroup-body">
+        <div class="map-field"><label>Property shown on the map</label><select id="propActiveSel" onchange="propPickActive_(this.value)"></select></div>
+        <button type="button" onclick="closeLayersMenu();openPropSheet_()">🏠 Property details &amp; MFTIP areas</button>
+        <div id="lioStatus" class="ls-muted" style="font-size:11px;line-height:1.4;padding:2px"></div>
+        <div id="lioToggles"></div>
+        <button type="button" onclick="closeLayersMenu();lioEnsure_(propActiveTract_(),true)">↻ Refresh provincial layers</button>
+        <div class="ls-muted" style="font-size:10px;line-height:1.4;padding:2px">Lots and concessions, roads, water, wetlands, contours and buildings from Land Information Ontario, fetched for the property and kept on this phone. Contains information licensed under the Open Government Licence – Ontario.</div>
+      </div>
+    </details>
+
     <details class="lgroup"><summary>👥 Crew &amp; live location</summary>
       <div class="lgroup-body">
         <button type="button" id="crewBtn" onclick="closeLayersMenu();fetchCrew(false)">👥 Crew plots — tap to refresh</button>
@@ -807,6 +822,7 @@
   <div id="fmap"></div>
   <div class="map-rail">
     <!-- tap-to-place button removed: use "＋ Create inventory plot" (crosshair/GPS) instead; tapping conflicted with selecting polygons -->
+    <button class="map-tool" id="toolFind" type="button" onclick="findOpen_()" title="Find an address"><span class="mt-i">🔎</span><span class="mt-l">Find</span></button>
     <button class="map-tool" id="toolTrack" type="button" onclick="toggleTrack()" title="Record where you walk"><span class="mt-i">⏺</span><span class="mt-l">Track</span></button>
     <button class="map-tool" id="toolMeasure" type="button" onclick="toggleMeasure()" title="Measure a distance or an area"><span class="mt-i">📐</span><span class="mt-l">Measure</span></button>
     <button class="map-tool" id="toolRoute" type="button" onclick="toggleRoute()" title="Lay out a cruise line to follow"><span class="mt-i">〰️</span><span class="mt-l">Route</span></button>
@@ -818,6 +834,15 @@
   </div>
   <div class="pdf-opacity-bar" id="pdfOpacityBar" style="display:none">
     <label>PDF</label><input type="range" id="pdfOpacity" min="0" max="100" value="85" oninput="setPDFOpacity(this.value)"><span id="pdfOpacityVal">85%</span>
+  </div>
+  <!-- v381: find an address -->
+  <div id="findBar" style="display:none;position:absolute;left:10px;right:72px;top:calc(64px + env(safe-area-inset-top));z-index:5450;background:rgba(15,30,13,.96);border:1px solid #33623a;border-radius:10px;padding:8px;box-shadow:0 2px 12px rgba(0,0,0,.5)">
+    <form onsubmit="event.preventDefault();findGo_()" style="display:flex;gap:6px;margin:0">
+      <input id="findInput" type="search" enterkeyhint="search" autocomplete="off" placeholder="Address, e.g. 4250 Aurora Rd, Stouffville" style="flex:1;min-width:0;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">
+      <button type="submit" style="flex:none;padding:8px 10px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">Go</button>
+      <button type="button" onclick="findClose_()" style="flex:none;padding:8px 10px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#cdebcf;font:inherit;font-size:13px">✕</button>
+    </form>
+    <div id="findResults" style="margin-top:6px;max-height:40vh;overflow-y:auto;-webkit-overflow-scrolling:touch"></div>
   </div>
   <div class="map-legend" id="mapLegend">
     <!-- The legend grows with the crew, so it can cover a good part of a phone screen. Tapping the
@@ -922,14 +947,14 @@
     <div class="modal-title" style="display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--card);padding:6px 0 12px;margin:0 0 8px;z-index:2">Tools <button type="button" onclick="closeMore()" style="background:#16271a;border:1px solid #33623a;border-radius:8px;color:#cdebcf;width:40px;height:40px;font-size:20px;line-height:1;cursor:pointer;flex:none" aria-label="Close">✕</button></div>
       <details class="mgroup" open><summary>📈 View the analysis</summary>
         <button type="button" onclick="closeMore();openSummary()">📊 Stand summary — quick totals per stand</button>
-        <button type="button" data-office="1" onclick="closeMore();openFullAnalysis('main')">📈 Full analysis — every summary tab</button>
+        <button type="button" onclick="closeMore();openFullAnalysis('main')">📈 Full analysis — every summary tab</button>
         <button type="button" onclick="closeMore();openDataTable()">▦ Plot data table — every field, every plot</button>
         <button type="button" onclick="closeMore();openPlotFinder()">🔎 Who did what, and when — by crew &amp; date</button>
       </details>
 
       <details class="mgroup"><summary>✍️ Written summaries</summary>
-        <button type="button" data-office="1" onclick="closeMore();openInventoryDesc()">📖 Inventory description — a page per tract</button>
-        <button type="button" data-office="1" onclick="closeMore();openNoteGen()">✎ Write compartment summaries (all missing)</button>
+        <button type="button" onclick="closeMore();openInventoryDesc()">📖 Inventory description — a page per tract</button>
+        <button type="button" onclick="closeMore();openNoteGen()">✎ Write compartment summaries (all missing)</button>
       </details>
 
       <details class="mgroup"><summary>📤 Send &amp; export</summary>
@@ -952,10 +977,10 @@
              tract — and the next question was "how do I email the Excel summaries for the tract I
              finished today?", which is exactly what this button does. Say all four things it does:
              summaries, Excel or PDF, one tract or all, emailed. -->
-        <button type="button" data-office="1" onclick="closeMore();openReportModal()">📗 Email me the summaries — Excel or PDF, by tract</button>
+        <button type="button" onclick="closeMore();openReportModal()">📗 Email me the summaries — Excel or PDF, by tract</button>
         <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:4px 2px 2px">Plot data plus every summary tab, for one property or all of them. Rebuilt from the Sheet first, so it includes today's plots once they have synced.</div>
         <button type="button" onclick="closeMore();openMapFiles()">🗂 Map files on Drive — tracks, routes, areas</button>
-        <button type="button" data-office="1" onclick="closeMore();openCompRpt()">📄 Compartment PDF reports — one, a tract, or all</button>
+        <button type="button" onclick="closeMore();openCompRpt()">📄 Compartment PDF reports — one, a tract, or all</button>
       </details>
 
       <details class="mgroup"><summary>🗂 Plots &amp; stands</summary>
@@ -963,7 +988,7 @@
         <button type="button" onclick="closeMore();openTractAssign()">🏷 Assign tract / property to plots</button>
         <button type="button" onclick="closeMore();openDeletedPlots()">↩ Restore deleted plots</button>
         <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:6px 2px 2px">Rebuilding the Sheet&rsquo;s summary tabs takes a few minutes and is best started from the Sheet itself.</div>
-        <button type="button" data-office="1" onclick="closeMore();buildAllSummary()">🗂 Rebuild the Sheet&rsquo;s summary tabs</button>
+        <button type="button" onclick="closeMore();buildAllSummary()">🗂 Rebuild the Sheet&rsquo;s summary tabs</button>
       </details>
 
       <details class="mgroup" id="auditGroup"><summary>🔍 Imported plots</summary>
@@ -1174,7 +1199,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-08 · v377";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-08 · v382";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1428,9 +1453,13 @@ function apiPost_(o, ms){
    Until a readable answer has been seen, saves go the old way (no-cors), so nothing here can make a
    phone that syncs today stop syncing. */
 const POST_REFUSED={};
-const POST_LABEL={photo:"Photo upload", mapfile:"Saving files to Drive", layerput:"Adding a shared layer"};
+const POST_LABEL={photo:"Photo upload", mapfile:"Saving files to Drive", layerput:"Adding a shared layer", propsave:"Saving property details", compsave:"Saving compartment details", lioput:"Keeping provincial layers in Drive", liolog:"Reporting a provincial-layer problem"};
 let authLimited=false;       // an account other than the administrator's: summaries, emails, exports and AI are not open to it yet
 function isLimited_(){ return !!((authToken&&authLimited) || (!authToken&&limitedPhone_())); }
+/* v379: on an account other than the office's, mail from the app goes to the address on the user's
+   login, whatever "Entered by" says — the Sheet decides. Here only for the wording and the checks. */
+function mailNeedsEmail_(){ return !isLimited_() && !String(cruiserEmail||"").trim(); }
+function mailToWords_(){ return isLimited_() ? "the email address on your login" : String(cruiserEmail||""); }
 function limitedNo_(){ if(isLimited_()){ toast("Not available to this account yet — it belongs to the office account",true); return true; } return false; }
 /* v374 — the account's plot limit. `full`: the Sheet has refused NEW plots (corrections still go). They
    stay on the phone; the automatic resend holds off for ten minutes so a full account is not asked
@@ -1589,6 +1618,8 @@ function authCheck_(then){
   apiGet_("action=authstatus").then(r=>{
     if(!r || r.ok!==true || typeof r.authRequired!=="boolean"){ done(false); return; }   // a backend older than v365
     authBackendOk=true;
+    /* v380: property edits that were waiting for a backend whose replies can be read. */
+    try{ if(propHasWaiting_()) setTimeout(()=>{ if(propBackendOk) propPush_(); else propSync_(); },1500); }catch(e){}
     authNeeded=r.authRequired; _lsSet("fi_authreq", authNeeded?"Y":"");
     if(r.signedIn){
       authUser=r.username||authUser; authAccountName=r.accountName||""; _lsSet("fi_authuser",authUser); _lsSet("fi_authacct",authAccountName);
@@ -1688,7 +1719,7 @@ function accountPanel_(){
     row("This phone", authToken?`<span style="color:#7fd0a0">logged in as ${esc(authUser||"—")}</span>`:`<span style="color:${authNeeded?"#e8a33a":"#8fae95"}">not logged in</span>`)+
     (authToken&&authAccountName?row("Account", esc(authAccountName)):"")+
     `</table>`+
-    (authToken&&authLimited?`<div style="color:#e8a33a;font-size:12px;margin-top:10px;line-height:1.4">This account can collect and sync plots, photos, tracts, areas and species, save its map files to Drive, and share map layers with its own crew. The summaries, emailed reports and written summaries are not open to it yet.</div>`:"")+
+    (authToken&&authLimited?`<div style="color:#e8a33a;font-size:12px;margin-top:10px;line-height:1.4">This account can collect and sync plots, photos, tracts, areas and species, save map files to Drive, share map layers with its own crew, build its own summaries, read the full analysis, email itself its summaries and compartment PDFs (to the address on your login), and ask for AI written summaries within a daily allowance. The imported-plot set and the analysis web page are not open to it.</div>`:"")+
     `<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">`+
       (authToken?`<button class="btn-mini" type="button" onclick="logout_()">Sign out</button>`
                 :`<button class="btn submit" type="button" onclick="closeInfoSheet_();loginOpen_()">Log in</button>`)+
@@ -3190,14 +3221,14 @@ function downloadSheet(){
 // everyone (runs as owner) and works offline once fetched.
 let _analysisSet="main";
 let _anCruiser="__all__";
-function openFullAnalysis(set){ if(limitedNo_()) return;
+function openFullAnalysis(set){ if(set==="audit" && limitedNo_()) return;   // v378: an outside account sees its own analysis; the imported set stays the office's
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   _analysisSet=set||"main"; _anCruiser="__all__";
   showDataSheet_("Full analysis — "+(_analysisSet==="audit"?"Imported plots":"Field plots"),
     `<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
        <button class="btn ghost" type="button" onclick="openFullAnalysis('main')" ${_analysisSet==="main"?'style="border-color:#2f7a44;color:#8fe6a0"':""}>Field plots</button>
-       <button class="btn ghost" type="button" onclick="openFullAnalysis('audit')" ${_analysisSet==="audit"?'style="border-color:#2f7a44;color:#8fe6a0"':""}>Imported plots</button>
-       <button class="btn ghost" type="button" onclick="openAnalysisPage()">↗ Web page</button>
+       ${isLimited_()?"":`<button class="btn ghost" type="button" onclick="openFullAnalysis('audit')" ${_analysisSet==="audit"?'style="border-color:#2f7a44;color:#8fe6a0"':""}>Imported plots</button>
+       <button class="btn ghost" type="button" onclick="openAnalysisPage()">↗ Web page</button>`}
        <button class="btn ghost" type="button" onclick="emailSummaryPdf()">📄 PDF</button>
      </div>
      <select id="anCruiserSel" onchange="setAnCruiser(this.value)" style="width:100%;margin-bottom:8px;display:none"></select>
@@ -3242,11 +3273,12 @@ function loadFullAnalysis(useCruiser){
 }
 // The same analysis as a standalone web page (opens in the browser; shareable, works for everyone).
 function openAnalysisPage(){
-  const url=SCRIPT_URL+(SCRIPT_URL.includes("?")?"&":"?")+"action=summaryhtml&set="+encodeURIComponent(_analysisSet||"main");
+  if(limitedNo_()) return;
+  const url=SCRIPT_URL+(SCRIPT_URL.includes("?")?"&":"?")+tokQ_()+"action=summaryhtml&set="+encodeURIComponent(_analysisSet||"main");   // v378: with login ON the page needs the phone's login too
   window.open(url,"_blank");
 }
 // Build a landscape, fit-to-width PDF of the summary tabs on the server and email it (printable / shareable).
-function emailSummaryPdf(tract){
+function emailSummaryPdf(tract){ if(_analysisSet==="audit" && limitedNo_()) return;
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   if(isOffline()){ toast("Need internet to build the PDF",true); return; }
   const t=String(tract||"").trim();
@@ -3595,7 +3627,7 @@ function flushQueue(manual){
       });
   });
 }
-window.addEventListener("online", ()=>{ toast("Back online — sending queued plots"); netDot(); renderSaved(); authCheck_(); try{ setTimeout(sharedFieldsFetch_, 4000); }catch(e){} flushQueue(); flushEditBatch_(); flushSpecies(); fetchSpecies(); flushTracts(); fetchTracts(); flushPhotos(); flushDeletes_(); });
+window.addEventListener("online", ()=>{ toast("Back online — sending queued plots"); netDot(); renderSaved(); authCheck_(); try{ setTimeout(sharedFieldsFetch_, 4000); }catch(e){} flushQueue(); flushEditBatch_(); flushSpecies(); fetchSpecies(); flushTracts(); fetchTracts(); flushPhotos(); flushDeletes_(); try{ if(Object.keys(propDirty.props).length||Object.keys(propDirty.comps).length) setTimeout(()=>propSync_(),6000); }catch(e){} });
 window.addEventListener("offline", ()=>{ netDot(); renderSaved(); });
 /* Species and tracts were missing from this. An addition that failed to confirm only got another
    chance on the next "online" event or the next time somebody added a plant — which on a phone
@@ -4268,7 +4300,7 @@ function tileXY_(lat,lon,z){ lon=((lon+180)%360+360)%360-180;      // a map pann
 /* b = {s,w,n,e} in degrees */
 function tileCount_(b,zmin,zmax){ let n=0; for(let z=zmin;z<=zmax;z++){ const a=tileXY_(b.n,b.w,z), c=tileXY_(b.s,b.e,z); n+=(c[0]-a[0]+1)*(c[1]-a[1]+1); } return n; }
 function tileList_(b,zmin,zmax){ const out=[]; for(let z=zmin;z<=zmax;z++){ const a=tileXY_(b.n,b.w,z), c=tileXY_(b.s,b.e,z);
-  for(let x=a[0];x<=c[0];x++) for(let y=a[1];y<=c[1];y++) out.push(TILE_URL_+z+"/"+y+"/"+x); } return out; }
+  for(let x=a[0];x<=c[0];x++) for(let y=a[1];y<=c[1];y++) out.push(imgTileUrl_(imgSource_(),x,y,z)); } return out; }     // v382: the photo the map is showing
 function boundsPad_(b,m){ const dLat=m/111320, dLon=m/(111320*Math.max(0.2,Math.cos((b.s+b.n)/2*Math.PI/180))); return {s:b.s-dLat,n:b.n+dLat,w:b.w-dLon,e:b.e+dLon}; }
 function geoBounds_(g){ let s=90,n=-90,w=180,e=-180,any=false;
   const walk=c=>{ if(!Array.isArray(c)) return; if(typeof c[0]==="number" && typeof c[1]==="number"){ if(isFinite(c[0])&&isFinite(c[1])){ any=true; w=Math.min(w,c[0]); e=Math.max(e,c[0]); s=Math.min(s,c[1]); n=Math.max(n,c[1]); } return; } c.forEach(walk); };
@@ -4333,8 +4365,11 @@ async function tilesDownload_(urls){
     const worker=async()=>{ while(next<urls.length && !job.cancel && !out.full){ const u=urls[next++];
         try{
           if(await c.match(u)){ out.had++; }
-          else { const res=await fetch(u,{mode:"cors"});
-            if(res && res.ok){ try{ await c.put(u,res); out.got++; }catch(e){ if(e && /quota/i.test(String(e.name||e.message||e))) out.full=true; else out.failed++; } }
+          else { let res=null;
+            /* A municipal server may not send the headers a readable (CORS) copy needs. The map shows
+               its tiles either way, so keep an opaque copy rather than none. */
+            try{ res=await fetch(u,{mode:"cors"}); }catch(e){ res=await fetch(u,{mode:"no-cors"}); }
+            if(res && (res.ok || res.type==="opaque")){ try{ await c.put(u,res); out.got++; }catch(e){ if(e && /quota/i.test(String(e.name||e.message||e))) out.full=true; else out.failed++; } }
             else out.failed++; }
         }catch(e){ out.failed++; }
         if((out.got+out.had+out.failed)%10===0) prog(); } };
@@ -4792,7 +4827,7 @@ let _finderRows=[];
    device after the first load so it can be reread in the bush with no signal — it is a page of prose
    and the crew may well want it standing in the stand it describes. */
 let _descItems=[], _descPick=0, _descTracts=[], _descHasKey=false, _descMayGen=false, _descBusy="";
-function openInventoryDesc(){ if(limitedNo_()) return;
+function openInventoryDesc(){
   try{ if(STORE){ const c=STORE.getItem("fi_invdesc"); if(c) _descItems=JSON.parse(c)||[]; } }catch(e){}
   showDataSheet_("Inventory description",
     `<div id="idBody" style="font-size:13px;color:#cfe3d2">`+(_descItems.length?"Loading the latest…":"Loading…")+`</div>`);
@@ -4873,7 +4908,7 @@ function idRender_(err){
    server reports nothing left, showing progress as it goes. Stoppable, because it is a long job and
    the person holding the phone should be able to change their mind. */
 let _ngRun=false, _ngDone=0, _ngLeft=null, _ngErr="";
-function openNoteGen(){ if(limitedNo_()) return;
+function openNoteGen(){
   showDataSheet_("Write compartment summaries",`<div id="ngBody" style="font-size:13px;color:#cfe3d2"></div>`);
   _ngDone=0; _ngLeft=null; _ngErr=""; _ngRun=false; ngRender_();
 }
@@ -4989,7 +5024,7 @@ function mfRender_(err){
    the next few until none are left, and hands back links. Batched because one request cannot carry a
    whole property, and each PDF takes a few seconds to render. */
 let _crRun=false, _crDone=0, _crLeft=null, _crErr="", _crWant="all", _crTracts=[], _crComps=[], _crFiles=[], _crFolder="";
-function openCompRpt(){ if(limitedNo_()) return;
+function openCompRpt(){
   _crDone=0; _crLeft=null; _crErr=""; _crFiles=[]; _crRun=false;
   showDataSheet_("Compartment PDF reports",`<div id="crBody" style="font-size:13px;color:#cfe3d2">Loading…</div>`);
   if(!connected || isOffline()){ crRender_("Offline — the Sheet builds these, so this needs a connection."); return; }
@@ -5030,7 +5065,7 @@ function crRender_(err){
     (_crErr?`<div style="color:#e8a33a;font-size:12px;margin-top:8px;line-height:1.4">${esc(_crErr)}</div>`:"")+
     `<button type="button" onclick="crStart_()" style="display:block;width:100%;margin-top:10px;padding:12px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">📄 ${_crDone?"Build more":"Build the reports"}</button>`+
     files+
-    (_crFolder?`<a href="${esc(_crFolder)}" target="_blank" rel="noopener" style="display:block;margin-top:10px;padding:10px;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#a9c9b0;text-decoration:none;text-align:center;font-size:12px">📁 Open the reports folder in Drive</a>`:"");
+    (_crFolder&&!isLimited_()?`<a href="${esc(_crFolder)}" target="_blank" rel="noopener" style="display:block;margin-top:10px;padding:10px;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#a9c9b0;text-decoration:none;text-align:center;font-size:12px">📁 Open the reports folder in Drive</a>`:"");
 }
 function crStop_(){ _crRun=false; crRender_(); }
 function crStart_(){ _crRun=true; _crErr=""; crRender_(); crBatch_(); }
@@ -5587,7 +5622,9 @@ function buildSheetSummary_(email,label){
       if(resp&&resp.ok){
         if(resp.url) lastSheetUrl=resp.url;
         const p=resp.plots||0, s=resp.stands||0;
-        toast(`Summary ready — ${p} plot${p==1?"":"s"} across ${s} stand${s==1?"":"s"}. Open your Google Sheet to view or export it.`);
+        toast(`Summary ready — ${p} plot${p==1?"":"s"} across ${s} stand${s==1?"":"s"}. `+(isLimited_()?"Open ⋯ More → Full analysis to read it.":"Open your Google Sheet to view or export it."));
+      } else if(resp && resp.error){
+        toast("Could not build the summary: "+String(resp.error).slice(0,140),true);
       } else {
         toast(email?"No plots found for your email yet — submit a plot first":"No plot data to summarise yet",true);
       }
@@ -5596,11 +5633,11 @@ function buildSheetSummary_(email,label){
   sc.src=SCRIPT_URL+sep+tokQ_()+"action=rebuild&callback="+cb+(email?("&email="+encodeURIComponent(email)):"");
   document.body.appendChild(sc);
 }
-function buildMySummary(){ if(limitedNo_()) return;
+function buildMySummary(){
   if(!cruiserEmail){ toast("Add your email first so we can find your plots",true); openCruiser(); return; }
   buildSheetSummary_(cruiserEmail,"your summary");
 }
-function buildAllSummary(){ if(limitedNo_()) return; buildSheetSummary_("","the full summary"); }
+function buildAllSummary(){ buildSheetSummary_("","the full summary"); }
 // Re-assign every saved plot's Stand/compartment from its GPS location (boundary file wins, else a drawn
 // polygon). Use after a compartment number/boundary changes. Sent plots are updated in the Sheet in place.
 // Bulk-assign the Tract / property name to plots already collected (e.g. it was missed in the field).
@@ -5685,9 +5722,9 @@ function restoreDeletedPlot(btn){
     else { toast("Restore failed: "+esc((r&&r.error)||err||"error"),true); btn.disabled=false; btn.textContent="↩ Restore"; }
   });
 }
-function openReportModal(){ if(limitedNo_()) return;
+function openReportModal(){
   if(!connected){ toast("Connect to a Sheet first",true); return; }
-  if(!cruiserEmail){ toast("Add your email in “Entered by” first — that's where the report goes",true); openCruiser(); return; }
+  if(mailNeedsEmail_()){ toast("Add your email in “Entered by” first — that's where the report goes",true); openCruiser(); return; }
   if(isOffline()){ toast("Need internet to build and email the report",true); return; }
   const sel=$("reportTractSel"), cur=$("TRACT").value, curT=(cur&&cur!==ADD_TRACT)?cur:"";
   // Only list tracts that still have plots in the Sheet — filled by fetchTractList_ below. (A tract whose
@@ -5711,10 +5748,10 @@ function runReportPdf(){ const t=$("reportTractSel").value; closeReportModal(); 
 // Email the workbook (data + all summary tabs) to the person's own address. A tract analyses that property alone.
 function emailReport(tract){
   if(!connected){ toast("Connect to a Sheet first",true); return; }
-  if(!cruiserEmail){ toast("Add your email in “Entered by” first — that's where the report goes",true); openCruiser(); return; }
+  if(mailNeedsEmail_()){ toast("Add your email in “Entered by” first — that's where the report goes",true); openCruiser(); return; }
   if(isOffline()){ toast("Need internet to email the report",true); return; }
   const t=String(tract||"").trim();
-  toast(`Analyzing ${t?`“${t}”`:"all plots"} and emailing to ${cruiserEmail} — this can take a moment…`);
+  toast(`Analyzing ${t?`“${t}”`:"all plots"} and emailing to ${mailToWords_()} — this can take a moment…`);
   const cb="__mail"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?";
   const sc=document.createElement("script");
   const cleanup=()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
@@ -6558,6 +6595,7 @@ async function openMap(){
   drawTrack();
   drawRoute();
   drawPoly();
+  try{ lioOnMapOpen_(); }catch(e){}   // v380: the chosen property's outline and provincial layers
   startMapGPS();
   if(!captureMode){ const ch=$("mapCrosshair"); if(ch) ch.style.display="none"; resetDropBar(); }   // default: New-plot button, no crosshair
   resumeSharing_();
@@ -6596,7 +6634,7 @@ function initMap(){
   fmap=L.map("fmap",{zoomControl:false,attributionControl:false,preferCanvas:true}).setView([44.13,-79.49],14);
   // crossOrigin lets the service worker store real (non-opaque) tiles, so imagery seen in signal
   // is still there offline. See TILE_CACHE in sw.js.
-  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:22,maxNativeZoom:19,crossOrigin:true}).addTo(fmap);
+  setImagery_(imageryId,true);      // v382: Esri, or York Region / Simcoe County photography (chosen under Layers)
   L.control.zoom({position:"bottomright"}).addTo(fmap);
   fpins=L.layerGroup().addTo(fmap); fauditpins=L.layerGroup().addTo(fmap); fboundLayer=L.layerGroup().addTo(fmap); flabelLayer=L.layerGroup().addTo(fmap); refLayer=L.layerGroup().addTo(fmap); freflabelLayer=L.layerGroup().addTo(fmap); crewLayer=L.layerGroup().addTo(fmap); liveLayer=L.layerGroup().addTo(fmap); crewRouteLayer=L.layerGroup().addTo(fmap); photoLayer=L.layerGroup().addTo(fmap);
   applyLayerVis_();
@@ -6606,7 +6644,7 @@ function initMap(){
     if(nearbyPlotPopup_(e.latlng)) return;                    // a plot pin near the tap wins over the boundary
     { const bf=boundaryFeatureAt(e.latlng.lat,e.latlng.lng); if(bf) showBoundPopup(e.latlng,bf); } });
   // Keep taps on the on-map controls from also being treated as map clicks (which in draw modes would drop a stray point).
-  try{ ["measureBar","routeBar","polyBar","mapDrop","layersMenu"].forEach(id=>{ const el=$(id); if(el){ L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); } });
+  try{ ["measureBar","routeBar","polyBar","mapDrop","layersMenu","findBar"].forEach(id=>{ const el=$(id); if(el){ L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); } });
     const sc=document.querySelector(".layers-scroll"); if(sc){ L.DomEvent.disableClickPropagation(sc); L.DomEvent.disableScrollPropagation(sc); }
     const rail=document.querySelector(".map-rail"); if(rail) L.DomEvent.disableClickPropagation(rail); }catch(e){}
   fmap.on("moveend zoomend",()=>{ try{ renderLabels(); renderRefLabels(); }catch(e){}
@@ -7261,7 +7299,7 @@ function noteGenPrompt_(stand){
     `<div style="font-size:11px;color:#5a7a62">No crew-note summary for this compartment yet.</div>`+
     `<button type="button" onclick="genNote_('${safe}')" style="margin-top:5px;padding:6px 10px;border-radius:6px;border:1px solid #2f7a44;background:#123a1c;color:#eafae8;font:inherit;font-size:12px">Write it now</button></div>`;
 }
-function genNote_(stand){ if(limitedNo_()) return;
+function genNote_(stand){
   if(!connected || isOffline()){ toast("Need a connection to write the summary",true); return; }
   _genBusy=stand; renderBoundPopup_();
   const cb="__gn"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
@@ -7292,14 +7330,14 @@ function genNote_(stand){ if(limitedNo_()) return;
    phones do not have — so the two routes that need nothing are offered first, and the Drive link is
    kept but labelled for what it costs. */
 function rptReady_(f){
-  const mail=String(cruiserEmail||"").trim();
+  const mail=mailNeedsEmail_()?"":mailToWords_();     // v379: another account's mail goes to its login's address
   showInfoSheet_("Report ready",
     `<div style="color:#a9c9b0;font-size:13px;line-height:1.55;margin-bottom:10px">${esc(f.name)}</div>`+
     `<button type="button" onclick="rptSave_('${esc(f.id)}')" style="display:block;width:100%;text-align:left;padding:12px;margin:0 0 7px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">⬇ Save to this device<div style="color:#8fae95;font-size:11px;margin-top:2px">No account needed</div></button>`+
     (mail
       ? `<button type="button" onclick="rptMail_('${esc(f.id)}')" style="display:block;width:100%;text-align:left;padding:12px;margin:0 0 7px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">✉️ Email it to me<div style="color:#8fae95;font-size:11px;margin-top:2px">${esc(mail)}</div></button>`
       : `<div style="color:#e8a33a;font-size:11px;line-height:1.4;margin:0 0 7px">Set your email in Tools → This device to have reports sent to you.</div>`)+
-    `<a href="${esc(f.url)}" target="_blank" rel="noopener" style="display:block;padding:11px;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#a9c9b0;text-decoration:none;text-align:center;font-size:12px">📄 Open in Drive <span style="color:#5a7a62">— needs a Google account</span></a>`);
+    (isLimited_()?"":`<a href="${esc(f.url)}" target="_blank" rel="noopener" style="display:block;padding:11px;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#a9c9b0;text-decoration:none;text-align:center;font-size:12px">📄 Open in Drive <span style="color:#5a7a62">— needs a Google account</span></a>`));
 }
 function rptSave_(id){
   if(!id) return;
@@ -7316,10 +7354,10 @@ function rptSave_(id){
 }
 function rptMail_(id){
   const to=String(cruiserEmail||"").trim();
-  if(!to){ toast("Set your email in Tools first",true); return; }
+  if(mailNeedsEmail_()){ toast("Set your email in Tools first",true); return; }
   toast("Sending…");
   jsonp_("action=comprptmail&id="+encodeURIComponent(id)+"&to="+encodeURIComponent(to), r=>{
-    if(r && r.ok) toast("Sent to "+to);
+    if(r && r.ok) toast("Sent to "+(r.to||to));
     else toast((r&&r.error)||"Couldn't send it",true);
   }, 60000);
 }
@@ -7336,7 +7374,7 @@ function jsonp_(query, done, ms){
   sc.src=SCRIPT_URL+sep+tokQ_()+query+"&callback="+cb;
   document.body.appendChild(sc);
 }
-function compRptOne_(stand){ if(limitedNo_()) return;
+function compRptOne_(stand){
   if(!stand) return;
   if(!connected || isOffline()){ toast("Need a connection — the Sheet builds the report",true); return; }
   toast("Building the report for "+stand+"…");
@@ -8577,7 +8615,7 @@ function exportTrackShp(){
   toast(`Track shapefile (UTM 17N) exported — ${trackLog.length} pts`);
 }
 
-function toggleLayersMenu(){ const m=$("layersMenu"); const show=m.style.display==="none"; if(show){ renderLayerList(); updateLayerStatus(); setTrackBtn(); m.querySelectorAll("details.lgroup").forEach(d=>d.open=false); const fg=$("lgroupFields"); if(fg && typeof boundFiles!=="undefined" && boundFiles.length) fg.open=true; } m.style.display = show?"flex":"none"; document.body.classList.toggle("layers-open", show); }
+function toggleLayersMenu(){ const m=$("layersMenu"); const show=m.style.display==="none"; if(show){ renderLayerList(); updateLayerStatus(); setTrackBtn(); try{ propMenuOpen_(); }catch(e){} try{ imgRender_(); }catch(e){} m.querySelectorAll("details.lgroup").forEach(d=>d.open=false); const fg=$("lgroupFields"); if(fg && typeof boundFiles!=="undefined" && boundFiles.length) fg.open=true; } m.style.display = show?"flex":"none"; document.body.classList.toggle("layers-open", show); }
 function closeLayersMenu(){ $("layersMenu").style.display="none"; document.body.classList.remove("layers-open"); }
 function storageBytes_(){ let t=0; try{ for(let i=0;i<STORE.length;i++){ const k=STORE.key(i); t+=(k||"").length+(STORE.getItem(k)||"").length; } }catch(e){} return t; }
 function updateLayerStatus(){
@@ -9433,6 +9471,7 @@ function mapToolHelp_(){
     `<div><div style="color:#eafae8;font-size:13px">${n}</div>`+
     `<div style="color:#8fae95;font-size:11px;line-height:1.4;margin-top:1px">${d}</div></div></div>`;
   showInfoSheet_("The map tools",
+    row("🔎","Find","Type a street address and the map goes there and drops a pin. Needs signal. The pin stays until you clear it.")+
     row("⏺","Track","Records where you walk, as a line. Tap again to stop. Export it from + Layers.")+
     row("📐","Measure","Tap two or more points for a distance; close the shape for an area. Nothing is saved.")+
     row("〰️","Route","Lay out a line of points to walk — a planned cruise line. Can be saved and shared.")+
@@ -9836,7 +9875,7 @@ function mapfileConfirm_(base, cb){
 }
 function offerMailExport_(base){
   if(!connected || isOffline()) return;
-  const to=String(cruiserEmail||"").trim();
+  const to=mailNeedsEmail_()?"":mailToWords_();       // v379
   setTimeout(()=>{
     showInfoSheet_("Export ready",
       `<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:10px">`+
@@ -9852,7 +9891,7 @@ function offerMailExport_(base){
       const el=$("expDrive"); if(!el) return;
       if(ok){
         el.style.color="#7fd0a0";
-        el.innerHTML=`&#10003; In Drive, folder "FRI Map Exports"`+(info&&info.kb?` &middot; ${esc(String(info.kb))} KB`:"");
+        el.innerHTML=`&#10003; In Drive`+(isLimited_()?"":`, folder "FRI Map Exports"`)+(info&&info.kb?` &middot; ${esc(String(info.kb))} KB`:"");
         return;
       }
       el.style.color="#e9c46a";
@@ -9894,10 +9933,10 @@ function mailExportFailed_(msg, inDrive){
         `and run <b>friEmailExports</b> from the add-on.`)+
     `</div>`);
 }
-function mailExport_(base){ if(limitedNo_()) return;
+function mailExport_(base){
   closeInfoSheet_();
   const to=String(cruiserEmail||"").trim();
-  if(!to){ toast("Set your email under \"Entered by\" first",true); return; }
+  if(mailNeedsEmail_()){ toast("Set your email under \"Entered by\" first",true); return; }
   if(!connected || isOffline()){ toast("Need a connection to email it",true); return; }
   /* mailexport arrived in v335. If the deployed script is already known to be older, say so now
      rather than retrying for a minute and then blaming the connection. Returns "" when the build
@@ -9909,7 +9948,7 @@ function mailExport_(base){ if(limitedNo_()) return;
   const ask=()=>{
     tries++;
     jsonp_("action=mailexport&to="+encodeURIComponent(to)+"&base="+encodeURIComponent(base), r=>{
-      if(r && r.ok){ toast("Emailed to "+to); return; }
+      if(r && r.ok){ toast("Emailed to "+(r.to||to)); return; }
       const err=String((r&&r.error)||"");
       /* Gmail permission is a different problem from a slow upload, and retrying will never fix
          it. Say exactly what to do instead of timing out with a vague failure. */
@@ -10592,6 +10631,797 @@ function drawWarpedTriangle(ctx,srcCanvas,ox,oy,s0,s1,s2,d0,d1,d2){
 }
 function loadPdfJs(){ if(window.pdfjsLib) return Promise.resolve();
   return loadScript("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js").then(()=>{ pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; }); }
+/* ============ v380 — Phase 2, steps 1 and 2 ============
+   PROPERTY RECORD (one per tract): owner, roll number, 911 address, lot and concession, township,
+   municipality, MPAC acres, how compartment areas are labelled, and the property's own outline.
+   COMPARTMENTS: each one's MFTIP class, its area calculated from the outline, and an area typed in
+   by hand (to match the assessment notice). AREA SUMMARY: acres and hectares by class, total, and how
+   many acres must be added or removed to agree with MPAC.
+   PROVINCIAL LAYERS: lots and concessions, roads, watercourses, water bodies, wetlands, contours and
+   buildings from Land Information Ontario, fetched for the property (outline + 500 m) the first time
+   it is needed, kept on this phone for the field and in the account's Drive for the other phones.
+   Everything is saved on this phone first; the Sheet gets it when there is signal. */
+const HA_AC=2.4710538146716534;
+const MFTIP_CLASSES=[["","— not set —"],["MFTIP","MFTIP eligible"],["CLTIP","CLTIP"],["INELIGIBLE","Not eligible"]];
+const PROP_CLS_LABEL={MFTIP:"MFTIP eligible",CLTIP:"CLTIP",INELIGIBLE:"Not eligible","":"Not classified"};
+let PROPS={props:{},comps:{},lio:{}};          // props[tractKey], comps[tractKey][nameKey], lio[tractKey] = Drive copy info
+let propDirty={props:{},comps:{}};              // waiting for the Sheet
+let propBackendOk=false, _propSyncing=false, _propLoaded=false, _propReady=null;
+/* The same key the Sheet uses: spaces collapsed, case ignored. */
+function propK_(s){ return String(s==null?"":s).replace(/\s+/g," ").trim().toLowerCase(); }
+/* Nothing may sync or save until what was stored on the phone is back: an early sync would otherwise
+   write an EMPTY waiting-list over the one saved before the app was closed. */
+_propReady=new Promise(res=>{
+  const done=()=>{ if(_propLoaded) return; _propLoaded=true; res(); };
+  setTimeout(done, 6000);          // storage that never answers (iOS can block it) must not swallow every later save
+  try{ ldbGet("props").then(v=>{ if(v&&v.props){ PROPS=Object.assign({props:{},comps:{},lio:{}},v); }
+    return ldbGet("propdirty"); }).then(v=>{ if(v&&v.props) propDirty=Object.assign({props:{},comps:{}},v); done(); }).catch(done); }catch(e){ done(); }
+});
+function propPersist_(){ try{ ldbPut("props",PROPS); ldbPut("propdirty",propDirty); }catch(e){} }
+
+/* ---- areas ----
+   Ellipsoidal sinusoidal (equal-area) projection about the polygon's own centre: exact enough for a
+   property anywhere in Ontario, not just UTM zone 17. Rings are [[lat,lon],…]. */
+function geoRingM2_(ring,lat0){
+  const a=6378137, f=1/298.257223563, e2=f*(2-f), r=Math.PI/180;
+  const s0=Math.sin(lat0*r), M=a*(1-e2)/Math.pow(1-e2*s0*s0,1.5);
+  let sum=0; const p=ring.map(q=>{ const la=q[0]*r, s=Math.sin(la), N=a/Math.sqrt(1-e2*s*s); return [q[1]*r*N*Math.cos(la), (q[0]-lat0)*r*M]; });
+  for(let i=0;i<p.length;i++){ const j=(i+1)%p.length; sum+=p[i][0]*p[j][1]-p[j][0]*p[i][1]; }
+  return Math.abs(sum/2);
+}
+/* polygons = [[outer, hole, …], …] in [lat,lon]. Holes subtracted. */
+function geoPolysHa_(polygons){
+  let n=0, la=0; polygons.forEach(pg=>(pg[0]||[]).forEach(q=>{ la+=q[0]; n++; })); if(!n) return 0;
+  const lat0=la/n; let m2=0;
+  polygons.forEach(pg=>pg.forEach((ring,i)=>{ if(!ring||ring.length<3) return; const a=geoRingM2_(ring,lat0); m2+= i===0 ? a : -a; }));
+  return Math.max(0,m2/10000);
+}
+function featPolys_(f){ const g=f&&f.geometry; if(!g) return [];
+  const ps=g.type==="Polygon"?[g.coordinates]:(g.type==="MultiPolygon"?g.coordinates:[]);
+  return ps.map(rings=>(rings||[]).map(ring=>(ring||[]).map(c=>[c[1],c[0]]))); }
+function featTract_(f){ const pr=(f&&f.properties)||{}; return (tractField?String(pr[tractField]!=null?pr[tractField]:"").trim():"")||manualTract||""; }
+/* The compartments of a property: from the loaded boundary files, the shapes drawn in the app, and —
+   for one this phone has no outline of — the record kept in the Sheet (its calculated and manual areas).
+   · A file's compartments belong to a property by the file's tract field (or the manual tract name).
+     Compartments with NO tract are used only when no loaded file carries this property's name — the
+     case of one property loaded from a file that has no tract field. Drawn shapes do not change that.
+   · The same compartment in two loaded files (an old and a revised boundary) is taken once, from the
+     file loaded last. Several polygons of one compartment in ONE file are its parts, and add up.
+   · A drawn shape counts only for a compartment no file has. */
+function propCompsGeo_(tract){
+  const k=propK_(tract), files=(typeof boundFiles!=="undefined"&&boundFiles)||[];
+  const hits=[], blanks=[];
+  files.forEach(bf=>{ const hit={}, blank={};
+    if(standField) (bf.features||[]).forEach(f=>{
+      const nm=String((f.properties&&f.properties[standField])!=null?f.properties[standField]:"").trim(); if(!nm) return;
+      const t=propK_(featTract_(f)), ps=featPolys_(f); if(!ps.length) return;
+      const tgt= t===k ? hit : (!t ? blank : null); if(!tgt) return;
+      const c=tgt[propK_(nm)]||(tgt[propK_(nm)]={name:nm,polygons:[]}); ps.forEach(p=>c.polygons.push(p)); });
+    hits.push(hit); blanks.push(blank); });
+  const anyHit=hits.some(h=>Object.keys(h).length), use=anyHit?hits:blanks, out={};
+  use.forEach((m,fi)=>Object.keys(m).forEach(n=>{ out[n]={name:m[n].name, polygons:m[n].polygons, src:"file", file:files[fi].name, unassigned:!anyHit}; }));
+  const dh={}, db={};
+  ((typeof polys!=="undefined"&&polys)||[]).forEach(pg=>{ if(!pg||!pg.pts||pg.pts.length<3) return; const nm=String(pg.name||"").trim(); if(!nm) return;
+    const t=propK_(pg.tract), tgt= t===k ? dh : (!t ? db : null); if(!tgt) return;
+    const c=tgt[propK_(nm)]||(tgt[propK_(nm)]={name:nm,polygons:[]}); c.polygons.push([pg.pts.map(p=>[p[0],p[1]])]); });
+  const drawn = Object.keys(dh).length ? dh : (Object.keys(out).length ? {} : db);
+  Object.keys(drawn).forEach(n=>{ if(!out[n]) out[n]={name:drawn[n].name, polygons:drawn[n].polygons, src:"drawn", unassigned:drawn===db}; });
+  const recs=PROPS.comps[k]||{};
+  Object.keys(recs).forEach(n=>{ if(out[n]) return; const r=recs[n]||{}; const v=(r.calcHa===""||r.calcHa==null)?NaN:Number(r.calcHa);
+    out[n]={name:r.name||n, polygons:[], src:"sheet", calcHa:v}; });
+  return Object.keys(out).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).map(n=>{ const c=out[n];
+    if(c.polygons.length) c.calcHa=+geoPolysHa_(c.polygons).toFixed(4); return c; });
+}
+/* An outline's area: rings inside an odd number of others are holes (even-odd), so a parcel with a
+   hole is not overstated. Rings are [[lat,lon],…]. */
+function propRingIn_(r,o){       // most of r's corners inside o: r lies inside o. Corners on a shared edge cannot decide it either way.
+  let a=0,b=0; r.forEach(q=>{ if(pointInRing_(q[0],q[1],o)) a++; else b++; }); return a>b; }
+function propOutlineHa_(rings){
+  let ha=0;
+  (rings||[]).forEach((r,i)=>{ if(!r||r.length<3) return; let inside=0;
+    rings.forEach((o,j)=>{ if(j!==i&&o&&o.length>=3&&propRingIn_(r,o)) inside++; });
+    const a=geoPolysHa_([[r]]); ha += (inside%2) ? -a : a; });
+  return Math.max(0,ha);
+}
+function propGet_(tract){ return PROPS.props[propK_(tract)]||null; }
+function propComp_(tract,name){ const t=PROPS.comps[propK_(tract)]; return (t&&t[propK_(name)])||null; }
+function propTracts_(){ const s={}; (tracts||[]).forEach(t=>{ if(String(t||"").trim()) s[propK_(t)]=String(t).trim(); });
+  Object.keys(PROPS.props).forEach(k=>{ const p=PROPS.props[k]; if(p&&p.tract) s[k]=s[k]||p.tract; });
+  return Object.values(s).sort((a,b)=>a.localeCompare(b)); }
+function propActiveTract_(){
+  let t=""; try{ t=(STORE&&STORE.getItem("fi_proptract"))||""; }catch(e){}
+  if(!t){ const el=$("TRACT"); t=(el&&el.value&&el.value!==ADD_TRACT)?el.value:""; }
+  return t||manualTract||"";
+}
+function propSetActive_(t){ try{ STORE&&STORE.setItem("fi_proptract",String(t||"")); }catch(e){} }
+/* The area a compartment counts for: the one typed in, if there is one, else the calculated one. */
+function propCompArea_(tract,c){
+  const rec=propComp_(tract,c.name)||{};
+  const man=(rec.manual===""||rec.manual==null)?NaN:Number(rec.manual);
+  if(isFinite(man)&&man>0){ const ha= rec.unit==="ha" ? man : man/HA_AC; return {ha:ha, ac:ha*HA_AC, src:"manual"}; }
+  const calc=isFinite(c.calcHa)?c.calcHa:((rec.calcHa!==""&&rec.calcHa!=null&&isFinite(Number(rec.calcHa)))?Number(rec.calcHa):0);
+  return {ha:calc, ac:calc*HA_AC, src:"calculated"};
+}
+/* The area summary. Pure: the compartments and the records go in, the table comes out. */
+function propSummary_(tract, comps){
+  comps = comps || propCompsGeo_(tract);
+  const p=propGet_(tract)||{}, rows=[], by={MFTIP:{ha:0,ac:0,n:0},CLTIP:{ha:0,ac:0,n:0},INELIGIBLE:{ha:0,ac:0,n:0},"":{ha:0,ac:0,n:0}};
+  let tha=0, tac=0;
+  comps.forEach(c=>{ const rec=propComp_(tract,c.name)||{}, cls=rec.cls||"", a=propCompArea_(tract,c);
+    rows.push({name:c.name, cls:cls, ha:a.ha, ac:a.ac, src:a.src, calcHa:c.calcHa, from:c.src});
+    const b=by[cls]||by[""]; b.ha+=a.ha; b.ac+=a.ac; b.n++; tha+=a.ha; tac+=a.ac; });
+  const mpac=(p.mpac===""||p.mpac==null)?NaN:Number(p.mpac);
+  const out={tract:tract, rows:rows, byClass:by, total:{ha:tha, ac:tac}, mpac:isFinite(mpac)?mpac:null, diffAc:null, msg:""};
+  if(out.mpac!=null){
+    const d=+(out.mpac-tac).toFixed(2); out.diffAc=d;
+    out.msg = Math.abs(d)<0.01 ? "The compartments add up to the MPAC acres."
+      : d>0 ? `Add ${d.toFixed(2)} ac to the compartments to reach the MPAC ${out.mpac.toFixed(2)} ac.`
+            : `Remove ${(-d).toFixed(2)} ac from the compartments to come down to the MPAC ${out.mpac.toFixed(2)} ac.`;
+  } else out.msg="No MPAC acres entered — type them in the property details to compare.";
+  return out;
+}
+/* ---- the roll number: 19 digits, shown as the notice prints them ---- */
+function propRollFmt_(v){ const d=String(v==null?"":v).replace(/[^0-9]/g,""); if(d.length!==19) return null;
+  return d.slice(0,4)+" "+d.slice(4,7)+" "+d.slice(7,10)+" "+d.slice(10,15)+" "+d.slice(15); }
+
+/* ---- the Sheet ----
+   Like the plots since v377, THE SHEET WINS for what this phone did not change: the phone keeps a note
+   of exactly which fields were edited here, and sends only those. An office correction to the owner
+   survives a phone that only changed the MPAC acres; two phones that changed different compartments
+   both count. */
+const PROP_FIELDS_=["owner","roll","address","lotcon","township","municipality","mpac","labelArea","labelUnit","boundary"];
+const COMP_FIELDS_=["cls","calcHa","manual","unit"];
+function propPick__(o,f){ const r={}; Object.keys(f||{}).forEach(x=>{ if(o&&o[x]!==undefined) r[x]=o[x]; }); return r; }
+function propSync_(then){
+  if(!_propLoaded){ _propReady.then(()=>propSync_(then)); return; }
+  const fin=ok=>{ _propSyncing=false; if(then) try{ then(ok); }catch(e){} };
+  if(_propSyncing){ if(then) setTimeout(()=>then(false),0); return; }
+  if(!connected||isOffline()){ if(then) then(false); return; }
+  _propSyncing=true;
+  jsonp_("action=propget", r=>{
+    if(!r||r.ok!==true||!Array.isArray(r.props)){ fin(false); return; }     // a backend older than v380 says nothing
+    propBackendOk=true;
+    /* What was waiting BEFORE this push keeps the phone's version of those fields: the reply above
+       was read before the push went. */
+    const waitP=JSON.parse(JSON.stringify(propDirty.props)), waitC=JSON.parse(JSON.stringify(propDirty.comps));
+    propPush_().then(()=>{
+      const np={}, nc={};
+      r.props.forEach(p=>{ const k=propK_(p.tract); if(k) np[k]=p; });
+      (r.comps||[]).forEach(c=>{ const k=propK_(c.tract), n=propK_(c.name); if(!k||!n) return; (nc[k]||(nc[k]={}))[n]=c; });
+      Object.keys(waitP).forEach(k=>{ const mine=PROPS.props[k]; if(!mine) return;
+        np[k]=Object.assign({}, np[k]||{tract:mine.tract}, propPick__(mine, waitP[k].f)); });
+      Object.keys(waitC).forEach(k=>{ const mine=PROPS.comps[k]||{}; Object.keys(waitC[k]||{}).forEach(n=>{ if(!mine[n]) return;
+        const t=nc[k]||(nc[k]={}); t[n]=Object.assign({}, t[n]||{tract:mine[n].tract,name:mine[n].name}, propPick__(mine[n], waitC[k][n].f)); }); });
+      PROPS.props=np; PROPS.comps=nc; PROPS.lio=r.lio||{};
+      propPersist_(); fin(true);
+    });
+  }, 30000);
+}
+function propHasWaiting_(){ return Object.keys(propDirty.props).length>0 || Object.keys(propDirty.comps).length>0; }
+function propPush_(){
+  /* authBackendOk: the backend has answered properly, so the reply to a POST can be read. Without it
+     sheetPost_ sends blind, and nothing could be marked as done. */
+  if(!propBackendOk||!authBackendOk||!connected||isOffline()) return Promise.resolve(false);
+  const jobs=[];
+  Object.keys(propDirty.props).forEach(k=>{ const p=PROPS.props[k], d=propDirty.props[k]; if(!p||!d){ delete propDirty.props[k]; return; }
+    const body=Object.assign({tract:p.tract}, propPick__(p, d.f));
+    jobs.push(sheetPost_({_action:"propsave", prop:body, email:String(cruiserEmail||"")}).then(j=>{
+      if(j&&j.ok&&j.prop){ if(propDirty.props[k]&&propDirty.props[k].t===d.t) delete propDirty.props[k]; }
+      else if(j&&j.ok===false&&j.error){ toast("The Sheet did not save the property: "+j.error,true); }
+    }).catch(()=>{})); });
+  Object.keys(propDirty.comps).forEach(k=>{ const t=PROPS.comps[k]||{}, w=propDirty.comps[k]||{};
+    const names=Object.keys(w).filter(n=>t[n]); if(!names.length){ delete propDirty.comps[k]; return; }
+    const stamp=JSON.stringify(w);
+    jobs.push(sheetPost_({_action:"compsave", email:String(cruiserEmail||""), tract:t[names[0]].tract, comps:names.map(n=>Object.assign({name:t[n].name}, propPick__(t[n], w[n].f)))}).then(j=>{
+      if(j&&j.ok){ if(JSON.stringify(propDirty.comps[k])===stamp) delete propDirty.comps[k]; }
+      else if(j&&j.ok===false&&j.error){ toast("The Sheet did not save the compartments: "+j.error,true); }
+    }).catch(()=>{})); });
+  return Promise.all(jobs).then(()=>{ propPersist_(); return true; });
+}
+/* prop = {tract, …only the fields that changed}; comps = [{name, …only the fields that changed}]. */
+function propSaveLocal_(prop, comps){
+  if(!_propLoaded){ _propReady.then(()=>propSaveLocal_(prop, comps)); return; }
+  const k=propK_(prop.tract); if(!k) return;
+  const was=PROPS.props[k]||{tract:String(prop.tract).trim()}, now=Date.now();
+  const f=Object.keys(prop).filter(x=>x!=="tract"&&PROP_FIELDS_.indexOf(x)>=0);
+  if(f.length){
+    PROPS.props[k]=Object.assign({}, was, propPick__(prop, f.reduce((o,x)=>(o[x]=1,o),{})), {at:new Date().toISOString()});
+    const d=propDirty.props[k]||(propDirty.props[k]={f:{}}); f.forEach(x=>d.f[x]=1); d.t=now; }
+  else if(!PROPS.props[k]) PROPS.props[k]=was;
+  if(comps&&comps.length){ const t=PROPS.comps[k]||(PROPS.comps[k]={}), dd=propDirty.comps[k]||(propDirty.comps[k]={});
+    comps.forEach(c=>{ const n=propK_(c.name); if(!n) return; const cf=Object.keys(c).filter(x=>COMP_FIELDS_.indexOf(x)>=0); if(!cf.length) return;
+      t[n]=Object.assign({}, t[n]||{name:String(c.name).trim()}, propPick__(c, cf.reduce((o,x)=>(o[x]=1,o),{})), {tract:was.tract||String(prop.tract).trim()});
+      const d=dd[n]||(dd[n]={f:{}}); cf.forEach(x=>d.f[x]=1); d.t=now; });
+    if(!Object.keys(dd).length) delete propDirty.comps[k]; }
+  propPersist_();
+  if(propBackendOk) propPush_().then(()=>{}); else propSync_();
+}
+
+/* ---- the property sheet ---- */
+let _ppTract="", _ppComps=[], _ppShown=null;   // _ppShown: the record and compartments as the form was drawn
+function openPropSheet_(tract){
+  const list=propTracts_();
+  _ppTract = tract!=null ? String(tract) : (propActiveTract_() || list[0] || "");
+  if(_ppTract) propSetActive_(_ppTract);
+  showDataSheet_("Property & MFTIP areas", `<div id="ppBody" oninput="propTouch_(event)" onchange="propTouch_(event)"></div>`);
+  propRender_();
+  /* A sync redraws the form from the stored record — never over something being typed. */
+  propSync_(ok=>{ if(ok && $("ppBody") && $("dataSheet") && $("dataSheet").style.display!=="none" && !_ppTouched && !_ppEditing_()) propRender_(); });
+}
+let _ppTouched=false;
+function propTouch_(e){ const id=String((e&&e.target&&e.target.id)||""); if(id==="ppTract"||/^ppBnd/.test(id)) return; _ppTouched=true; }
+function _ppEditing_(){ const a=document.activeElement; return !!(a && a.id && /^pp/.test(a.id)); }
+/* keep: the outline was changed while the cruiser had typed into the form — redraw, but put back what
+   they typed and keep comparing with the values first drawn, so nothing typed is lost or mis-sent. */
+function propRender_(keep){
+  const box=$("ppBody"); if(!box) return;
+  let held=null, heldShown=null;
+  if(keep && _ppTouched){ held={}; heldShown=_ppShown;
+    ["ppOwner","ppRoll","ppAddress","ppLotcon","ppTownship","ppMunicipality","ppMpac","ppLabelArea","ppLabelUnit"].forEach(id=>{ const el=$(id); if(el) held[id]=el.value; });
+    for(let i=0;i<(_ppComps||[]).length;i++) ["ppCls","ppMan","ppUnit"].forEach(x=>{ const el=$(x+i); if(el) held[x+i+"|"+propK_(_ppComps[i].name)]=el.value; }); }
+  const list=propTracts_(), t=_ppTract;
+  const inp=(id,label,val,extra)=>`<label style="display:block;margin:0 0 8px"><span style="display:block;font-size:12px;color:#a9c9b0;margin-bottom:2px">${label}</span>`+
+    `<input id="${id}" type="text" value="${esc(val==null?"":val)}" ${extra||""} style="width:100%;box-sizing:border-box;font-size:16px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></label>`;
+  const sel=(id,opts,val,extra)=>`<select id="${id}" ${extra||""} style="font-size:16px;padding:7px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
+    opts.map(o=>`<option value="${esc(o[0])}"${String(val)===o[0]?" selected":""}>${esc(o[1])}</option>`).join("")+`</select>`;
+  let h=`<div style="font-size:12px;color:#a9c9b0;line-height:1.5;margin-bottom:8px">One record per tract. It goes on the MFTIP maps and the area summary. Saved on this phone, and sent to the Sheet when there is signal.</div>`;
+  h+=`<label style="display:block;margin:0 0 10px"><span style="display:block;font-size:12px;color:#a9c9b0;margin-bottom:2px">Property (tract)</span>`+
+     sel("ppTract",[["","— choose —"]].concat(list.map(x=>[x,x])),t,`onchange="propPick_(this.value)"`)+`</label>`;
+  if(!t){ box.innerHTML=h+`<div style="color:#e8a33a;font-size:13px">Add the tract on the plot card first (Tract / property), then come back here.</div>`; return; }
+  const p=propGet_(t)||{};
+  h+=inp("ppOwner","Owner",p.owner)+
+     inp("ppRoll","Roll number (19 digits)",p.roll,`inputmode="numeric" oninput="propRollHint_()"`)+`<div id="ppRollHint" style="font-size:11px;margin:-4px 0 8px;color:#8fae95"></div>`+
+     (p.rollBad?`<div style="font-size:12px;color:#e8a33a;margin:-4px 0 8px">The roll number in the Sheet was stored as a number and has lost its last digits — type it again here.</div>`:"")+
+     inp("ppAddress","Municipal (911) address",p.address)+
+     inp("ppLotcon","Lot and concession",p.lotcon,`placeholder="e.g. PT LOT 11, CON 12"`)+
+     inp("ppTownship","Township",p.township)+
+     inp("ppMunicipality","Municipality",p.municipality)+
+     inp("ppMpac","MPAC assessment acres",p.mpac,`inputmode="decimal"`);
+  h+=`<div style="margin:4px 0 10px;font-size:12px;color:#a9c9b0">Compartment labels on the maps show the `+
+     sel("ppLabelArea",[["calc","calculated"],["manual","manually entered"]],p.labelArea||"calc")+` area in `+
+     sel("ppLabelUnit",[["ac","acres"],["ha","hectares"]],p.labelUnit||"ac")+`</div>`;
+  // the outline
+  const b=Array.isArray(p.boundary)?p.boundary:[];
+  const bha=b.length?propOutlineHa_(b):0;
+  h+=`<div style="border-top:1px solid #2a4030;margin:10px 0 6px;padding-top:8px;font:700 13px system-ui;color:#eafae8">Property outline</div>`+
+     `<div id="ppBndState" style="font-size:12px;color:#cfe3d2;line-height:1.5;margin-bottom:6px">`+
+     (b.length?`Outline saved — ${(bha*HA_AC).toFixed(2)} ac (${bha.toFixed(2)} ha), ${b.length} part${b.length===1?"":"s"}.`
+              :`No outline yet. The provincial layers are fetched around the compartments until there is one.`)+`</div>`;
+  const files=(boundFiles||[]).map(f=>[f.id,f.name]), drawn=(polys||[]).map((pg,i)=>[String(i),(pg.name||("Shape "+(i+1)))+(pg.tract?" · "+pg.tract:"")]);
+  h+=`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">`+
+     (files.length?sel("ppBndFile",[["","Use a loaded file…"]].concat(files),"",`onchange="propUseFile_(this.value)"`):"")+
+     (drawn.length?sel("ppBndDrawn",[["","Use a drawn shape…"]].concat(drawn),"",`onchange="propUseDrawn_(this.value)"`):"")+
+     (b.length?`<button type="button" class="btn ghost" onclick="propClearBnd_()">Remove outline</button>`:"")+`</div>`;
+  if(!files.length&&!drawn.length) h+=`<div style="font-size:11px;color:#8fae95;margin-bottom:6px">Load the owner's shapefile (Layers → Load &amp; import → Stand boundaries), or draw the outline with the map's Draw tool, then pick it here.</div>`;
+  // compartments
+  _ppComps=propCompsGeo_(t);
+  h+=`<div style="border-top:1px solid #2a4030;margin:10px 0 6px;padding-top:8px;font:700 13px system-ui;color:#eafae8">Compartments</div>`;
+  if(!_ppComps.length) h+=`<div style="font-size:12px;color:#e8a33a;line-height:1.5">No compartments found for ${esc(t)}. Load the boundary file and pick its Stand name field (and Tract field) under Layers, or draw them with the map's Draw tool.</div>`;
+  else {
+    if(_ppComps[0].unassigned) h+=`<div style="font-size:11px;color:#e8a33a;margin-bottom:6px">These compartments have no tract in the file. They are shown here because none carry ${esc(t)}.</div>`;
+    h+=_ppComps.map((c,i)=>{ const r=propComp_(t,c.name)||{}, hasCalc=isFinite(c.calcHa);
+      return `<div style="border:1px solid #2a4030;border-radius:8px;padding:8px;margin-bottom:6px">`+
+        `<div style="display:flex;justify-content:space-between;gap:8px;font-size:13px;color:#eafae8"><b>${esc(c.name)}</b>`+
+        `<span style="color:#a9c9b0">${hasCalc?`${(c.calcHa*HA_AC).toFixed(2)} ac · ${c.calcHa.toFixed(2)} ha calculated`:"no area calculated"}${c.src==="sheet"?" · no outline on this phone":""}</span></div>`+
+        `<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px">`+
+        sel("ppCls"+i,MFTIP_CLASSES,r.cls||"")+
+        `<input id="ppMan${i}" type="text" inputmode="decimal" placeholder="manual area" value="${esc(r.manual==null?"":r.manual)}" style="width:110px;font-size:16px;padding:7px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
+        sel("ppUnit"+i,[["ac","ac"],["ha","ha"]],r.unit||"ac")+`</div></div>`; }).join("");
+  }
+  h+=`<div style="display:flex;gap:8px;margin:12px 0 6px"><button type="button" class="btn submit" style="flex:1" onclick="propSaveForm_()">Save</button>`+
+     `<button type="button" class="btn ghost" style="flex:1" onclick="propSaveForm_(true)">Area summary</button></div>`;
+  const waiting=!!propDirty.props[propK_(t)]||!!propDirty.comps[propK_(t)];
+  h+=`<div style="font-size:11px;color:#8fae95">${waiting?"Saved on this phone — waiting to go to the Sheet.":(p.at?"In step with the Sheet"+(p.by?" · last saved by "+esc(p.by):"")+".":"")}</div>`;
+  _ppShown={prop:JSON.parse(JSON.stringify(p)), comps:JSON.parse(JSON.stringify(PROPS.comps[propK_(t)]||{}))};
+  box.innerHTML=h; propRollHint_(); _ppTouched=false;
+  if(held){
+    Object.keys(held).forEach(key=>{ const bar=key.indexOf("|");
+      if(bar<0){ const el=$(key); if(el) el.value=held[key]; return; }
+      const base=key.slice(0,bar).replace(/\d+$/,""), nm=key.slice(bar+1), i=_ppComps.findIndex(c=>propK_(c.name)===nm);
+      if(i>=0){ const el=$(base+i); if(el) el.value=held[key]; } });
+    _ppShown=heldShown; _ppTouched=true; propRollHint_(); }
+}
+function propPick_(t){ _ppTract=String(t||""); propSetActive_(_ppTract); propRender_(); try{ lioRender_(); }catch(e){} }
+function propRollHint_(){ const el=$("ppRoll"), hint=$("ppRollHint"); if(!el||!hint) return;
+  const n=String(el.value||"").replace(/[^0-9]/g,"").length;
+  hint.textContent = !n ? "" : n===19 ? "19 digits ✓" : n+" of 19 digits"; hint.style.color = (!n||n===19)?"#8fae95":"#e8a33a"; }
+/* Read the form; false (and a message) when something cannot be saved as typed. */
+function propReadForm_(){
+  const t=_ppTract; if(!t) return null;
+  const v=id=>{ const el=$(id); return el?String(el.value||"").trim():""; };
+  const rollRaw=v("ppRoll"), roll=rollRaw?propRollFmt_(rollRaw):"";
+  if(roll===null){ toast("The roll number needs 19 digits — it has "+rollRaw.replace(/[^0-9]/g,"").length,true); return null; }
+  const mp=v("ppMpac").replace(/,/g,""); if(mp!==""&&!(isFinite(Number(mp))&&Number(mp)>=0)){ toast("MPAC acres must be a number",true); return null; }
+  const form={owner:v("ppOwner"), roll:roll, address:v("ppAddress"), lotcon:v("ppLotcon"), township:v("ppTownship"),
+    municipality:v("ppMunicipality"), mpac:mp===""?"":Number(mp), labelArea:v("ppLabelArea")==="manual"?"manual":"calc", labelUnit:v("ppLabelUnit")==="ha"?"ha":"ac"};
+  /* Only what the cruiser changed goes out (see "the Sheet" above): compared with the values the form
+     was DRAWN with — not the record now, which a sync may have updated underneath the open form. */
+  const shown=(_ppShown&&_ppShown.prop&&propK_(_ppShown.prop.tract||t)===propK_(t))?_ppShown:{prop:propGet_(t)||{},comps:PROPS.comps[propK_(t)]||{}};
+  const was=shown.prop||{}, same=(a,b)=>String(a==null?"":a)===String(b==null?"":b);
+  const defaults={labelArea:"calc",labelUnit:"ac"};
+  const prop={tract:t};
+  Object.keys(form).forEach(x=>{ const old=(was[x]===undefined||was[x]==="")&&defaults[x]?defaults[x]:was[x]; if(!same(form[x],old)) prop[x]=form[x]; });
+  const comps=[];
+  for(let i=0;i<_ppComps.length;i++){ const c=_ppComps[i], m=v("ppMan"+i).replace(/,/g,"");
+    if(m!==""&&!(isFinite(Number(m))&&Number(m)>=0)){ toast("The manual area for "+c.name+" must be a number",true); return null; }
+    const r=(shown.comps&&shown.comps[propK_(c.name)])||{}, o={name:c.name};
+    const cls=v("ppCls"+i), man=m===""?"":Number(m), unit=v("ppUnit"+i)==="ha"?"ha":"ac";
+    if(!same(cls,r.cls)) o.cls=cls;
+    if(!same(man,r.manual)) o.manual=man;
+    if(!same(unit,r.unit||"ac")) o.unit=unit;
+    if(c.polygons.length && isFinite(c.calcHa) && !(r.calcHa!==""&&r.calcHa!=null&&Math.abs(Number(r.calcHa)-c.calcHa)<0.00005)) o.calcHa=+c.calcHa.toFixed(4);
+    if(Object.keys(o).length>1) comps.push(o); }
+  return {prop:prop, comps:comps};
+}
+function propSaveForm_(thenSummary){
+  const f=propReadForm_(); if(!f) return;
+  propSaveLocal_(f.prop, f.comps);
+  toast(connected&&!isOffline()?"Property saved":"Property saved on this phone — it goes to the Sheet when there is signal");
+  try{ lioEnsure_(f.prop.tract,false,true); }catch(e){}
+  if(thenSummary) propShowSummary_(f.prop.tract); else propRender_();
+}
+function propBndSet_(rings, what){
+  const t=_ppTract; if(!t) return;
+  if(rings.length>200){ toast("That outline has "+rings.length+" separate parts — more than the Sheet keeps (200). Use a file with just the property's outline.",true); return; }
+  // keep it under what one Sheet cell holds: thin evenly, never below the shape's corners count of 4
+  let pts=rings.reduce((n,r)=>n+r.length,0); const max=1800;
+  if(pts>max){ const keep=max/pts; rings=rings.map(r=>{ const n=Math.max(4,Math.floor(r.length*keep)), step=r.length/n, o=[];
+    for(let i=0;i<n;i++) o.push(r[Math.floor(i*step)]); return o; }); }
+  rings=rings.map(r=>r.map(q=>[+Number(q[0]).toFixed(6),+Number(q[1]).toFixed(6)]));
+  propSaveLocal_({tract:t, boundary:rings}, null);
+  toast("Property outline set from "+what);
+  propRender_(true); try{ lioEnsure_(t,false,true); }catch(e){}
+}
+function propUseFile_(id){ if(!id) return; const f=(boundFiles||[]).find(x=>x.id===id); if(!f) return;
+  const rings=[]; (f.features||[]).forEach(ft=>featPolys_(ft).forEach(pg=>pg.forEach(r=>{ if(r&&r.length>=3) rings.push(r); })));   // holes too: the area is worked out even-odd
+  if(!rings.length){ toast("That file has no polygons to use as an outline",true); return; }
+  propBndSet_(rings, f.name); }
+function propUseDrawn_(i){ if(i==="") return; const pg=(polys||[])[+i]; if(!pg||!pg.pts||pg.pts.length<3) return;
+  propBndSet_([pg.pts.map(p=>[p[0],p[1]])], pg.name||"the drawn shape"); }
+function propClearBnd_(){ const t=_ppTract; if(!t) return; if(!confirm("Remove the property outline for "+t+"?")) return;
+  propSaveLocal_({tract:t, boundary:[]}, null); propRender_(true); try{ lioRender_(); }catch(e){} }
+function propSummaryHtml_(s){
+  const f2=x=>(Math.round(x*100)/100).toFixed(2);
+  let h=`<table style="width:100%;border-collapse:collapse;font-size:13px;color:#e8f0e6"><tr style="color:#a9c9b0;text-align:left"><th style="padding:4px">Compartment</th><th>Class</th><th style="text-align:right">ac</th><th style="text-align:right;padding-right:4px">ha</th></tr>`;
+  s.rows.forEach(r=>{ h+=`<tr style="border-top:1px solid #2a4030"><td style="padding:4px">${esc(r.name)}${r.src==="manual"?' <small style="color:#e8c35a">manual</small>':""}</td><td>${esc(PROP_CLS_LABEL[r.cls]||"")}</td><td style="text-align:right">${f2(r.ac)}</td><td style="text-align:right;padding-right:4px">${f2(r.ha)}</td></tr>`; });
+  ["MFTIP","CLTIP","INELIGIBLE",""].forEach(k=>{ const b=s.byClass[k]; if(!b.n) return;
+    h+=`<tr style="border-top:1px solid #33623a;color:#cfe3d2"><td style="padding:4px" colspan="2">${esc(PROP_CLS_LABEL[k])} (${b.n})</td><td style="text-align:right">${f2(b.ac)}</td><td style="text-align:right;padding-right:4px">${f2(b.ha)}</td></tr>`; });
+  h+=`<tr style="border-top:2px solid #4caf50;font-weight:700"><td style="padding:4px" colspan="2">Total</td><td style="text-align:right">${f2(s.total.ac)}</td><td style="text-align:right;padding-right:4px">${f2(s.total.ha)}</td></tr>`;
+  if(s.mpac!=null) h+=`<tr style="color:#cfe3d2"><td style="padding:4px" colspan="2">MPAC assessment</td><td style="text-align:right">${f2(s.mpac)}</td><td style="text-align:right;padding-right:4px">${f2(s.mpac/HA_AC)}</td></tr>`;
+  h+=`</table><div style="margin:10px 0;padding:10px;border-radius:8px;background:#10240f;border:1px solid #33623a;font-size:14px;color:${s.diffAc!=null&&Math.abs(s.diffAc)>=0.01?"#ffd24a":"#cfe3d2"}">${esc(s.msg)}</div>`;
+  return h;
+}
+function propSummaryText_(s){
+  const f2=x=>(Math.round(x*100)/100).toFixed(2), L=["Compartment\tClass\tAcres\tHectares"];
+  s.rows.forEach(r=>L.push([r.name+(r.src==="manual"?" (manual)":""), PROP_CLS_LABEL[r.cls]||"", f2(r.ac), f2(r.ha)].join("\t")));
+  ["MFTIP","CLTIP","INELIGIBLE",""].forEach(k=>{ const b=s.byClass[k]; if(b.n) L.push([PROP_CLS_LABEL[k]+" total","",f2(b.ac),f2(b.ha)].join("\t")); });
+  L.push(["Total","",f2(s.total.ac),f2(s.total.ha)].join("\t"));
+  if(s.mpac!=null) L.push(["MPAC assessment","",f2(s.mpac),f2(s.mpac/HA_AC)].join("\t"));
+  L.push(s.msg); return L.join("\n");
+}
+let _ppLastSummary=null;
+function propShowSummary_(tract){
+  const t=tract||_ppTract; if(!t) return;
+  const s=propSummary_(t); _ppLastSummary=s;
+  showDataSheet_("Area summary — "+t, (s.rows.length?propSummaryHtml_(s):`<div style="color:#e8a33a;font-size:13px">No compartments found for ${esc(t)}.</div>`)+
+    `<div style="display:flex;gap:8px"><button type="button" class="btn ghost" style="flex:1" onclick="openPropSheet_(_ppTract)">◂ Back</button>`+
+    `<button type="button" class="btn ghost" style="flex:1" onclick="propCopySummary_()">Copy table</button></div>`);
+}
+function propCopySummary_(){ if(!_ppLastSummary) return; const t=propSummaryText_(_ppLastSummary);
+  try{ navigator.clipboard.writeText(t).then(()=>toast("Copied — paste it into the plan"),()=>toast("Could not copy on this phone",true)); }catch(e){ toast("Could not copy on this phone",true); } }
+
+/* ============ provincial reference layers (Land Information Ontario) ============ */
+const LIO_BASE="https://ws.lioservices.lrc.gov.on.ca/arcgis2/rest/services/LIO_OPEN_DATA/";
+const LIO_ATTRIB="Contains information licensed under the Open Government Licence – Ontario.";
+const LIO_MARGIN_M=500;
+const LIO_LAYERS=[
+  {k:"lots",      label:"Lots & concessions", svc:"LIO_Open06", id:2,  name:"Lot Fabric Improved",       fields:"OGF_ID,LOT_IDENT,CONCESSION_IDENT,GEOGRAPHIC_TOWNSHIP_NAME", on:true},
+  {k:"roads",     label:"Roads",              svc:"LIO_Open09", id:0,  name:"ORN Road Net Element",      fields:"OGF_ID,ROAD_ELEMENT_TYPE", on:true},
+  {k:"water",     label:"Watercourses",       svc:"LIO_Open01", id:26, name:"OHN Watercourse",           fields:"OGF_ID,WATERCOURSE_TYPE,OFFICIAL_NAME_LABEL,PERMANENCY", on:true},
+  {k:"waterbody", label:"Water bodies",       svc:"LIO_Open01", id:25, name:"OHN Waterbody",             fields:"OGF_ID,WATERBODY_TYPE,OFFICIAL_NAME_LABEL,PERMANENCY", on:true},
+  {k:"wetland",   label:"Wetlands",           svc:"LIO_Open01", id:15, name:"Wetland With Significance", fields:"OGF_ID,WETLAND_TYPE,WETLAND_SIGNIFICANCE,EVALUATED_WETLAND_NAME", on:true},
+  {k:"contour",   label:"Contours",           svc:"LIO_Open01", id:29, name:"Contour",                   fields:"OGF_ID,ELEVATION", off:0.00002, on:false},
+  {k:"building",  label:"Buildings",          svc:"LIO_Open01", id:34, name:"Building To Scale",         fields:"OGF_ID,BUILDING_TYPE", on:false}
+];
+const LIO_PAGE=1000, LIO_MAX_PAGES=25, LIO_TIMEOUT_MS=20000;
+let lioVis={}; LIO_LAYERS.forEach(L_=>{ lioVis[L_.k]=L_.on; });
+try{ if(STORE) Object.assign(lioVis, JSON.parse(STORE.getItem("fi_liovis"))||{}); }catch(e){}
+let lioCache=null, lioCacheTract="", _lioBusy={}, lioLayer=null, lioLabelLayer=null, propLineLayer=null, lioRenderer=null;
+function lioKey_(t){ return "lio:"+propK_(t); }
+/* After a failed or partial fetch, the map does not ask the province again on its own for 6 hours
+   (Refresh always does). Without this, one layer the province has renamed would have every opening of
+   the map fetch all seven again. */
+const LIO_RETRY_MS=6*3600*1000;
+function lioTries_(){ try{ return JSON.parse((STORE&&STORE.getItem("fi_liotry"))||"{}")||{}; }catch(e){ return {}; } }
+function lioTried_(k,v){ const m=lioTries_(); if(v==null) delete m[k]; else m[k]=v; try{ STORE&&STORE.setItem("fi_liotry",JSON.stringify(m)); }catch(e){} }
+/* Where the property is: its outline if it has one, else its compartments. [w,s,e,n] or null. */
+function propExtent_(tract){
+  const p=propGet_(tract); let pts=[];
+  if(p&&Array.isArray(p.boundary)&&p.boundary.length) p.boundary.forEach(r=>r.forEach(q=>pts.push(q)));
+  else propCompsGeo_(tract).forEach(c=>c.polygons.forEach(pg=>(pg[0]||[]).forEach(q=>pts.push(q))));
+  pts=pts.filter(q=>isFinite(q[0])&&isFinite(q[1])); if(!pts.length) return null;
+  let w=1/0,s=1/0,e=-1/0,n=-1/0; pts.forEach(q=>{ if(q[1]<w)w=q[1]; if(q[1]>e)e=q[1]; if(q[0]<s)s=q[0]; if(q[0]>n)n=q[0]; });
+  return [w,s,e,n];
+}
+function lioPad_(b,m){ const lat=(b[1]+b[3])/2, dy=m/111320, dx=m/(111320*Math.max(0.2,Math.cos(lat*Math.PI/180)));
+  return [+(b[0]-dx).toFixed(6), +(b[1]-dy).toFixed(6), +(b[2]+dx).toFixed(6), +(b[3]+dy).toFixed(6)]; }
+function lioCovers_(outer,inner){ return !!outer&&!!inner&&outer[0]<=inner[0]&&outer[1]<=inner[1]&&outer[2]>=inner[2]&&outer[3]>=inner[3]; }
+/* Layer ids can change when the province republishes: look each one up by NAME, once a month. */
+function lioResolve_(svc){
+  let memo={}; try{ memo=JSON.parse((STORE&&STORE.getItem("fi_lioids"))||"{}")||{}; }catch(e){ memo={}; }
+  const m=memo[svc]; if(m&&m.at&&Date.now()-m.at<30*864e5&&m.map) return Promise.resolve(m.map);
+  return lioFetchJson_(LIO_BASE+svc+"/MapServer?f=json").then(j=>{
+    const map={}; ((j&&j.layers)||[]).forEach(x=>{ if(x&&x.name!=null) map[String(x.name).trim().toLowerCase()]=x.id; });
+    if(Object.keys(map).length){ memo[svc]={at:Date.now(),map:map}; try{ STORE&&STORE.setItem("fi_lioids",JSON.stringify(memo)); }catch(e){} }
+    return map;
+  }).catch(()=>(m&&m.map)||{});
+}
+function lioFetchJson_(url){
+  const once=()=>new Promise((res,rej)=>{
+    let ctl=null; try{ ctl=new AbortController(); }catch(e){}
+    const t=setTimeout(()=>{ try{ ctl&&ctl.abort(); }catch(e){} rej(new Error("timed out")); }, LIO_TIMEOUT_MS);
+    fetch(url, ctl?{signal:ctl.signal}:{}).then(r=>{ if(r&&r.ok===false) throw new Error("HTTP "+r.status); return r.json(); })
+      .then(j=>{ clearTimeout(t); if(j&&j.error) rej(new Error(String((j.error&&j.error.message)||"service error"))); else res(j); })
+      .catch(e=>{ clearTimeout(t); rej(e); });
+  });
+  return once().catch(()=>once());                       // the service is sometimes slow: one more try
+}
+/* One layer for a box. Pages until a page comes back EMPTY (short pages happen mid-set) and drops
+   duplicates on OGF_ID — both seen in the live tests of 2026-10-06. */
+async function lioFetchLayer_(L_, bbox){
+  const ids=await lioResolve_(L_.svc); const want=String(L_.name).toLowerCase();
+  const id=(ids&&ids[want]!=null)?ids[want]:L_.id;
+  const seen={}, feats=[]; let ended=false;
+  for(let page=0; page<LIO_MAX_PAGES; page++){
+    const q=["geometry="+bbox.join(","),"geometryType=esriGeometryEnvelope","inSR=4326","spatialRel=esriSpatialRelIntersects",
+      "outFields="+L_.fields,"returnGeometry=true","outSR=4326","geometryPrecision=6","orderByFields=OBJECTID",
+      "resultOffset="+(page*LIO_PAGE),"resultRecordCount="+LIO_PAGE,"f=geojson"];
+    if(L_.off) q.push("maxAllowableOffset="+L_.off);
+    const j=await lioFetchJson_(LIO_BASE+L_.svc+"/MapServer/"+id+"/query?"+q.join("&"));
+    const fs=(j&&Array.isArray(j.features))?j.features:null;
+    if(!fs) throw new Error("no features in the reply");
+    if(!fs.length){ ended=true; break; }
+    let fresh=0;
+    fs.forEach(f=>{ const pr=f&&f.properties||{}; const key=pr.OGF_ID!=null?"o"+pr.OGF_ID:(f.id!=null?"i"+f.id:"g"+JSON.stringify(f.geometry).slice(0,200));
+      if(seen[key]) return; seen[key]=1; fresh++; feats.push({type:"Feature",properties:pr,geometry:f.geometry}); });
+    if(!fresh){ ended=true; break; }                    // a server that ignores the offset would loop forever
+  }
+  return {type:"FeatureCollection",features:feats,cut:!ended};      // cut: stopped at the page limit with more to come
+}
+function lioStatus_(msg){ const el=$("lioStatus"); if(el) el.innerHTML=msg; }
+/* Make sure the property's layers are on this phone: from the phone, else the account's Drive,
+   else the province. `force` = Refresh: always the province. `quiet` = no "nothing to do" toasts. */
+async function lioEnsure_(tract, force, quiet){
+  tract=String(tract||"").trim(); if(!tract){ if(!quiet) toast("Choose the property first (Layers → Property & provincial layers)",true); return; }
+  const k=propK_(tract); if(_lioBusy[k]) return; _lioBusy[k]=1;
+  try{
+    const ext=propExtent_(tract);
+    if(!ext){ lioStatus_(`No outline or compartments for <b>${esc(tract)}</b> yet — the provincial layers need one of them.`); if(!quiet) toast("Load or draw the property outline or its compartments first",true); return; }
+    const want=lioPad_(ext,LIO_MARGIN_M), need=lioPad_(ext,LIO_MARGIN_M*0.8);
+    let cache=null; try{ cache=await ldbGet(lioKey_(tract)); }catch(e){}
+    const complete=c=>c&&c.layers&&LIO_LAYERS.every(L_=>c.layers[L_.k]&&c.layers[L_.k].fc);
+    if(!force && cache && !cache.partial && lioCovers_(cache.bbox,need) && complete(cache)){ lioUse_(tract,cache); return; }
+    if(isOffline()){
+      if(cache){ lioUse_(tract,cache); lioStatus_(`Showing the copy saved ${esc(lioWhen_(cache.at))}. No signal to fetch more.`); }
+      else lioStatus_(`No signal — the provincial layers for <b>${esc(tract)}</b> will be fetched when there is.`);
+      return;
+    }
+    const lastTry=lioTries_()[k];
+    if(!force && lastTry && Date.now()-lastTry<LIO_RETRY_MS){
+      if(cache){ lioUse_(tract,cache); lioStatus_(`Showing the copy saved ${esc(lioWhen_(cache.at))}. The province did not answer earlier — Refresh to try again now.`); }
+      else lioStatus_(`The province's map service did not answer earlier — Refresh to try again.`);
+      return;
+    }
+    // another phone may already have fetched them
+    if(!force && propBackendOk && connected && PROPS.lio && PROPS.lio[k]){
+      const d=await new Promise(res=>jsonp_("action=lioget&tract="+encodeURIComponent(tract), r=>res(r), 60000));
+      if(d&&d.ok&&d.data&&d.data.layers&&lioCovers_(d.data.bbox,need)&&complete(d.data)){ try{ await ldbPut(lioKey_(tract),d.data); }catch(e){} lioUse_(tract,d.data); return; }
+    }
+    lioStatus_(`Fetching the provincial layers for <b>${esc(tract)}</b>…`);
+    const out={v:1, tract:tract, bbox:want, at:new Date().toISOString(), layers:{}}, failed=[];
+    for(const L_ of LIO_LAYERS){
+      try{ const fc=await lioFetchLayer_(L_, want); out.layers[L_.k]={fc:{type:"FeatureCollection",features:fc.features}, n:fc.features.length, at:out.at, cut:!!fc.cut}; }
+      catch(e){ failed.push(L_.label+": "+String(e&&e.message||e).slice(0,60));
+        const old=cache&&cache.layers&&cache.layers[L_.k]; if(old) out.layers[L_.k]=Object.assign({},old,{stale:true}); }
+    }
+    const got=LIO_LAYERS.filter(L_=>out.layers[L_.k]&&!out.layers[L_.k].stale).length;
+    if(!got){                                             // nothing came back: keep what there was
+      if(cache) lioUse_(tract,cache);
+      lioStatus_(`The province's map service did not answer.${cache?` Showing the copy saved ${esc(lioWhen_(cache.at))}.`:""}`);
+      toast("Couldn't reach the provincial map service"+(cache?" — showing the saved copy":" — try Refresh later"),true);
+      lioTried_(k,Date.now()); lioLogFail_(tract,failed); return;
+    }
+    if(failed.length){ out.partial=true; lioTried_(k,Date.now()); }      // fetched again later, or on Refresh
+    else lioTried_(k,null);
+    try{ await ldbPut(lioKey_(tract),out); }catch(e){}
+    lioUse_(tract,out);
+    if(failed.length){ toast("Some provincial layers did not load: "+failed.map(x=>x.split(":")[0]).join(", ")+(cache?" — kept the saved copy of those":""),true); lioLogFail_(tract,failed); }
+    else if(!quiet || force) toast("Provincial layers saved for "+tract);
+    if(propBackendOk && !failed.length){
+      const text=JSON.stringify(out);
+      sheetPost_({_action:"lioput", tract:tract, data:text}).then(j=>{ if(j&&j.ok){ PROPS.lio[k]={kb:j.kb,when:out.at}; propPersist_(); } }).catch(()=>{});
+    }
+  } finally { delete _lioBusy[k]; }
+}
+function lioLogFail_(tract,failed){ if(!propBackendOk||!connected||isOffline()) return;
+  const last=lioTries_()["__log"]; if(last && Date.now()-last<3600*1000) return;          // once an hour from a phone; the Sheet keeps one an hour per account
+  lioTried_("__log",Date.now());
+  try{ sheetPost_({_action:"liolog", tract:tract, failed:failed}).catch(()=>{}); }catch(e){} }
+function lioWhen_(iso){ try{ const d=new Date(iso); return d.toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}); }catch(e){ return String(iso||""); } }
+function lioUse_(tract,cache){ lioCache=cache; lioCacheTract=tract;
+  const n=LIO_LAYERS.reduce((s,L_)=>s+((cache.layers[L_.k]&&cache.layers[L_.k].n)||0),0);
+  const cut=LIO_LAYERS.filter(L_=>cache.layers[L_.k]&&cache.layers[L_.k].cut).map(L_=>L_.label);
+  lioStatus_(`<b>${esc(tract)}</b>: ${n} provincial features, saved ${esc(lioWhen_(cache.at))}${cache.partial?" (some layers from an older copy)":""}.`+
+    (cut.length?` ${esc(cut.join(", "))}: too many to fetch — only part of the area is shown.`:""));
+  lioRender_(); }
+/* ---- on the map ---- */
+const LIO_STYLE={
+  lots:     {color:"#f5f5f5", weight:1, opacity:0.75, dashArray:"6 4", fill:false},
+  roads:    {color:"#ffb74d", weight:2, opacity:0.9, fill:false},
+  water:    {color:"#4fc3f7", weight:2, opacity:0.95, fill:false},
+  waterbody:{color:"#4fc3f7", weight:1, opacity:0.9, fillColor:"#29b6f6", fillOpacity:0.35},
+  wetland:  {color:"#26a69a", weight:1, opacity:0.9, fillColor:"#4db6ac", fillOpacity:0.25, dashArray:"3 3"},
+  contour:  {color:"#d7b377", weight:1, opacity:0.7, fill:false},
+  building: {color:"#212121", weight:1, opacity:0.9, fillColor:"#eeeeee", fillOpacity:0.6}
+};
+function lioToggle_(k){ lioVis[k]=!lioVis[k]; try{ STORE&&STORE.setItem("fi_liovis",JSON.stringify(lioVis)); }catch(e){} lioRender_(); }
+function lioTogglesHtml_(){
+  return `<div class="layer-hd" style="margin-top:2px">Provincial layers</div>`+LIO_LAYERS.map(L_=>{ const n=(lioCache&&lioCache.layers&&lioCache.layers[L_.k]&&lioCache.layers[L_.k].n)||0, on=!!lioVis[L_.k];
+    return `<div class="visrow"><span onclick="lioToggle_('${L_.k}')" style="flex:1;cursor:pointer">${esc(L_.label)} <small>(${n})</small></span>`+
+      `<span class="visdot ${on?"on":""}" onclick="lioToggle_('${L_.k}')" style="cursor:pointer">${on?"ON":"OFF"}</span></div>`; }).join("");
+}
+function lioRender_(){
+  const box=$("lioToggles"); if(box) box.innerHTML=lioTogglesHtml_();
+  const pt=$("propActiveName"); if(pt) pt.textContent=propActiveTract_()||"none chosen";
+  if(typeof fmap==="undefined"||!fmap||!window.L) return;
+  if(!lioRenderer){ try{ fmap.createPane("lioPane"); fmap.getPane("lioPane").style.zIndex=350; fmap.getPane("lioPane").style.pointerEvents="none"; }catch(e){}
+    lioRenderer=L.canvas({pane:"lioPane",padding:0.5}); lioLayer=L.layerGroup().addTo(fmap); lioLabelLayer=L.layerGroup().addTo(fmap); propLineLayer=L.layerGroup().addTo(fmap);
+    fmap.on("zoomend moveend",lioLabels_); }
+  lioLayer.clearLayers(); propLineLayer.clearLayers();
+  const t=propActiveTract_(), sameTract=lioCache&&propK_(lioCacheTract)===propK_(t);
+  let any=false;
+  if(sameTract) LIO_LAYERS.forEach(L_=>{ const d=lioCache.layers[L_.k]; if(!lioVis[L_.k]||!d||!d.fc||!d.fc.features.length) return; any=true;
+    const st=Object.assign({pane:"lioPane",renderer:lioRenderer,interactive:false}, LIO_STYLE[L_.k]);
+    L.geoJSON(d.fc,{renderer:lioRenderer, style:f=>{ if(L_.k==="water"&&/intermit/i.test(String(f.properties&&f.properties.PERMANENCY||""))) return Object.assign({},st,{dashArray:"5 4"}); return st; },
+      pointToLayer:(f,ll)=>L.circleMarker(ll,Object.assign({radius:3},st)), interactive:false, pane:"lioPane"}).addTo(lioLayer); });
+  const p=propGet_(t);
+  if(p&&Array.isArray(p.boundary)&&p.boundary.length) p.boundary.forEach(r=>L.polygon(r,{color:"#ff1744",weight:3,fill:false,interactive:false}).addTo(propLineLayer));
+  let at=$("lioAttrib");
+  if(!at){ const mv=$("mapView"); if(mv){ at=document.createElement("div"); at.id="lioAttrib";
+    at.style.cssText="position:absolute;left:6px;bottom:calc(4px + env(safe-area-inset-bottom));z-index:900;font:10px system-ui;color:#fff;background:rgba(0,0,0,.45);padding:2px 5px;border-radius:4px;pointer-events:none;max-width:70%";
+    at.textContent=LIO_ATTRIB; mv.appendChild(at); } }
+  if(at) at.style.display=any?"block":"none";
+  lioLabels_();
+}
+/* Lot and concession numbers, only when zoomed in enough to read them. */
+function lioLabels_(){
+  if(!lioLabelLayer||!fmap) return; lioLabelLayer.clearLayers();
+  if(!lioCache||!lioVis.lots||propK_(lioCacheTract)!==propK_(propActiveTract_())||fmap.getZoom()<15) return;
+  const d=lioCache.layers.lots; if(!d||!d.fc) return;
+  const view=fmap.getBounds(); let n=0;
+  d.fc.features.forEach(f=>{ if(n>=60) return; const ps=featPolys_(f); if(!ps.length) return;
+    let w=1/0,s=1/0,e=-1/0,nn=-1/0; ps.forEach(pg=>(pg[0]||[]).forEach(q=>{ if(q[1]<w)w=q[1]; if(q[1]>e)e=q[1]; if(q[0]<s)s=q[0]; if(q[0]>nn)nn=q[0]; }));
+    const c=[(s+nn)/2,(w+e)/2]; if(!view.contains(c)) return;
+    const pr=f.properties||{}, txt=[pr.LOT_IDENT,pr.CONCESSION_IDENT].filter(Boolean).join(" · "); if(!txt) return;
+    n++; L.marker(c,{interactive:false,keyboard:false,icon:L.divIcon({className:"lio-lbl",html:`<span style="font:600 10px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000;white-space:nowrap">${esc(txt)}</span>`,iconSize:[0,0]})}).addTo(lioLabelLayer); });
+}
+/* When the map opens: the chosen property's layers, fetched if this phone has none yet. */
+function lioOnMapOpen_(){
+  const t=propActiveTract_();
+  const go=()=>{ if(t) lioEnsure_(t,false,true); else lioRender_(); };
+  if(!t){ lioRender_(); return; }
+  ldbGet(lioKey_(t)).then(c=>{ if(c&&c.layers){ lioUse_(t,c); } go(); }).catch(go);
+  if(!propBackendOk && connected && !isOffline()) propSync_(ok=>{ if(ok) lioRender_(); });
+}
+function propPickActive_(v){ propSetActive_(v); lioCache=null; lioRender_(); lioOnMapOpen_(); }
+function propActiveOptions_(){ const t=propActiveTract_(); return [["","— choose —"]].concat(propTracts_().map(x=>[x,x])).map(o=>`<option value="${esc(o[0])}"${o[0]===t?" selected":""}>${esc(o[1])}</option>`).join(""); }
+function propMenuOpen_(){ const s=$("propActiveSel"); if(s) s.innerHTML=propActiveOptions_(); lioRender_(); }
+/* ============ v381 — find an address ============
+   Esri's World Geocoding Service (the same company as the aerial photo), used as a SEARCH — the
+   result is shown on the map, never stored, which is the use Esri allows without a key. Ontario
+   rural 911 addresses tested 2026-10-08: "4250 Aurora Road, Whitchurch-Stouffville" → exact match.
+   Results near the map's centre are preferred. A chosen result is marked with a pin until cleared. */
+const FIND_URL="https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates";
+let findPin=null, _findSeq=0, _findHits=[];
+function findOpen_(){ const b=$("findBar"); if(!b) return;
+  const show=b.style.display==="none"; b.style.display=show?"block":"none"; const t=$("toolFind"); if(t) t.classList.toggle("on",show);
+  if(show){ const i=$("findInput"); if(i) try{ i.focus(); }catch(e){} findRender_(); } }
+function findClose_(){ const b=$("findBar"); if(b) b.style.display="none"; const t=$("toolFind"); if(t) t.classList.remove("on"); try{ const i=$("findInput"); if(i) i.blur(); }catch(e){} }
+function findUrl_(q){
+  const p=["SingleLine="+encodeURIComponent(q),"f=json","maxLocations=6","countryCode=CAN","outFields=Match_addr,Addr_type,Type"];
+  try{ if(typeof fmap!=="undefined"&&fmap){ const c=fmap.getCenter(); p.push("location="+c.lng.toFixed(5)+","+c.lat.toFixed(5)); } }catch(e){}
+  return FIND_URL+"?"+p.join("&");
+}
+/* How close to zoom for each kind of answer: a house lands on the lot; a street, town or region
+   needs to stand further back. */
+function findZoom_(t){ t=String(t||""); if(/PointAddress|Subaddress|StreetAddress|StreetInt|POI/i.test(t)) return 17;
+  if(/StreetName|Postal/i.test(t)) return 15; if(/Locality|Neighborhood|District/i.test(t)) return 13; return 11; }
+function findGo_(){
+  const i=$("findInput"), q=String((i&&i.value)||"").trim();
+  if(q.length<3){ findMsg_("Type an address — at least the street and town."); return; }
+  if(isOffline()){ findMsg_("Finding an address needs signal. The map itself still works."); return; }
+  const seq=++_findSeq; findMsg_("Searching…");
+  let ctl=null; try{ ctl=new AbortController(); }catch(e){}
+  const timer=setTimeout(()=>{ try{ ctl&&ctl.abort(); }catch(e){} if(seq===_findSeq) findMsg_("No answer from the address search — try again in a moment."); },15000);
+  fetch(findUrl_(q), ctl?{signal:ctl.signal}:{}).then(r=>r.json()).then(j=>{
+    clearTimeout(timer); if(seq!==_findSeq) return;                 // an older search answering late is ignored
+    if(j&&j.error){ findMsg_("The address search said: "+String((j.error&&j.error.message)||"error")); return; }
+    _findHits=((j&&j.candidates)||[]).filter(c=>c&&c.location&&isFinite(c.location.x)&&isFinite(c.location.y)&&(c.score==null||c.score>=60)).slice(0,6);
+    if(!_findHits.length){ findMsg_("Nothing found for “"+q+"”. Check the spelling, or add the town."); return; }
+    if(_findHits.length===1 || (_findHits[0].score>=99 && !(_findHits[1]&&_findHits[1].score>=99))) { findPick_(0); return; }
+    findRender_();
+  }).catch(()=>{ clearTimeout(timer); if(seq===_findSeq) findMsg_("Couldn't reach the address search — check the signal and try again."); });
+}
+function findMsg_(m){ const r=$("findResults"); if(r) r.innerHTML=`<div style="color:#cfe3d2;font-size:13px;line-height:1.4;padding:4px 2px">${esc(m)}</div>`; }
+function findRender_(){
+  const r=$("findResults"); if(!r) return;
+  let h=_findHits.map((c,i)=>`<button type="button" onclick="findPick_(${i})" style="display:block;width:100%;text-align:left;padding:9px;margin:0 0 5px;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#e8f0e6;font:inherit;font-size:13px">📍 ${esc(c.address||(c.attributes&&c.attributes.Match_addr)||"")}</button>`).join("");
+  if(findPin) h+=`<button type="button" onclick="findClearPin_()" style="display:block;width:100%;text-align:left;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#cdebcf;font:inherit;font-size:12px">✕ Remove the search pin</button>`;
+  r.innerHTML=h;
+}
+function findPick_(i){
+  const c=_findHits[i]; if(!c) return;
+  const lat=+c.location.y, lon=+c.location.x, name=String(c.address||(c.attributes&&c.attributes.Match_addr)||"");
+  const z=findZoom_((c.attributes&&c.attributes.Addr_type)||"");
+  if(typeof fmap==="undefined"||!fmap||!window.L) return;
+  findClearPin_(true);
+  findPin=L.marker([lat,lon],{zIndexOffset:2000,icon:L.divIcon({className:"find-pin",iconSize:[26,36],iconAnchor:[13,34],
+    html:`<div style="font-size:30px;line-height:30px;filter:drop-shadow(0 1px 2px #000)">📍</div>`})}).addTo(fmap);
+  findPin.bindPopup(`<div style="font-size:13px;line-height:1.4"><b>${esc(name)}</b><br><span style="color:#666;font-size:11px">Approximate — from the address search, not a survey.</span><br>`+
+    `<a href="#" onclick="event.preventDefault();findClearPin_();return false">Remove pin</a></div>`);
+  try{ fmap.setView([lat,lon], z); }catch(e){}
+  try{ findPin.openPopup(); }catch(e){}
+  findClose_();
+  toast("Found: "+name);
+}
+function findClearPin_(quiet){ if(findPin){ try{ fmap.removeLayer(findPin); }catch(e){} findPin=null; } if(!quiet){ findRender_(); try{ fmap.closePopup(); }catch(e){} } }
+/* ============ v382 — aerial photo sources ============
+   Ported from the Street Tree app (v215), where these were worked out and used in the field:
+   · Esri World Imagery — everywhere; the default and the fallback.
+   · York Region 2025 — 10 cm, flown spring 2025, from York's DYNAMIC service: tiles are asked for
+     by bounding box (export), so there is no cache scheme to get wrong. Its mosaic layer is a parent
+     whose children are Boundary, Footprint and Image; asking for the parent draws a green 1 km grid,
+     so the Image child is looked up by name (once, remembered).
+   · York Region 2022, Simcoe County 2022 and 2018 — cached services that do NOT use the standard
+     zoom numbering: their level 0 is the standard zoom 10 (York) or 9 (Simcoe). URL level = map zoom
+     + zOff, through Leaflet's zoomOffset. Below the first level they have nothing, so Esri shows there.
+   · Another service… — paste any tile URL; "Test these over this view" asks each service for one real
+     tile at the map's centre and keeps the level offset that works.
+   The built-in services send the headers a readable copy needs (the Street Tree app draws them into
+   its PDFs), so their tiles are loaded as CORS images like Esri's — the offline cache then never
+   keeps an unreadable error page as a tile. A pasted service is loaded plainly, since nothing is known
+   about it.
+   Outside its coverage a municipal service returns nothing, so after repeated failures the map shows
+   Esri and says so — without forgetting the choice. */
+const IMAGERY=[
+  {id:"esri", name:"Esri world imagery", zOff:0, maxNative:19, credit:"Esri, Maxar, Earthstar Geographics",
+   url:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", note:"Everywhere. The fallback.", cors:true},
+  {id:"york2025", name:"York Region 2025", type:"export", layer:1, maxNative:22, credit:"York Region",
+   url:"https://ww3.yorkmaps.ca/arcgis/rest/services/WMS/YorkRegion_OrthoImages_WMS/MapServer", note:"10 cm, flown spring 2025. The sharpest over York Region.", cors:true},
+  {id:"york2022", name:"York Region 2022", zOff:-10, maxNative:21, credit:"York Region",
+   url:"https://ww2.yorkmaps.ca/arcgis/rest/services/CacheMaps/YR_Imagery2022/MapServer/tile/{z}/{y}/{x}", note:"An earlier year, to compare against.", cors:true},
+  {id:"simcoe2022", name:"Simcoe County 2022", zOff:-9, maxNative:20, credit:"The Corporation of the County of Simcoe",
+   url:"https://maps.simcoe.ca/arcgis/rest/services/Public/Ortho_2022_Cache/MapServer/tile/{z}/{y}/{x}", note:"Simcoe's most recent public photography.", cors:true},
+  {id:"simcoe2018", name:"Simcoe County 2018", zOff:-9, maxNative:20, credit:"The Corporation of the County of Simcoe",
+   url:"https://maps.simcoe.ca/arcgis/rest/services/Public/Ortho_2018_Cache/MapServer/tile/{z}/{y}/{x}", note:"An earlier year.", cors:true},
+  {id:"custom", name:"Another service…", zOff:0, maxNative:21, credit:"", url:"", note:"Paste any ArcGIS tile URL."}
+];
+let imageryId="esri", imgBase=null, imgUnder=null, _imgFails=0, _imgFellBack=false;
+function imgLs_(k){ try{ return JSON.parse((STORE&&STORE.getItem(k))||"null"); }catch(e){ return null; } }
+function imgLsSet_(k,v){ try{ STORE&&STORE.setItem(k,typeof v==="string"?v:JSON.stringify(v)); }catch(e){} }
+try{ imageryId=(STORE&&STORE.getItem("fi_imagery"))||"esri"; }catch(e){}
+(function(){ const c=imgLs_("fi_imgcustom"); if(c&&c.url){ const s=IMAGERY.find(x=>x.id==="custom"); s.url=c.url; s.zOff=c.off||0; s.credit="Custom source"; }
+  const l=imgLs_("fi_imgoff"); if(l) IMAGERY.forEach(s=>{ if(l[s.id]!==undefined && s.id!=="esri") s.zOff=l[s.id]; });
+  const d=imgLs_("fi_imglayer"); if(d) IMAGERY.forEach(s=>{ if(d[s.id]!=null) s.drawLayer=d[s.id]; }); })();
+function imgSource_(){ const s=IMAGERY.find(x=>x.id===imageryId); return (s && s.url) ? s : IMAGERY[0]; }
+const MERC_HALF_=20037508.342789244;
+function imgBBox3857_(x,y,z){ const span=(MERC_HALF_*2)/Math.pow(2,z), xmin=-MERC_HALF_+x*span, ymax=MERC_HALF_-y*span; return [xmin,ymax-span,xmin+span,ymax].join(","); }
+/* One tile's address for any source: x, y, z are the MAP's tile numbers. */
+function imgTileUrl_(src,x,y,z){
+  if(src.type==="export") return src.url+"/export?bbox="+imgBBox3857_(x,y,z)+"&bboxSR=3857&imageSR=3857&size=256,256&format=jpg&transparent=false&layers=show:"+(src.drawLayer!=null?src.drawLayer:(src.layer!=null?src.layer:0))+"&f=image";
+  return src.url.replace("{z}",z+(src.zOff||0)).replace("{y}",y).replace("{x}",x);
+}
+/* The Image child of a dynamic mosaic, asked once and remembered (see above). */
+function imgResolveExport_(src){
+  if(src.type!=="export"||src.drawLayer!=null) return Promise.resolve();
+  return fetch(src.url+"?f=json").then(r=>r.json()).then(j=>{
+    const parent=src.layer!=null?src.layer:0, kid=((j&&j.layers)||[]).find(l=>l.parentLayerId===parent&&/image/i.test(l.name||""));
+    if(kid){ src.drawLayer=kid.id; const d=imgLs_("fi_imglayer")||{}; d[src.id]=kid.id; imgLsSet_("fi_imglayer",d); }
+  }).catch(()=>{});
+}
+let ImgExportLayer_=null;
+function imgExportClass_(){ if(!ImgExportLayer_) ImgExportLayer_=L.TileLayer.extend({
+  initialize:function(src,o){ this._src=src; L.TileLayer.prototype.initialize.call(this,"",o); },
+  getTileUrl:function(c){ return imgTileUrl_(this._src,c.x,c.y,c.z); } }); return ImgExportLayer_; }
+function setImagery_(id, first){
+  if(id==="custom" && !(IMAGERY.find(s=>s.id==="custom")||{}).url){ imgCustom_(); return; }
+  imageryId=IMAGERY.some(s=>s.id===id)?id:"esri"; if(!first) imgLsSet_("fi_imagery",imageryId);
+  const src=imgSource_();
+  if(src.type==="export" && src.drawLayer==null){ imgResolveExport_(src).then(()=>{ if(imageryId===src.id) imgDraw_(); }); }
+  imgDraw_();
+  if(!first){ imgRender_(); toast("Aerial photo: "+src.name); }
+}
+function imgDraw_(srcOverride){
+  if(typeof fmap==="undefined"||!fmap||!window.L) return;
+  const src=srcOverride||imgSource_();
+  if(imgBase){ try{ fmap.removeLayer(imgBase); }catch(e){} imgBase=null; }
+  if(imgUnder){ try{ fmap.removeLayer(imgUnder); }catch(e){} imgUnder=null; }
+  const esri=IMAGERY[0];
+  if(src.type==="export"){
+    imgBase=new (imgExportClass_())(src,{maxZoom:22,maxNativeZoom:src.maxNative||22,crossOrigin:!!src.cors,attribution:src.credit});
+  } else {
+    /* A cache whose first level is standard zoom 10 has nothing below it: Esri fills in there. */
+    const minZ=Math.max(0,-(src.zOff||0));
+    imgBase=L.tileLayer(src.url,{maxZoom:22,maxNativeZoom:src.maxNative||19,minZoom:minZ,zoomOffset:src.zOff||0,crossOrigin:!!src.cors,attribution:src.credit});
+    if(minZ>0) imgUnder=L.tileLayer(esri.url,{maxZoom:minZ-1,maxNativeZoom:19,crossOrigin:true}).addTo(fmap);
+  }
+  imgBase.addTo(fmap); try{ imgBase.setZIndex(0); if(imgUnder) imgUnder.setZIndex(0); }catch(e){}
+  _imgFails=0;
+  if(src.id!=="esri" && imgBase.on){
+    imgBase.on("tileerror",()=>{
+      if(_imgFellBack || src.id!==imgSource_().id) return;
+      if(++_imgFails<8) return;
+      _imgFellBack=true; imgDraw_(esri); _imgFellBack=false;      // the choice is kept, so it returns next time
+      toast(src.name+" has no photo here (or is not answering) — showing Esri",true);
+    });
+    imgBase.on("tileload",()=>{ if(_imgFails) _imgFails=Math.max(0,_imgFails-1); });
+  }
+  imgCredit_(srcOverride?esri:src);
+}
+function imgCredit_(src){
+  let el=$("imgCredit");
+  if(!el){ const mv=$("mapView"); if(!mv) return; el=document.createElement("div"); el.id="imgCredit";
+    el.style.cssText="position:absolute;right:66px;bottom:calc(4px + env(safe-area-inset-bottom));z-index:900;font:9px system-ui;color:#fff;background:rgba(0,0,0,.4);padding:1px 4px;border-radius:3px;pointer-events:none"; mv.appendChild(el); }
+  el.textContent="Imagery: "+(src.credit||src.name);
+}
+function imgRender_(){
+  const nm=$("imgName"); if(nm) nm.textContent=imgSource_().name;
+  const box=$("imgList"); if(!box) return;
+  box.innerHTML=IMAGERY.map(s=>`<button type="button" onclick="${s.id==="custom"&&!s.url?"imgCustom_()":`setImagery_('${s.id}')`}">${s.id===imageryId?"✓ ":""}${esc(s.name)}`+
+      `<div style="color:#8fae95;font-size:11px;margin-top:2px">${esc(s.note)}</div></button>`).join("")+
+    `<button type="button" onclick="imgCustom_()">✎ Set up another service</button>`+
+    `<button type="button" id="imgTestBtn" onclick="imgTest_()">🔎 Test these over this view</button>`+
+    `<div id="imgTestLine" class="ls-muted" style="font-size:11px;line-height:1.4;padding:2px">Pan to the property first, then test — it asks each service for one real tile there and keeps the setting that works. Outside York Region or Simcoe County their photos are blank, and the map shows Esri.</div>`;
+}
+function imgCustom_(){
+  const src=IMAGERY.find(s=>s.id==="custom"), saved=imgLs_("fi_imgcustom")||{};
+  const url=prompt("Tile URL, with {z}, {y} and {x} where the level, row and column go.\n\nAn ArcGIS cache looks like:\nhttps://…/MapServer/tile/{z}/{y}/{x}\n(ArcGIS puts the ROW before the COLUMN.)", saved.url||"https://…/MapServer/tile/{z}/{y}/{x}");
+  if(url===null) return;
+  const u=String(url).trim();
+  if(!/^https:\/\//i.test(u) || u.indexOf("{z}")<0 || u.indexOf("{x}")<0 || u.indexOf("{y}")<0){ toast("That needs to be an https address with {z}, {y} and {x} in it",true); return; }
+  const off=prompt("Level offset. On the MapServer page, Tile Info, Level 0 resolution:\n  156543 → 0 (standard)\n  305.75 → -9\n  152.87 → -10\nNot sure? Leave 0 and use Test these over this view.", String(saved.off!==undefined?saved.off:0));
+  if(off===null) return;
+  src.url=u; src.zOff=parseInt(off,10)||0; src.credit="Custom source"; src.name="Another service"; 
+  imgLsSet_("fi_imgcustom",{url:src.url,off:src.zOff});
+  setImagery_("custom");
+}
+function imgTryTile_(url){ return new Promise(res=>{ const im=new Image(); let done=false; const end=ok=>{ if(!done){ done=true; res(ok); } };
+  im.onload=()=>end(im.width>4); im.onerror=()=>end(false); setTimeout(()=>end(false),6000); im.src=url; }); }
+async function imgProbe_(src){
+  const z=Math.min(18,Math.max(14,fmap.getZoom())), c=fmap.getCenter(), t=tileXY_(c.lat,c.lng,z);
+  if(src.type==="export"){ await imgResolveExport_(src); return (await imgTryTile_(imgTileUrl_(src,t[0],t[1],z))) ? 0 : null; }
+  for(const off of [src.zOff||0,0,-9,-10,-11,-8]){ const lvl=z+off; if(lvl<0||lvl>23) continue;
+    if(await imgTryTile_(imgTileUrl_(Object.assign({},src,{zOff:off}),t[0],t[1],z))) return off; }
+  return null;
+}
+let _imgTesting=false;
+async function imgTest_(){
+  if(typeof fmap==="undefined"||!fmap){ toast("Open the map first",true); return; }
+  if(isOffline()){ toast("Testing needs signal",true); return; }
+  if(_imgTesting) return; _imgTesting=true;
+  const line=t=>{ const el=$("imgTestLine"); if(el) el.innerHTML=t; };
+  const out=[];
+  try{
+    for(const src of IMAGERY){ if(!src.url||src.id==="esri") continue;
+      line("Trying "+esc(src.name)+"…");
+      const off=await imgProbe_(src);
+      if(off!==null){ src.zOff=off; out.push(src.type==="export"?`${src.name}: works here`:`${src.name}: works here${off?` (level offset ${off})`:""}`); }
+      else out.push(`${src.name}: no photo here`); }
+    const learned={}; IMAGERY.forEach(s=>{ if(s.id!=="esri"&&s.type!=="export") learned[s.id]=s.zOff; }); imgLsSet_("fi_imgoff",learned);
+  } finally { _imgTesting=false; }
+  imgRender_(); line(out.map(esc).join("<br>"));
+  if(imgSource_().id!=="esri") imgDraw_();
+}
 </script>
 </body>
 </html>

@@ -2,13 +2,13 @@
    © 2026 Silv-Econ Ltd. All rights reserved. Proprietary — no license granted.
    Caches the app shell + map libraries so the form (and map shell) open with no signal
    after the first online visit. Bump CACHE when you change index.html so devices update. */
-const CACHE = "fi-plotcard-v377";
+const CACHE = "fi-plotcard-v382";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 // Aerial imagery tiles, kept in their own cache so an app update never wipes them: whatever
 // ground the crew panned over while in signal stays viewable back in the bush. Imagery doesn't
 // change, so tiles are served cache-first and only fetched when they're missing.
 const TILE_CACHE = "fi-plotcard-tiles";
-const TILE_HOSTS = ["server.arcgisonline.com", "services.arcgisonline.com"];
+const TILE_HOSTS = ["server.arcgisonline.com", "services.arcgisonline.com", "ww2.yorkmaps.ca", "ww3.yorkmaps.ca", "maps.simcoe.ca"];   // v382: York Region and Simcoe County photography too
 const TILE_MAX = 9000;   // roughly 200 MB of imagery; oldest tiles drop off beyond this (v371: room for a downloaded area of up to 6000)
 async function trimTiles_() {
   const c = await caches.open(TILE_CACHE);
