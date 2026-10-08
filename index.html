@@ -1174,7 +1174,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-07 · v376";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-08 · v377";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1482,6 +1482,53 @@ function adoptKept_(kept){
 /* What the cruiser emptied on purpose: the plot held a value and this edit removed it. The Sheet is
    told, so it writes the cell empty instead of keeping its own value. The note stays with the plot
    until the field is filled again. */
+/* v377 — the plot as it was when this phone was last in step with the Sheet (its "base"). What the
+   cruiser has changed since is worked out against it and sent as `_edited`; the Sheet keeps its own
+   value for everything else, so a correction made at the office is not undone by an old copy here.
+   Only non-empty values are stored, to keep the phone's storage small. */
+const BASE_SKIP_={PlotID:1,SubmittedAt:1,ACCOUNT:1,AGECLASS:1,PHOTO_LINKS:1};
+const baseNorm_=v=>(v===undefined||v===null)?"":String(v).trim();
+/* A date compares as a clock reading, whichever way it was written (the Sheet's feed sends an instant). */
+function dateCanon_(v){ const t=baseNorm_(v); if(!t) return "";
+  const p2=n=>String(n).padStart(2,"0");
+  if(/^\d{4}-\d\d-\d\dT/.test(t) && /([Zz]|[+\-]\d\d:?\d\d)$/.test(t)){ const d=new Date(t); if(isFinite(d.getTime())) return d.getFullYear()+"-"+p2(d.getMonth()+1)+"-"+p2(d.getDate())+" "+p2(d.getHours())+":"+p2(d.getMinutes())+":"+p2(d.getSeconds()); }
+  const m=/^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(t);
+  return m ? m[1]+"-"+p2(m[2])+"-"+p2(m[3])+" "+p2(m[4])+":"+m[5]+":"+p2(m[6]||0) : t; }
+const baseCanon_=(f,v)=>f==="DATE"?dateCanon_(v):baseNorm_(v);
+/* Kept small: four characters per field (a fingerprint of the value), not the values themselves. */
+function baseH_(s){ let h=0x811c9dc5; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,0x01000193)>>>0; } return ("0000"+(h%1679616).toString(36)).slice(-4); }
+/* The first four characters fingerprint the field list itself: a later build that renames or reorders
+   fields cannot read an old base against the wrong fields — the plot then goes as a whole row. */
+const BASE_SIG_=baseH_(HEADER.join(","));
+function baseOf_(p){ return BASE_SIG_+HEADER.map(f=>BASE_SKIP_[f]?"----":baseH_(baseCanon_(f,p[f]))).join(""); }
+function baseOk_(p){ return !!p && typeof p._base==="string" && p._base.length===HEADER.length*4+4 && p._base.slice(0,4)===BASE_SIG_; }
+function editedOf_(p){ if(!baseOk_(p)) return null; const b=p._base;
+  return HEADER.filter((f,i)=>!BASE_SKIP_[f] && b.substr(4+i*4,4)!==baseH_(baseCanon_(f,p[f]))); }
+function baseSet_(p,f,v){ if(!baseOk_(p)) return; const i=HEADER.indexOf(f); if(i<0||BASE_SKIP_[f]) return; p._base=p._base.slice(0,4+i*4)+baseH_(baseCanon_(f,v))+p._base.slice(4+i*4+4); }
+/* What goes over the wire: `_edited` instead of the base itself. */
+function outPlot_(p){ if(!p || typeof p!=="object" || !("_base" in p)) return p; const q=Object.assign({},p); const ed=editedOf_(p); delete q._base; if(ed) q._edited=ed; return q; }
+function outBody_(o){
+  if(!o || typeof o!=="object") return o;
+  const act=String(o._action||"");
+  if(act==="") return outPlot_(o);
+  if(act==="plotbatch" && Array.isArray(o.plots)) return Object.assign({},o,{plots:o.plots.map(outPlot_)});
+  return o;
+}
+/* The Sheet sent back values this phone was behind on, for fields the cruiser had not changed. Take
+   one only if the phone still holds what it sent (a later edit, or a later reply, wins) and the
+   plot is not open in the form. */
+function adoptSheet_(map, sentMap){
+  if(!map || typeof map!=="object") return;
+  let n=0;
+  saved.forEach((p,i)=>{ const m=p&&p._id&&map[p._id]; if(!m || typeof m!=="object") return;
+    if(editingIndex===i) return;
+    const was=(sentMap&&sentMap[p._id])||null;
+    Object.keys(m).forEach(f=>{ if(BASE_SKIP_[f] || f.charAt(0)==="_") return;
+      if(!was || !(f in was) || baseCanon_(f,p[f])!==baseCanon_(f,was[f])) return;
+      p[f]=m[f]; baseSet_(p,f,m[f]); n++; });
+  });
+  if(n){ try{ persist(); }catch(e){} try{ renderSaved(); }catch(e){} }
+}
 const CLEARABLE_=["AGE","TRACT","PHOTONUM"];
 function clearedNote_(before, d){
   const has=v=>!(v===undefined||v===null||String(v).trim()==="");
@@ -1494,14 +1541,15 @@ function postRefuse_(why){ const e=new Error(why); e.fiWhy=why; return e; }
 function sheetPost_(o){
   const act=String((o&&o._action)||"");
   if(POST_REFUSED[act]) return Promise.reject(postRefuse_("notavailable"));
-  const init={method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:postBody_(o)};
+  const init={method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:postBody_(outBody_(o))};
   if(!authBackendOk){ init.mode="no-cors"; return fetch(SCRIPT_URL,init).then(()=>null); }
   return fetch(SCRIPT_URL,init).then(r=>{
     let jp; try{ jp=r.json(); }catch(e){ return null; }
     return Promise.resolve(jp).then(j=>j, ()=>null);
   }).then(j=>{
     if(j && typeof j==="object" && j.ok!==false){ if(j.capRefused) capSeen_(j, true); else if(j.capWarn) capSeen_(j.capWarn, false);
-      if(j.kept) { try{ adoptKept_(j.kept); }catch(e){} } }
+      if(j.kept) { try{ adoptKept_(j.kept); }catch(e){} }
+      if(j.sheet) { try{ adoptSheet_(j.sheet, j.sent); }catch(e){} } }
     if(!j || typeof j!=="object" || j.ok!==false) return j||null;
     const err=String(j.error||"");
     if(err==="auth"){ try{ authCheck_(); }catch(e){} throw postRefuse_("auth"); }
@@ -2663,7 +2711,7 @@ function plotConfirm_(list, then){
     const judge=r=>{
       if(!(r && r.ok && r.plot)) return;
       const mm=plotMismatch_(p, r.plot, r.hasDateText ? String(r.dateText||"") : undefined);
-      if(!mm.length){ p._sent=true; delete p._mismatch; delete p._mmN; delete p._mmSig; delete p._batchRetry; okN++; }
+      if(!mm.length){ p._sent=true; p._base=baseOf_(p); delete p._mismatch; delete p._mmN; delete p._mmSig; delete p._batchRetry; okN++; }
       else {
         const sig=plotSig_(p);
         if(p._mmSig!==sig){ p._mmSig=sig; p._mmN=0; }
@@ -2742,8 +2790,11 @@ function finalizeSubmit(d){
     return;
   }
   const isUpdate = editingIndex!=null;
+  if(editingIndex!=null && saved[editingIndex] && String(saved[editingIndex].PLOTSRC||"").trim()) d.PLOTSRC=saved[editingIndex].PLOTSRC;   // v377: editing never changes where a plot came from
   if(!String(d.PLOTSRC||"").trim()) d.PLOTSRC="FIELD";   // note the source of a field-collected plot (imported plots use "IMPORTED")
-  if(isUpdate){ d._id = saved[editingIndex]._id || genId(); clearedNote_(saved[editingIndex], d); saved[editingIndex]=d; }
+  if(isUpdate){ const was_=saved[editingIndex]; d._id = was_._id || genId(); clearedNote_(was_, d);
+    if(baseOk_(was_)) d._base=was_._base;   // v377: the edit is measured against the plot as last confirmed in step with the Sheet
+    saved[editingIndex]=d; }
   else { d._id = genId(); saved.push(d); }
   persist();
   send(d,isUpdate);
@@ -5458,11 +5509,15 @@ function restoreFromSheet(quiet){
       rows.forEach(r=>{
         const id=String(r.PlotID||"").trim(); if(!id) return;
         const mine=byId[id]; if(!mine || !mine._sent) return;      // unsent local work is left alone
+        /* v377: a plot this phone holds exactly as the Sheet does is in step — give it its base, so a
+           later edit here cannot undo a correction made afterwards at the office. */
+        if(!baseOk_(mine) && !mine._mismatch){ try{ if(!plotMismatch_(mine, r, undefined).length) mine._base=baseOf_(mine); }catch(e){} }
         SHEET_OWNED.forEach(f=>{
           if(!(f in r)) return;
           const now=String(r[f]==null?"":r[f]).trim(), was=String(mine[f]==null?"":mine[f]).trim();
           if(now===was) return;
           mine[f]=r[f]; changed++; changedFields[f]=(changedFields[f]||0)+1;
+          baseSet_(mine,f,r[f]);
         });
       });
       if(changed){
@@ -5478,7 +5533,7 @@ function restoreFromSheet(quiet){
         if(rid && haveIds.has(rid)) return;                    // already on the device
         let n=0; for(let i=1;i<=28;i++){ if(r["T"+i+"SP"]) n++; }
         r._id = r.PlotID || genId();      // KEEP the Sheet's PlotID so later edits update the row (not duplicate)
-        r._sent=true; r._ts=r.DATE||nowStr(); r._trees=n;
+        r._sent=true; r._ts=r.DATE||nowStr(); r._trees=n; r._base=baseOf_(r);   // v377: exactly what the Sheet holds
         /* Anything restored from the Sheet is, by definition, already in the Sheet. It used to be
            sorted by PLOTSRC — so a plot pushed from one device came back on another as a blue
            "imported" pin still asking to be pushed, which is what the crew were seeing. PLOTSRC is
@@ -8160,6 +8215,7 @@ function sheetPlotEdit_(){
   const rec=Object.assign({}, s.plot);
   rec._id = s.id || rec._id || genId();
   rec._sent = true;
+  rec._base = baseOf_(rec);              // v377: pulled from the Sheet, so in step by definition
   rec._fromSheet = s.submitted || "";     // what the row looked like when we pulled it
   closePlotCard();
   const at=saved.findIndex(q=>q && String(q._id||"")===String(rec._id));
