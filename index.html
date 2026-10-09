@@ -760,6 +760,12 @@
         <div class="map-field" id="areaFieldRow" style="display:none">
           <label>Area field (official hectares — used if filled, else calculated)</label><select id="areaFieldSel" onchange="setAreaField(this.value)"></select>
         </div>
+        <div class="map-field" id="acFieldRow" style="display:none">
+          <label>Acres field (used if filled, else from the hectares)</label><select id="acFieldSel" onchange="setAcField(this.value)"></select>
+        </div>
+        <div class="map-field" id="adjFieldRow" style="display:none">
+          <label>Adjusted acres field (kept as filled; the rest are shared out to match the MPAC acres)</label><select id="adjFieldSel" onchange="setAdjField(this.value)"></select>
+        </div>
         <div class="map-field popupfields" id="popupFieldRow" style="display:none">
           <label>Tap-a-stand popup fields</label>
           <div id="popupFieldList" class="popupfield-list"></div>
@@ -823,6 +829,7 @@
   <div class="map-rail">
     <!-- tap-to-place button removed: use "＋ Create inventory plot" (crosshair/GPS) instead; tapping conflicted with selecting polygons -->
     <button class="map-tool" id="toolFind" type="button" onclick="findOpen_()" title="Find an address"><span class="mt-i">🔎</span><span class="mt-l">Find</span></button>
+    <button class="map-tool" id="toolText" type="button" onclick="mnOpen_()" title="Notes and arrows for the maps"><span class="mt-i">✎</span><span class="mt-l">Text</span></button>
     <button class="map-tool" id="toolTrack" type="button" onclick="toggleTrack()" title="Record where you walk"><span class="mt-i">⏺</span><span class="mt-l">Track</span></button>
     <button class="map-tool" id="toolMeasure" type="button" onclick="toggleMeasure()" title="Measure a distance or an area"><span class="mt-i">📐</span><span class="mt-l">Measure</span></button>
     <button class="map-tool" id="toolRoute" type="button" onclick="toggleRoute()" title="Lay out a cruise line to follow"><span class="mt-i">〰️</span><span class="mt-l">Route</span></button>
@@ -1199,7 +1206,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-08 · v382";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-09 · v387";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1453,7 +1460,7 @@ function apiPost_(o, ms){
    Until a readable answer has been seen, saves go the old way (no-cors), so nothing here can make a
    phone that syncs today stop syncing. */
 const POST_REFUSED={};
-const POST_LABEL={photo:"Photo upload", mapfile:"Saving files to Drive", layerput:"Adding a shared layer", propsave:"Saving property details", compsave:"Saving compartment details", lioput:"Keeping provincial layers in Drive", liolog:"Reporting a provincial-layer problem"};
+const POST_LABEL={shapesave:"Saving the compartment layer", shapedel:"Deleting compartment pieces", notesave:"Saving map notes", notedel:"Deleting map notes", mapverput:"Saving a map version", photo:"Photo upload", mapfile:"Saving files to Drive", layerput:"Adding a shared layer", propsave:"Saving property details", compsave:"Saving compartment details", lioput:"Keeping provincial layers in Drive", liolog:"Reporting a provincial-layer problem"};
 let authLimited=false;       // an account other than the administrator's: summaries, emails, exports and AI are not open to it yet
 function isLimited_(){ return !!((authToken&&authLimited) || (!authToken&&limitedPhone_())); }
 /* v379: on an account other than the office's, mail from the app goes to the address on the user's
@@ -3627,7 +3634,7 @@ function flushQueue(manual){
       });
   });
 }
-window.addEventListener("online", ()=>{ toast("Back online — sending queued plots"); netDot(); renderSaved(); authCheck_(); try{ setTimeout(sharedFieldsFetch_, 4000); }catch(e){} flushQueue(); flushEditBatch_(); flushSpecies(); fetchSpecies(); flushTracts(); fetchTracts(); flushPhotos(); flushDeletes_(); try{ if(Object.keys(propDirty.props).length||Object.keys(propDirty.comps).length) setTimeout(()=>propSync_(),6000); }catch(e){} });
+window.addEventListener("online", ()=>{ toast("Back online — sending queued plots"); netDot(); renderSaved(); authCheck_(); try{ setTimeout(sharedFieldsFetch_, 4000); }catch(e){} flushQueue(); flushEditBatch_(); flushSpecies(); fetchSpecies(); flushTracts(); fetchTracts(); flushPhotos(); flushDeletes_(); try{ if(propHasWaiting_()) setTimeout(()=>propSync_(),6000); }catch(e){} });
 window.addEventListener("offline", ()=>{ netDot(); renderSaved(); });
 /* Species and tracts were missing from this. An addition that failed to confirm only got another
    chance on the next "online" event or the next time somebody added a plant — which on a phone
@@ -6533,12 +6540,12 @@ const LIVE_FRESH_MS=5*60*1000;   // within this = "live" (pulsing); older but st
 /* #ff7043 has gone: it was the reference-point colour too, so the seventh crew member's plots were
    indistinguishable from navigation targets. Replaced with a teal that nothing else uses. */
 const CREW_PALETTE=["#ff5252","#4d8bff","#ffb300","#26c281","#b56cff","#26c6da","#00897b","#9ccc65","#ec407a","#5c6bc0"];
-let mePos=null, meSamples=[], meHeading=null, BOUND=null, standField=null, ageField=null, tractField=null, areaField=null, popupFields=[], mapLibsLoaded=false, boundFiles=[];
+let mePos=null, meSamples=[], meHeading=null, BOUND=null, standField=null, ageField=null, tractField=null, areaField=null, acField=null, adjField=null, popupFields=[], mapLibsLoaded=false, boundFiles=[];
 function rebuildBound(){ BOUND = boundFiles.length ? {type:"FeatureCollection", features:[].concat(...boundFiles.map(f=>f.features||[]))} : null; }
 // Small layer settings stay in localStorage (tiny). Boundary files now load from IndexedDB (async),
 // migrating any old localStorage copy on first run so nothing is lost.
 try{ if(STORE){
-  standField=STORE.getItem("fi_standfield")||null; ageField=STORE.getItem("fi_agefield")||null; tractField=STORE.getItem("fi_tractfield")||null; areaField=STORE.getItem("fi_areafield")||null;
+  standField=STORE.getItem("fi_standfield")||null; ageField=STORE.getItem("fi_agefield")||null; tractField=STORE.getItem("fi_tractfield")||null; areaField=STORE.getItem("fi_areafield")||null; { const g=k=>{ const v=STORE.getItem(k); return v==="__none__"?"":(v||null); }; acField=g("fi_acfield"); adjField=g("fi_adjfield"); }
   try{ popupFields=JSON.parse(STORE.getItem("fi_popupfields")||"[]")||[]; }catch(e){ popupFields=[]; }
   plotLabelField=STORE.getItem("fi_plotlabel")||"none";
 } }catch(e){}
@@ -6639,7 +6646,10 @@ function initMap(){
   fpins=L.layerGroup().addTo(fmap); fauditpins=L.layerGroup().addTo(fmap); fboundLayer=L.layerGroup().addTo(fmap); flabelLayer=L.layerGroup().addTo(fmap); refLayer=L.layerGroup().addTo(fmap); freflabelLayer=L.layerGroup().addTo(fmap); crewLayer=L.layerGroup().addTo(fmap); liveLayer=L.layerGroup().addTo(fmap); crewRouteLayer=L.layerGroup().addTo(fmap); photoLayer=L.layerGroup().addTo(fmap);
   applyLayerVis_();
   fmap.on("moveend zoomend",rememberMapView_);
-  fmap.on("click",e=>{ if(selectMode){ addSelPoint(e.latlng); return; } if(polyMode){ addPolyPoint(e.latlng); return; } if(routeMode){ addRoutePoint(e.latlng); return; } if(measureMode){ addMeasurePoint(e.latlng); return; } if(moveMode_) return;   // the crosshair is the target; taps must not open popups mid-move
+  fmap.on("click",e=>{ if(typeof rnTap_==="function" && rnTap_(e.latlng)) return;   // v384: placing a typed road label
+    if(typeof csTap_==="function" && csTap_(e.latlng)) return;                       // v387: the compartment layer editor
+    if(typeof mnTap_==="function" && mnTap_(e.latlng)) return;                       // v385: placing a note or an arrow
+    if(selectMode){ addSelPoint(e.latlng); return; } if(polyMode){ addPolyPoint(e.latlng); return; } if(routeMode){ addRoutePoint(e.latlng); return; } if(measureMode){ addMeasurePoint(e.latlng); return; } if(moveMode_) return;   // the crosshair is the target; taps must not open popups mid-move
     if(placeMode){ placeAt(e.latlng.lat,e.latlng.lng); return; }
     if(nearbyPlotPopup_(e.latlng)) return;                    // a plot pin near the tap wins over the boundary
     { const bf=boundaryFeatureAt(e.latlng.lat,e.latlng.lng); if(bf) showBoundPopup(e.latlng,bf); } });
@@ -6864,7 +6874,7 @@ function loadBoundaries(file){
 function removeBoundFile(id){
   boundFiles=boundFiles.filter(f=>f.id!==id); rebuildBound();
   cacheBoundaries(); renderBoundaries(); renderLayerList(); updateLayerStatus(); updateInStand();
-  if(!boundFiles.length){ const ml=document.querySelector(".map-load"); if(ml) ml.classList.remove("has"); $("standFieldSel").innerHTML=""; $("mapFieldRow").style.display="none"; if($("sendAreasBtn")) $("sendAreasBtn").style.display="none"; if($("ageFieldRow")) $("ageFieldRow").style.display="none"; if($("ageFieldSel")) $("ageFieldSel").innerHTML=""; if($("tractFieldRow")) $("tractFieldRow").style.display="none"; if($("tractFieldSel")) $("tractFieldSel").innerHTML=""; if($("areaFieldRow")) $("areaFieldRow").style.display="none"; if($("areaFieldSel")) $("areaFieldSel").innerHTML=""; popupFields=[]; $("popupFieldList").innerHTML=""; $("popupFieldRow").style.display="none"; }
+  if(!boundFiles.length){ const ml=document.querySelector(".map-load"); if(ml) ml.classList.remove("has"); $("standFieldSel").innerHTML=""; $("mapFieldRow").style.display="none"; if($("sendAreasBtn")) $("sendAreasBtn").style.display="none"; if($("ageFieldRow")) $("ageFieldRow").style.display="none"; if($("ageFieldSel")) $("ageFieldSel").innerHTML=""; if($("tractFieldRow")) $("tractFieldRow").style.display="none"; if($("tractFieldSel")) $("tractFieldSel").innerHTML=""; if($("areaFieldRow")) $("areaFieldRow").style.display="none"; if($("areaFieldSel")) $("areaFieldSel").innerHTML=""; ["acFieldRow","adjFieldRow"].forEach(id=>{ if($(id)) $(id).style.display="none"; }); popupFields=[]; $("popupFieldList").innerHTML=""; $("popupFieldRow").style.display="none"; }
   toast("Boundary file removed");
 }
 function renderLayerList(){
@@ -7035,9 +7045,21 @@ function pickStandField(){
   if(arsel){
     arsel.innerHTML=`<option value="">— calculate from shape —</option>`+keys.map(k=>`<option value="${esc(k)}">${esc(k)}</option>`).join("");
     if(areaField && !keys.includes(areaField)) areaField=null;
-    if(!areaField){ areaField = keys.find(k=>/(^|_)ha(_|$)|hectare|area_?ha|areaha|gross_?ha|net_?ha|legal_?area|planar_?ha/i.test(k)) || ""; }
+    if(!areaField){ areaField = keys.find(k=>!/adj/i.test(k)&&/(^|_)ha(_|$)|hectare|area_?ha|areaha|gross_?ha|net_?ha|legal_?area|planar_?ha/i.test(k)) || ""; }
     arsel.value=areaField||"";
     $("areaFieldRow").style.display = keys.length ? "flex" : "none";
+  }
+  /* v386: acres and adjusted acres fields — guessed from the names, and the cruiser can change them. */
+  const acsel=$("acFieldSel"), adjsel=$("adjFieldSel");
+  if(acsel&&adjsel){
+    const opts=`<option value="">— none (from the hectares) —</option>`+keys.map(k=>`<option value="${esc(k)}">${esc(k)}</option>`).join("");
+    acsel.innerHTML=opts; adjsel.innerHTML=opts.replace("none (from the hectares)","none (shared out from the MPAC acres)");
+    if(acField && !keys.includes(acField)) acField=null;
+    if(adjField && !keys.includes(adjField)) adjField=null;
+    if(adjField==null) adjField=propGuessAdj_(keys)||null;
+    if(acField==null) acField=propGuessAc_(keys,adjField)||null;
+    acsel.value=acField||""; adjsel.value=adjField||"";
+    $("acFieldRow").style.display = $("adjFieldRow").style.display = keys.length ? "flex" : "none";
   }
   populatePopupFields(keys);
 }
@@ -7131,9 +7153,14 @@ function setAgeField(k){ ageField=k||null; cacheBoundaries(); shareFieldsSoon_()
 function setTractField(k){ tractField=k||null; cacheBoundaries(); shareFieldsSoon_(); toast(tractField?`Auto-assign will fill TRACT from “${tractField}”`:"Tract auto-fill turned off"); scheduleAreaPush_(); }
 let manualTract = (function(){ try{ return (STORE&&STORE.getItem("fi_manualtract"))||""; }catch(e){ return ""; } })();
 function setManualTract(v){ manualTract=String(v||"").trim(); try{ if(STORE) STORE.setItem("fi_manualtract",manualTract); }catch(e){} scheduleAreaPush_(); }
+function propGuessAdj_(keys){ const c=(keys||[]).filter(k=>/adj/i.test(k)&&!/adjacen/i.test(k)&&!/(^|_)ha(_|$)|hect/i.test(k));
+  return c.find(k=>/(^|_)ac(_|$|r)|acre/i.test(k)) || c.find(k=>/area/i.test(k)) || c.find(k=>/^adj(usted)?$/i.test(k)) || ""; }
+function propGuessAc_(keys,adj){ return (keys||[]).find(k=>k!==adj&&!/adj/i.test(k)&&/(^|_)ac(_|$)|acre|area_?ac|^ac$/i.test(k)) || ""; }
+function setAcField(k){ acField=k||""; cacheBoundaries(); try{ propRefreshIfOpen_(); }catch(e){} toast(acField?`Acres from “${acField}” where filled`:"Acres from the hectares"); }
+function setAdjField(k){ adjField=k||""; cacheBoundaries(); try{ propRefreshIfOpen_(); }catch(e){} toast(adjField?`Adjusted acres from “${adjField}” where filled — the rest are shared out from the MPAC acres`:"Adjusted acres shared out from the MPAC acres"); }
 function setAreaField(k){ areaField=k||null; cacheBoundaries(); shareFieldsSoon_(); scheduleAreaPush_(); toast(areaField?`Using “${areaField}” as official area (ha) where filled`:"Areas will be calculated from shape"); }
 function cacheBoundaries(){
-  try{ if(STORE){ STORE.setItem("fi_standfield",standField||""); STORE.setItem("fi_agefield",ageField||""); STORE.setItem("fi_tractfield",tractField||""); STORE.setItem("fi_areafield",areaField||""); STORE.setItem("fi_popupfields",JSON.stringify(popupFields)); STORE.removeItem("fi_boundaries"); STORE.removeItem("fi_boundfiles"); } }catch(e){}
+  try{ if(STORE){ STORE.setItem("fi_standfield",standField||""); STORE.setItem("fi_agefield",ageField||""); STORE.setItem("fi_tractfield",tractField||""); STORE.setItem("fi_areafield",areaField||""); STORE.setItem("fi_acfield",acField===""?"__none__":(acField||"")); STORE.setItem("fi_adjfield",adjField===""?"__none__":(adjField||"")); /* "none" chosen sticks; null = not chosen, so guess */ STORE.setItem("fi_popupfields",JSON.stringify(popupFields)); STORE.removeItem("fi_boundaries"); STORE.removeItem("fi_boundfiles"); } }catch(e){}
   try{ ldbPut("boundfiles", boundFiles).catch(()=>{ toast("Couldn't save boundaries to device storage",true); }); }catch(e){}
 }
 const LABEL_MIN_ZOOM=14, LABEL_MAX=200;   // labels only when zoomed in, only what's on screen, capped
@@ -9471,6 +9498,7 @@ function mapToolHelp_(){
     `<div><div style="color:#eafae8;font-size:13px">${n}</div>`+
     `<div style="color:#8fae95;font-size:11px;line-height:1.4;margin-top:1px">${d}</div></div></div>`;
   showInfoSheet_("The map tools",
+    row("✎","Text","Notes and arrows for the MFTIP maps: one tap for a note, two for an arrow (tail, then head). Size in inches as printed, bold, colour, and which map it goes on.")+
     row("🔎","Find","Type a street address and the map goes there and drops a pin. Needs signal. The pin stays until you clear it.")+
     row("⏺","Track","Records where you walk, as a line. Tap again to stop. Export it from + Layers.")+
     row("📐","Measure","Tap two or more points for a distance; close the shape for an area. Nothing is saved.")+
@@ -9637,26 +9665,39 @@ function syncPolys(){
       else toast(`${j&&j.ok?"Saved":"Sent"} ${polys.length} area${polys.length==1?"":"s"} — plots & summary recalculating`); })
     .catch(e=>toast(postFailMsg_(e,"Sync failed — check signal",true),true));
 }
+/* v386: a drawn shape's acres and adjusted acres. The adjusted acres are its compartment's from the
+   area summary (shared out from the MPAC acres), split between the compartment's parts by size. */
+function polyAcres_(list){
+  const sums={}, out=list.map(pg=>{ const ha=polyAreaOf_(pg.pts)/10000; return {ha:ha, ac:ha*HA_AC, adj:ha*HA_AC}; });
+  try{ list.forEach((pg,i)=>{ const t=String(pg.tract||"").trim(); if(!t||!propGet_(t)) return;
+      const k=propK_(t)+"|"+propK_(pg.name); if(!sums[k]){ const S=propSummary_(t), r=S.rows.find(x=>propK_(x.name)===propK_(pg.name)&&x.from==="drawn"); sums[k]={row:r, ac:0}; }
+      sums[k].ac+=out[i].ac; });
+    list.forEach((pg,i)=>{ const k=propK_(String(pg.tract||"").trim())+"|"+propK_(pg.name), z=sums[k]; if(z&&z.row&&z.ac>0) out[i].adj=z.row.adj*out[i].ac/z.ac; });
+  }catch(e){}
+  return out;
+}
 function allPolys_(){ const list=polys.slice(); if(polyPts.length>=3) list.push({name:"P-"+(polys.length+1), pts:polyPts.slice()}); return list; }
 function exportPoly(){
   const all=allPolys_(); if(!all.length){ toast("Draw an area first (3+ points)",true); return; }
+  const acs=polyAcres_(all);
   const feats=all.map(pg=>{ const u=pg.pts.map(p=>utm17n_(p[0],p[1])); let sa=0; for(let i=0;i<u.length;i++){ const j=(i+1)%u.length; sa+=u[i].x*u[j].y-u[j].x*u[i].y; }
     const ring=(sa>0?pg.pts.slice():pg.pts.slice().reverse()); const coords=ring.map(p=>[p[1],p[0]]); coords.push(coords[0]); const area=polyAreaOf_(pg.pts);
-    return {type:"Feature",properties:{name:pg.name,area_ha:+(area/10000).toFixed(4),area_m2:Math.round(area),perim_m:Math.round(polyPerimOf_(pg.pts))},geometry:{type:"Polygon",coordinates:[coords]}}; });
+    const A=acs[all.indexOf(pg)];
+    return {type:"Feature",properties:{name:pg.name,tract:pg.tract||"",area_ha:+(area/10000).toFixed(4),area_ac:+A.ac.toFixed(2),adj_ac:+A.adj.toFixed(2),area_m2:Math.round(area),perim_m:Math.round(polyPerimOf_(pg.pts))},geometry:{type:"Polygon",coordinates:[coords]}}; });
   const blob=new Blob([JSON.stringify({type:"FeatureCollection",features:feats})],{type:"application/geo+json"}), url=URL.createObjectURL(blob), a=document.createElement("a");
   a.href=url; a.download=`FRIpolys_${nowStr().replace(/[: ]/g,"-")}.geojson`; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),1500); toast(`${all.length} area${all.length==1?"":"s"} exported`);
 }
 function exportPolyShp(){
   const all=allPolys_(); if(!all.length){ toast("Draw an area first (3+ points)",true); return; }
-  const feats=[], recs=[];
+  const feats=[], recs=[], acs=polyAcres_(all);
   all.forEach((pg,idx)=>{ const u=pg.pts.map(p=>utm17n_(p[0],p[1])); let sa=0; for(let i=0;i<u.length;i++){ const j=(i+1)%u.length; sa+=u[i].x*u[j].y-u[j].x*u[i].y; }
     const ring=(sa>0?u.slice().reverse():u.slice()); ring.push({x:ring[0].x,y:ring[0].y});
     let xmin=1/0,ymin=1/0,xmax=-1/0,ymax=-1/0; ring.forEach(p=>{ xmin=Math.min(xmin,p.x); ymin=Math.min(ymin,p.y); xmax=Math.max(xmax,p.x); ymax=Math.max(ymax,p.y); });
     feats.push({pts:ring, box:{xmin,ymin,xmax,ymax}}); const area=polyAreaOf_(pg.pts);
-    recs.push([idx+1, pg.name, (area/10000).toFixed(4), Math.round(area), polyPerimOf_(pg.pts).toFixed(1)]); });
+    recs.push([idx+1, pg.name, pg.tract||"", (area/10000).toFixed(4), acs[idx].ac.toFixed(2), acs[idx].adj.toFixed(2), Math.round(area), polyPerimOf_(pg.pts).toFixed(1)]); });
   const {shp,shx}=buildShpSet_(feats,5);
-  const dbf=buildDbf_([{name:"ID",type:"N",len:8,dec:0},{name:"NAME",type:"C",len:30},{name:"AREA_HA",type:"N",len:14,dec:4},{name:"AREA_M2",type:"N",len:14,dec:0},{name:"PERIM_M",type:"N",len:12,dec:1}], recs);
+  const dbf=buildDbf_([{name:"ID",type:"N",len:8,dec:0},{name:"NAME",type:"C",len:30},{name:"TRACT",type:"C",len:60},{name:"AREA_HA",type:"N",len:14,dec:4},{name:"AREA_AC",type:"N",len:14,dec:2},{name:"ADJ_AC",type:"N",len:14,dec:2},{name:"AREA_M2",type:"N",len:14,dec:0},{name:"PERIM_M",type:"N",len:12,dec:1}], recs);
   const base="FRIpolys_"+nowStr().replace(/[: ]/g,"-");
   const zip=zipStore_([{name:base+".shp",data:shp},{name:base+".shx",data:shx},{name:base+".dbf",data:dbf},{name:base+".prj",data:new TextEncoder().encode(PRJ_17N)},dbfCpgFile_(base)]);
   const blob=new Blob([zip],{type:"application/zip"}), url=URL.createObjectURL(blob), a=document.createElement("a");
@@ -10644,9 +10685,9 @@ function loadPdfJs(){ if(window.pdfjsLib) return Promise.resolve();
 const HA_AC=2.4710538146716534;
 const MFTIP_CLASSES=[["","— not set —"],["MFTIP","MFTIP eligible"],["CLTIP","CLTIP"],["INELIGIBLE","Not eligible"]];
 const PROP_CLS_LABEL={MFTIP:"MFTIP eligible",CLTIP:"CLTIP",INELIGIBLE:"Not eligible","":"Not classified"};
-let PROPS={props:{},comps:{},lio:{}};          // props[tractKey], comps[tractKey][nameKey], lio[tractKey] = Drive copy info
-let propDirty={props:{},comps:{}};              // waiting for the Sheet
-let propBackendOk=false, _propSyncing=false, _propLoaded=false, _propReady=null;
+let PROPS={props:{},comps:{},lio:{},notes:{},shapes:{}};          // props[tractKey], comps[tractKey][nameKey], lio[tractKey] = Drive copy info
+let propDirty={props:{},comps:{},notes:{},noteDel:[],shapes:{},shapeDel:[]};              // waiting for the Sheet
+let propBackendOk=false, propNotesOk=false, propShapesOk=false, _propPushP=null, _propSyncing=false, _propLoaded=false, _propReady=null;
 /* The same key the Sheet uses: spaces collapsed, case ignored. */
 function propK_(s){ return String(s==null?"":s).replace(/\s+/g," ").trim().toLowerCase(); }
 /* Nothing may sync or save until what was stored on the phone is back: an early sync would otherwise
@@ -10654,8 +10695,8 @@ function propK_(s){ return String(s==null?"":s).replace(/\s+/g," ").trim().toLow
 _propReady=new Promise(res=>{
   const done=()=>{ if(_propLoaded) return; _propLoaded=true; res(); };
   setTimeout(done, 6000);          // storage that never answers (iOS can block it) must not swallow every later save
-  try{ ldbGet("props").then(v=>{ if(v&&v.props){ PROPS=Object.assign({props:{},comps:{},lio:{}},v); }
-    return ldbGet("propdirty"); }).then(v=>{ if(v&&v.props) propDirty=Object.assign({props:{},comps:{}},v); done(); }).catch(done); }catch(e){ done(); }
+  try{ ldbGet("props").then(v=>{ if(v&&v.props){ PROPS=Object.assign({props:{},comps:{},lio:{},notes:{},shapes:{}},v); }
+    return ldbGet("propdirty"); }).then(v=>{ if(v&&v.props) propDirty=Object.assign({props:{},comps:{},notes:{},noteDel:[],shapes:{},shapeDel:[]},v); done(); }).catch(done); }catch(e){ done(); }
 });
 function propPersist_(){ try{ ldbPut("props",PROPS); ldbPut("propdirty",propDirty); }catch(e){} }
 
@@ -10689,6 +10730,11 @@ function featTract_(f){ const pr=(f&&f.properties)||{}; return (tractField?Strin
      file loaded last. Several polygons of one compartment in ONE file are its parts, and add up.
    · A drawn shape counts only for a compartment no file has. */
 function propCompsGeo_(tract){
+  /* v387: a property with a compartment layer made from its outline: those pieces are its compartments. */
+  const made=(typeof csOf_==="function")?csOf_(tract):[];
+  if(made.length){ const g={};
+    made.forEach(c=>{ const n=propK_(c.name); (g[n]||(g[n]={name:c.name, polygons:[], src:"made", unassigned:false})).polygons.push(c.rings); });
+    return Object.keys(g).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).map(n=>{ const c=g[n]; c.calcHa=+geoPolysHa_(c.polygons).toFixed(4); return c; }); }
   const k=propK_(tract), files=(typeof boundFiles!=="undefined"&&boundFiles)||[];
   const hits=[], blanks=[];
   files.forEach(bf=>{ const hit={}, blank={};
@@ -10696,10 +10742,12 @@ function propCompsGeo_(tract){
       const nm=String((f.properties&&f.properties[standField])!=null?f.properties[standField]:"").trim(); if(!nm) return;
       const t=propK_(featTract_(f)), ps=featPolys_(f); if(!ps.length) return;
       const tgt= t===k ? hit : (!t ? blank : null); if(!tgt) return;
-      const c=tgt[propK_(nm)]||(tgt[propK_(nm)]={name:nm,polygons:[]}); ps.forEach(p=>c.polygons.push(p)); });
+      const c=tgt[propK_(nm)]||(tgt[propK_(nm)]={name:nm,polygons:[]}); ps.forEach(p=>c.polygons.push(p));
+      /* v386: the layer's own hectares / acres / adjusted acres, where filled; the parts of one compartment add up. */
+      [["fHa",areaField],["fAc",acField],["fAdj",adjField]].forEach(z=>{ (c["_"+z[0]]||(c["_"+z[0]]=[])).push(propNum_(z[1]&&f.properties?f.properties[z[1]]:null)); }); });
     hits.push(hit); blanks.push(blank); });
   const anyHit=hits.some(h=>Object.keys(h).length), use=anyHit?hits:blanks, out={};
-  use.forEach((m,fi)=>Object.keys(m).forEach(n=>{ out[n]={name:m[n].name, polygons:m[n].polygons, src:"file", file:files[fi].name, unassigned:!anyHit}; }));
+  use.forEach((m,fi)=>Object.keys(m).forEach(n=>{ out[n]={name:m[n].name, polygons:m[n].polygons, src:"file", file:files[fi].name, unassigned:!anyHit, fHa:propPartsVal_(m[n]._fHa), fAc:propPartsVal_(m[n]._fAc), fAdj:propPartsVal_(m[n]._fAdj)}; }));
   const dh={}, db={};
   ((typeof polys!=="undefined"&&polys)||[]).forEach(pg=>{ if(!pg||!pg.pts||pg.pts.length<3) return; const nm=String(pg.name||"").trim(); if(!nm) return;
     const t=propK_(pg.tract), tgt= t===k ? dh : (!t ? db : null); if(!tgt) return;
@@ -10734,32 +10782,75 @@ function propActiveTract_(){
   return t||manualTract||"";
 }
 function propSetActive_(t){ try{ STORE&&STORE.setItem("fi_proptract",String(t||"")); }catch(e){} }
-/* The area a compartment counts for: the one typed in, if there is one, else the calculated one. */
+/* v386 — a compartment's areas.
+   · Hectares: the layer's hectares field where filled, else calculated from the shape.
+   · Acres: the layer's acres field where filled, else the hectares in acres.
+   · Adjusted acres: typed in the app, or the layer's adjusted-acres field — those are kept as they are.
+     Every other compartment's adjusted acres are its acres, scaled so the property adds up to the MPAC
+     acres exactly (see propSummary_). */
+/* A layer field over a compartment's parts (one value per polygon in the file). Used only when EVERY part
+   has it filled — otherwise the blank parts' area would be lost. The same figure on every part is the
+   compartment's total repeated (what ArcGIS's Multipart To Singlepart leaves), so it is taken once;
+   different figures are the parts' own areas, and add up. */
+function propPartsVal_(a){
+  if(!a||!a.length||!a.every(v=>isFinite(v)&&v>=0)) return undefined;
+  if(a.length>1 && a.every(v=>Math.abs(v-a[0])<1e-9)) return a[0];
+  return a.reduce((x,y)=>x+y,0);
+}
+function propNum_(v){ if(v==null||v==="") return NaN; const n=parseFloat(String(v).replace(/,/g,"")); return isFinite(n)?n:NaN; }
 function propCompArea_(tract,c){
   const rec=propComp_(tract,c.name)||{};
-  const man=(rec.manual===""||rec.manual==null)?NaN:Number(rec.manual);
-  if(isFinite(man)&&man>0){ const ha= rec.unit==="ha" ? man : man/HA_AC; return {ha:ha, ac:ha*HA_AC, src:"manual"}; }
-  const calc=isFinite(c.calcHa)?c.calcHa:((rec.calcHa!==""&&rec.calcHa!=null&&isFinite(Number(rec.calcHa)))?Number(rec.calcHa):0);
-  return {ha:calc, ac:calc*HA_AC, src:"calculated"};
+  const recCalc=(rec.calcHa!==""&&rec.calcHa!=null&&isFinite(Number(rec.calcHa)))?Number(rec.calcHa):0;
+  const calc=isFinite(c.calcHa)?c.calcHa:recCalc;
+  const ha=(c.fHa>0)?c.fHa:calc, ac=(c.fAc>0)?c.fAc:ha*HA_AC;
+  const man=propNum_(rec.manual);
+  let fix=NaN, fixSrc="";
+  if(isFinite(man)&&man>=0){ fix= rec.unit==="ha" ? man*HA_AC : man; fixSrc="typed"; }        // a typed 0 (a road allowance, say) is kept as 0
+  else if(c.fAdj!==undefined&&isFinite(c.fAdj)){ fix=c.fAdj; fixSrc="layer"; }
+  return {ha:ha, ac:ac, haSrc:(c.fHa>0)?"layer":"calculated", acSrc:(c.fAc>0)?"layer":(c.fHa>0?"from layer ha":"calculated"), fix:fix, fixSrc:fixSrc};
 }
-/* The area summary. Pure: the compartments and the records go in, the table comes out. */
+/* Share `target` acres over the weights, in hundredths, so the shares add up to it exactly. */
+function propShare_(target, weights){
+  const W=weights.reduce((a,b)=>a+b,0), T=Math.round(target*100);
+  if(!(W>0)) return weights.map(()=>0);
+  const raw=weights.map(w=>T*w/W), cents=raw.map(Math.floor); let left=T-cents.reduce((a,b)=>a+b,0);
+  raw.map((r,i)=>[r-Math.floor(r),i]).sort((a,b)=>b[0]-a[0]||a[1]-b[1]).forEach(z=>{ if(left>0){ cents[z[1]]++; left--; } });
+  return cents.map(c=>c/100);
+}
+/* The area summary. Pure: the compartments and the records go in, the table comes out.
+   Each row: ha, ac (measured or from the layer) and adj (adjusted acres, which the maps use). */
 function propSummary_(tract, comps){
   comps = comps || propCompsGeo_(tract);
-  const p=propGet_(tract)||{}, rows=[], by={MFTIP:{ha:0,ac:0,n:0},CLTIP:{ha:0,ac:0,n:0},INELIGIBLE:{ha:0,ac:0,n:0},"":{ha:0,ac:0,n:0}};
-  let tha=0, tac=0;
-  comps.forEach(c=>{ const rec=propComp_(tract,c.name)||{}, cls=rec.cls||"", a=propCompArea_(tract,c);
-    rows.push({name:c.name, cls:cls, ha:a.ha, ac:a.ac, src:a.src, calcHa:c.calcHa, from:c.src});
-    const b=by[cls]||by[""]; b.ha+=a.ha; b.ac+=a.ac; b.n++; tha+=a.ha; tac+=a.ac; });
-  const mpac=(p.mpac===""||p.mpac==null)?NaN:Number(p.mpac);
-  const out={tract:tract, rows:rows, byClass:by, total:{ha:tha, ac:tac}, mpac:isFinite(mpac)?mpac:null, diffAc:null, msg:""};
-  if(out.mpac!=null){
-    const d=+(out.mpac-tac).toFixed(2); out.diffAc=d;
-    out.msg = Math.abs(d)<0.01 ? "The compartments add up to the MPAC acres."
-      : d>0 ? `Add ${d.toFixed(2)} ac to the compartments to reach the MPAC ${out.mpac.toFixed(2)} ac.`
-            : `Remove ${(-d).toFixed(2)} ac from the compartments to come down to the MPAC ${out.mpac.toFixed(2)} ac.`;
-  } else out.msg="No MPAC acres entered — type them in the property details to compare.";
+  const p=propGet_(tract)||{}, rows=[], z=()=>({ha:0,ac:0,adj:0,n:0}), by={MFTIP:z(),CLTIP:z(),INELIGIBLE:z(),"":z()};
+  comps.forEach(c=>{ const rec=propComp_(tract,c.name)||{}, a=propCompArea_(tract,c);
+    rows.push({name:c.name, cls:rec.cls||"", ha:a.ha, ac:a.ac, haSrc:a.haSrc, acSrc:a.acSrc, adj:isFinite(a.fix)?Math.round(a.fix*100)/100:a.ac, adjSrc:a.fixSrc||"acres", src:a.fixSrc==="typed"?"manual":"calculated", calcHa:c.calcHa, from:c.src}); });
+  const mpacN=propNum_(p.mpac), mpac=isFinite(mpacN)?mpacN:null;
+  const free=rows.filter(r=>r.adjSrc==="acres"), fixed=rows.filter(r=>r.adjSrc!=="acres");
+  const fixSum=fixed.reduce((a,r)=>a+r.adj,0), freeAc=free.reduce((a,r)=>a+r.ac,0);
+  let shared=false;
+  if(mpac!=null && free.length && freeAc>0 && mpac-fixSum>0){
+    propShare_(mpac-fixSum, free.map(r=>r.ac)).forEach((v,i)=>{ free[i].adj=v; free[i].adjSrc="auto"; }); shared=true; }
+  let tha=0, tac=0, tadj=0;
+  rows.forEach(r=>{ const b=by[r.cls]||by[""]; b.ha+=r.ha; b.ac+=r.ac; b.adj+=r.adj; b.n++; tha+=r.ha; tac+=r.ac; tadj+=r.adj; });
+  const out={tract:tract, rows:rows, byClass:by, total:{ha:tha, ac:tac, adj:tadj}, mpac:mpac, diffAc:null, measDiffAc:null, msg:""};
+  if(mpac!=null){
+    const d=+(mpac-tadj).toFixed(2), m=+(mpac-tac).toFixed(2); out.diffAc=d; out.measDiffAc=m;
+    if(Math.abs(d)<0.01){
+      out.msg = Math.abs(m)<0.01 ? "The compartments add up to the MPAC acres."
+        : (()=>{ const sh=+((mpac-fixSum)-freeAc).toFixed(2);
+            return `The adjusted acres add up to the MPAC ${mpac.toFixed(2)} ac. The compartments measure ${tac.toFixed(2)} ac`+(Math.abs(sh)<0.01?".":
+              `, so ${Math.abs(sh).toFixed(2)} ac was ${sh>0?"added across":"taken off"} the ${free.length} compartment${free.length===1?"":"s"} without a typed or layer adjusted area, in proportion to their size.`); })();
+    } else out.msg = (d>0 ? `Add ${d.toFixed(2)} ac to the compartments to reach the MPAC ${mpac.toFixed(2)} ac.`
+                          : `Remove ${(-d).toFixed(2)} ac from the compartments to come down to the MPAC ${mpac.toFixed(2)} ac.`)
+        + (!free.length ? " Every compartment has a typed or layer adjusted area, so nothing was shared out."
+           : ` The typed and layer adjusted areas already come to ${fixSum.toFixed(2)} ac, leaving nothing to share out to the ${free.length===1?"other compartment — it is shown at its acres":"other "+free.length+" compartments — they are shown at their acres"}.`);
+  } else out.msg="No MPAC acres entered — compartments without a typed or layer adjusted area use their acres. Type the MPAC acres in the property details and the difference is shared out in proportion.";
   return out;
 }
+/* Which area the map labels show: "adj" adjusted acres (the default), "ac" acres, "ha" hectares.
+   Stored as labelArea "adj" / "acres" / "calc"+labelUnit "ha". Before v386 "calc"+"ac" was the default and
+   "manual" the typed areas — both now read as adjusted acres. */
+function propLabelShow_(p){ p=p||{}; return p.labelArea==="acres" ? "ac" : (p.labelArea==="calc"&&p.labelUnit==="ha") ? "ha" : "adj"; }
 /* ---- the roll number: 19 digits, shown as the notice prints them ---- */
 function propRollFmt_(v){ const d=String(v==null?"":v).replace(/[^0-9]/g,""); if(d.length!==19) return null;
   return d.slice(0,4)+" "+d.slice(4,7)+" "+d.slice(7,10)+" "+d.slice(10,15)+" "+d.slice(15); }
@@ -10781,9 +10872,15 @@ function propSync_(then){
   jsonp_("action=propget", r=>{
     if(!r||r.ok!==true||!Array.isArray(r.props)){ fin(false); return; }     // a backend older than v380 says nothing
     propBackendOk=true;
+    /* v385: a backend older than v385 sends no notes, and would not understand a note being saved (an
+       unknown POST there is taken as a plot). Until it says it knows about notes, the phone's notes stay
+       as they are and wait. */
+    propNotesOk=Array.isArray(r.notes);
+    propShapesOk=Array.isArray(r.shapes);      // v387: the compartment layer, the same way
+    const waitS=Object.assign({},propDirty.shapes||{}), delS=(propDirty.shapeDel||[]).slice();
     /* What was waiting BEFORE this push keeps the phone's version of those fields: the reply above
        was read before the push went. */
-    const waitP=JSON.parse(JSON.stringify(propDirty.props)), waitC=JSON.parse(JSON.stringify(propDirty.comps));
+    const waitP=JSON.parse(JSON.stringify(propDirty.props)), waitC=JSON.parse(JSON.stringify(propDirty.comps)), waitN=Object.assign({},propDirty.notes||{}), delB=(propDirty.noteDel||[]).slice();
     propPush_().then(()=>{
       const np={}, nc={};
       r.props.forEach(p=>{ const k=propK_(p.tract); if(k) np[k]=p; });
@@ -10792,13 +10889,36 @@ function propSync_(then){
         np[k]=Object.assign({}, np[k]||{tract:mine.tract}, propPick__(mine, waitP[k].f)); });
       Object.keys(waitC).forEach(k=>{ const mine=PROPS.comps[k]||{}; Object.keys(waitC[k]||{}).forEach(n=>{ if(!mine[n]) return;
         const t=nc[k]||(nc[k]={}); t[n]=Object.assign({}, t[n]||{tract:mine[n].tract,name:mine[n].name}, propPick__(mine[n], waitC[k][n].f)); }); });
-      PROPS.props=np; PROPS.comps=nc; PROPS.lio=r.lio||{};
-      propPersist_(); fin(true);
+      /* Notes and arrows: the Sheet's, except one this phone changed since (kept as the phone has it) or
+         deleted and not yet confirmed (left out). */
+      /* "Deleted" is what was waiting to be deleted before the push (the reply was read before it went)
+         and anything deleted since; "the phone's" is what was waiting before the push and anything
+         placed or changed while it was going. */
+      const nn={}, gone={}, mineIds=Object.assign({}, waitN, propDirty.notes||{}); delB.concat(propDirty.noteDel||[]).forEach(id=>{ gone[id]=1; });
+      if(propNotesOk){
+        r.notes.forEach(n=>{ if(n&&n.id&&!gone[n.id]) nn[n.id]=n; });
+        Object.keys(mineIds).forEach(id=>{ const mine=(PROPS.notes||{})[id]; if(mine&&!gone[id]) nn[id]=mine; });
+      }
+      const ns={}, goneS={}, mineS=Object.assign({}, waitS, propDirty.shapes||{}); delS.concat(propDirty.shapeDel||[]).forEach(id=>{ goneS[id]=1; });
+      if(propShapesOk){
+        r.shapes.forEach(c=>{ if(c&&c.id&&!goneS[c.id]) ns[c.id]=c; });
+        Object.keys(mineS).forEach(id=>{ const mine=(PROPS.shapes||{})[id]; if(mine&&!goneS[id]) ns[id]=mine; });
+      }
+      if(propShapesOk){ const sig=m=>{ const o={}; Object.values(m||{}).forEach(c=>{ const k=propK_(c.tract); (o[k]||(o[k]=[])).push(c.id+":"+JSON.stringify([c.name,c.rings])); }); Object.keys(o).forEach(k=>o[k]=o[k].sort().join("|")); return o; };
+        const a=sig(PROPS.shapes), b=sig(ns); Object.keys(Object.assign({},a,b)).forEach(k=>{ if(a[k]!==b[k]) _csUndo=_csUndo.filter(u=>propK_(u.tract)!==k); }); }   // the office or another phone changed this layer: Undo would undo their work
+      PROPS.props=np; PROPS.comps=nc; PROPS.lio=r.lio||{}; if(propNotesOk) PROPS.notes=nn; if(propShapesOk) PROPS.shapes=ns;
+      propPersist_(); try{ mnRender_(); }catch(e){} try{ csRender_(); }catch(e){} fin(true);
     });
   }, 30000);
 }
-function propHasWaiting_(){ return Object.keys(propDirty.props).length>0 || Object.keys(propDirty.comps).length>0; }
+function propHasWaiting_(){ return Object.keys(propDirty.props).length>0 || Object.keys(propDirty.comps).length>0 || Object.keys(propDirty.notes||{}).length>0 || (propDirty.noteDel||[]).length>0 || Object.keys(propDirty.shapes||{}).length>0 || (propDirty.shapeDel||[]).length>0; }
+/* One push at a time: a second one waits for the first, so a delete cannot overtake the save of the
+   same note still on its way. */
 function propPush_(){
+  const p=(_propPushP||Promise.resolve()).then(propPush1_, propPush1_);
+  _propPushP=p.catch(()=>{}); return p;
+}
+function propPush1_(){
   /* authBackendOk: the backend has answered properly, so the reply to a POST can be read. Without it
      sheetPost_ sends blind, and nothing could be marked as done. */
   if(!propBackendOk||!authBackendOk||!connected||isOffline()) return Promise.resolve(false);
@@ -10816,6 +10936,28 @@ function propPush_(){
       if(j&&j.ok){ if(JSON.stringify(propDirty.comps[k])===stamp) delete propDirty.comps[k]; }
       else if(j&&j.ok===false&&j.error){ toast("The Sheet did not save the compartments: "+j.error,true); }
     }).catch(()=>{})); });
+  /* v385: notes and arrows — the changed ones whole, then the deletions. */
+  if(propNotesOk){ const ids=Object.keys(propDirty.notes||{}).filter(id=>(PROPS.notes||{})[id]); if(ids.length){ const stamp={}; ids.forEach(id=>stamp[id]=propDirty.notes[id]);
+      jobs.push(sheetPost_({_action:"notesave", email:String(cruiserEmail||""), notes:ids.map(id=>PROPS.notes[id])}).then(j=>{
+        if(j&&j.ok){ ids.forEach(id=>{ if(propDirty.notes[id]===stamp[id]) delete propDirty.notes[id]; }); }
+        else if(j&&j.ok===false&&j.error) toast("The Sheet did not save the notes: "+j.error,true);
+      }).catch(()=>{})); }
+    Object.keys(propDirty.notes||{}).forEach(id=>{ if(!(PROPS.notes||{})[id]) delete propDirty.notes[id]; }); }
+  if(propNotesOk){ const del=(propDirty.noteDel||[]).slice(); if(del.length) jobs.push(sheetPost_({_action:"notedel", ids:del}).then(j=>{
+      if(j&&j.ok) propDirty.noteDel=(propDirty.noteDel||[]).filter(id=>del.indexOf(id)<0); }).catch(()=>{})); }
+  /* v387: the compartment layer's pieces — the changed ones whole (in batches), then the deletions. */
+  if(propShapesOk){ const big=[], ids=Object.keys(propDirty.shapes||{}).filter(id=>{ const c=(PROPS.shapes||{})[id]; if(!c) return false; if(JSON.stringify(c.rings).length>45000){ big.push(c.name); return false; } return true; });
+    if(big.length) toast("Too many corners to send to the Sheet (about 1,800 at most per piece): "+big.join(", ")+" — cut "+(big.length===1?"it":"them")+" into smaller pieces",true);
+    const batches=[]; let cur=[], size=0; ids.forEach(id=>{ const n=JSON.stringify(PROPS.shapes[id]).length; if(cur.length&&(size+n>400000||cur.length>=40)){ batches.push(cur); cur=[]; size=0; } cur.push(id); size+=n; }); if(cur.length) batches.push(cur);
+    batches.forEach(b=>{ const stamp={}; b.forEach(id=>stamp[id]=propDirty.shapes[id]);
+      jobs.push(sheetPost_({_action:"shapesave", email:String(cruiserEmail||""), shapes:b.map(id=>{ const c=PROPS.shapes[id]; return {id:c.id, tract:c.tract, name:c.name, rings:c.rings}; })}).then(j=>{
+        const done=(j&&Array.isArray(j.savedIds))?j.savedIds:((j&&j.ok)?b:[]);
+        done.forEach(id=>{ if(propDirty.shapes[id]===stamp[id]) delete propDirty.shapes[id]; });
+        if(j&&j.ok===false&&j.error) toast("The Sheet did not save the compartment layer: "+j.error,true);
+      }).catch(()=>{})); });
+    Object.keys(propDirty.shapes||{}).forEach(id=>{ if(!(PROPS.shapes||{})[id]) delete propDirty.shapes[id]; });
+    const del=(propDirty.shapeDel||[]).slice(); if(del.length) jobs.push(sheetPost_({_action:"shapedel", ids:del}).then(j=>{
+      if(j&&j.ok) propDirty.shapeDel=(propDirty.shapeDel||[]).filter(id=>del.indexOf(id)<0); }).catch(()=>{})); }
   return Promise.all(jobs).then(()=>{ propPersist_(); return true; });
 }
 /* prop = {tract, …only the fields that changed}; comps = [{name, …only the fields that changed}]. */
@@ -10849,6 +10991,7 @@ function openPropSheet_(tract){
   propSync_(ok=>{ if(ok && $("ppBody") && $("dataSheet") && $("dataSheet").style.display!=="none" && !_ppTouched && !_ppEditing_()) propRender_(); });
 }
 let _ppTouched=false;
+function propRefreshIfOpen_(){ if($("ppBody") && $("dataSheet") && $("dataSheet").style.display!=="none") propRender_(true); }
 function propTouch_(e){ const id=String((e&&e.target&&e.target.id)||""); if(id==="ppTract"||/^ppBnd/.test(id)) return; _ppTouched=true; }
 function _ppEditing_(){ const a=document.activeElement; return !!(a && a.id && /^pp/.test(a.id)); }
 /* keep: the outline was changed while the cruiser had typed into the form — redraw, but put back what
@@ -10857,7 +11000,7 @@ function propRender_(keep){
   const box=$("ppBody"); if(!box) return;
   let held=null, heldShown=null;
   if(keep && _ppTouched){ held={}; heldShown=_ppShown;
-    ["ppOwner","ppRoll","ppAddress","ppLotcon","ppTownship","ppMunicipality","ppMpac","ppLabelArea","ppLabelUnit"].forEach(id=>{ const el=$(id); if(el) held[id]=el.value; });
+    ["ppOwner","ppRoll","ppAddress","ppLotcon","ppTownship","ppMunicipality","ppMpac","ppLabelShow"].forEach(id=>{ const el=$(id); if(el) held[id]=el.value; });
     for(let i=0;i<(_ppComps||[]).length;i++) ["ppCls","ppMan","ppUnit"].forEach(x=>{ const el=$(x+i); if(el) held[x+i+"|"+propK_(_ppComps[i].name)]=el.value; }); }
   const list=propTracts_(), t=_ppTract;
   const inp=(id,label,val,extra)=>`<label style="display:block;margin:0 0 8px"><span style="display:block;font-size:12px;color:#a9c9b0;margin-bottom:2px">${label}</span>`+
@@ -10876,10 +11019,10 @@ function propRender_(keep){
      inp("ppLotcon","Lot and concession",p.lotcon,`placeholder="e.g. PT LOT 11, CON 12"`)+
      inp("ppTownship","Township",p.township)+
      inp("ppMunicipality","Municipality",p.municipality)+
-     inp("ppMpac","MPAC assessment acres",p.mpac,`inputmode="decimal"`);
-  h+=`<div style="margin:4px 0 10px;font-size:12px;color:#a9c9b0">Compartment labels on the maps show the `+
-     sel("ppLabelArea",[["calc","calculated"],["manual","manually entered"]],p.labelArea||"calc")+` area in `+
-     sel("ppLabelUnit",[["ac","acres"],["ha","hectares"]],p.labelUnit||"ac")+`</div>`;
+     inp("ppMpac","MPAC assessment acres",p.mpac,`inputmode="decimal"`)+
+     `<div style="font-size:11px;color:#8fae95;margin:-4px 0 8px;line-height:1.45">The compartments' adjusted acres are made to add up to this: any you type below (or that the layer's adjusted-acres field gives) are kept, and the rest are shared out in proportion to their size.</div>`;
+  h+=`<div style="margin:4px 0 10px;font-size:12px;color:#a9c9b0">Compartment labels on the maps show `+
+     sel("ppLabelShow",[["adj","adjusted acres"],["ac","acres"],["ha","hectares"]],propLabelShow_(p))+`</div>`;
   // the outline
   const b=Array.isArray(p.boundary)?p.boundary:[];
   const bha=b.length?propOutlineHa_(b):0;
@@ -10899,15 +11042,32 @@ function propRender_(keep){
   if(!_ppComps.length) h+=`<div style="font-size:12px;color:#e8a33a;line-height:1.5">No compartments found for ${esc(t)}. Load the boundary file and pick its Stand name field (and Tract field) under Layers, or draw them with the map's Draw tool.</div>`;
   else {
     if(_ppComps[0].unassigned) h+=`<div style="font-size:11px;color:#e8a33a;margin-bottom:6px">These compartments have no tract in the file. They are shown here because none carry ${esc(t)}.</div>`;
-    h+=_ppComps.map((c,i)=>{ const r=propComp_(t,c.name)||{}, hasCalc=isFinite(c.calcHa);
+    const S=propSummary_(t,_ppComps), SRC_={layer:"from the layer",calculated:"calculated","from layer ha":"from the layer's ha"};
+    h+=_ppComps.map((c,i)=>{ const r=propComp_(t,c.name)||{}, row=S.rows[i]||{}, hasArea=row.ha>0;
+      const adjNote= row.adjSrc==="typed"?"typed":row.adjSrc==="layer"?"from the layer":row.adjSrc==="auto"?"shared out to match MPAC":S.mpac!=null?"= acres (not shared out — see the area summary)":"= acres (no MPAC acres)";
       return `<div style="border:1px solid #2a4030;border-radius:8px;padding:8px;margin-bottom:6px">`+
         `<div style="display:flex;justify-content:space-between;gap:8px;font-size:13px;color:#eafae8"><b>${esc(c.name)}</b>`+
-        `<span style="color:#a9c9b0">${hasCalc?`${(c.calcHa*HA_AC).toFixed(2)} ac · ${c.calcHa.toFixed(2)} ha calculated`:"no area calculated"}${c.src==="sheet"?" · no outline on this phone":""}</span></div>`+
+        `<span style="color:#a9c9b0;text-align:right">${hasArea?`${row.ha.toFixed(2)} ha ${SRC_[row.haSrc]||""} · ${row.ac.toFixed(2)} ac ${SRC_[row.acSrc]||""}`:"no area calculated"}${c.src==="sheet"?" · no outline on this phone":""}</span></div>`+
+        `<div style="font-size:12px;color:#e8c35a;margin-top:3px">Adjusted: ${hasArea||row.adj>0?row.adj.toFixed(2)+" ac":"—"} · ${adjNote}</div>`+
         `<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px">`+
         sel("ppCls"+i,MFTIP_CLASSES,r.cls||"")+
-        `<input id="ppMan${i}" type="text" inputmode="decimal" placeholder="manual area" value="${esc(r.manual==null?"":r.manual)}" style="width:110px;font-size:16px;padding:7px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
+        `<input id="ppMan${i}" type="text" inputmode="decimal" placeholder="type adjusted" value="${esc(r.manual==null?"":r.manual)}" style="width:120px;font-size:16px;padding:7px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
         sel("ppUnit"+i,[["ac","ac"],["ha","ha"]],r.unit||"ac")+`</div></div>`; }).join("");
+    h+=`<div style="font-size:11px;color:#8fae95;line-height:1.45;margin-bottom:6px">Leave “type adjusted” blank to have it shared out from the MPAC acres. Type a figure only where you want that compartment's area fixed.</div>`;
   }
+  // v387: the compartment layer made from the outline
+  { const made=csOf_(t), names={}; made.forEach(c=>names[propK_(c.name)]=c.name);
+    h+=`<div style="border-top:1px solid #2a4030;margin:10px 0 6px;padding-top:8px;font:700 13px system-ui;color:#eafae8">Compartment layer from the outline</div>`;
+    if(!made.length) h+=`<div style="font-size:11px;color:#8fae95;line-height:1.45;margin-bottom:6px">Copies the property outline, then you cut it into compartments on the map and name them — the compartments fit the property exactly, with no slivers.</div>`+
+      `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="csEdit_(_ppTract)" ${b.length?"":"disabled"}>✂ Start from the property outline</button>`+(b.length?"":`<div style="font-size:11px;color:#e8a33a;margin-bottom:6px">Save the property outline first.</div>`);
+    else h+=`<div style="font-size:12px;color:#cfe3d2;margin-bottom:6px">${made.length} piece${made.length===1?"":"s"} · ${Object.keys(names).length} compartment${Object.keys(names).length===1?"":"s"}. These are the property's compartments: loaded boundary files and drawn areas for ${esc(t)} are not counted while the layer has pieces.</div>`+
+      `<div style="display:flex;gap:6px;margin-bottom:6px"><button type="button" class="btn ghost" style="flex:1" onclick="csEdit_(_ppTract)">✂ Edit on the map</button><button type="button" class="btn ghost" style="flex:1" onclick="csExportShp_(_ppTract)">⇩ Shapefile</button></div>`+
+      `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="if(csFromOutline_(_ppTract)) propRender_(true)">Start again from the outline</button>`;
+    if(made.length){ const chk=csCheck_(t); if(!chk.ok) h+=`<div style="font-size:12px;color:#ffd24a;margin-bottom:6px">${chk.over?"Some pieces of the layer overlap (two phones may have cut it at the same time) — open the editor to fix them.":"The layer's pieces add up to "+chk.layHa.toFixed(2)+" ha but the outline is "+chk.propHa.toFixed(2)+" ha — start again from the outline to match it."}</div>`; } }
+  h+=`<div style="border-top:1px solid #2a4030;margin:10px 0 6px;padding-top:8px;font:700 13px system-ui;color:#eafae8">MFTIP maps</div>`+
+     `<div style="font-size:11px;color:#8fae95;margin-bottom:6px">Letter-size PDF and JPEG from what is saved here — save any changes first.</div>`+
+     `<div style="display:flex;gap:8px;margin-bottom:6px"><button type="button" class="btn ghost" style="flex:1" onclick="mmOpen_(4)">🗺 Map 4 — surrounding area</button><button type="button" class="btn ghost" style="flex:1" onclick="mmOpen_(6)">🛰 Map 6 — detailed, aerial</button></div>`+
+     `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="mvOpen_()">💾 Saved map versions</button>`;
   h+=`<div style="display:flex;gap:8px;margin:12px 0 6px"><button type="button" class="btn submit" style="flex:1" onclick="propSaveForm_()">Save</button>`+
      `<button type="button" class="btn ghost" style="flex:1" onclick="propSaveForm_(true)">Area summary</button></div>`;
   const waiting=!!propDirty.props[propK_(t)]||!!propDirty.comps[propK_(t)];
@@ -10933,12 +11093,12 @@ function propReadForm_(){
   if(roll===null){ toast("The roll number needs 19 digits — it has "+rollRaw.replace(/[^0-9]/g,"").length,true); return null; }
   const mp=v("ppMpac").replace(/,/g,""); if(mp!==""&&!(isFinite(Number(mp))&&Number(mp)>=0)){ toast("MPAC acres must be a number",true); return null; }
   const form={owner:v("ppOwner"), roll:roll, address:v("ppAddress"), lotcon:v("ppLotcon"), township:v("ppTownship"),
-    municipality:v("ppMunicipality"), mpac:mp===""?"":Number(mp), labelArea:v("ppLabelArea")==="manual"?"manual":"calc", labelUnit:v("ppLabelUnit")==="ha"?"ha":"ac"};
+    municipality:v("ppMunicipality"), mpac:mp===""?"":Number(mp), labelArea:({adj:"adj",ac:"acres",ha:"calc"})[v("ppLabelShow")]||"adj", labelUnit:v("ppLabelShow")==="ha"?"ha":"ac"};
   /* Only what the cruiser changed goes out (see "the Sheet" above): compared with the values the form
      was DRAWN with — not the record now, which a sync may have updated underneath the open form. */
   const shown=(_ppShown&&_ppShown.prop&&propK_(_ppShown.prop.tract||t)===propK_(t))?_ppShown:{prop:propGet_(t)||{},comps:PROPS.comps[propK_(t)]||{}};
   const was=shown.prop||{}, same=(a,b)=>String(a==null?"":a)===String(b==null?"":b);
-  const defaults={labelArea:"calc",labelUnit:"ac"};
+  const defaults={labelArea:"adj",labelUnit:"ac"};
   const prop={tract:t};
   Object.keys(form).forEach(x=>{ const old=(was[x]===undefined||was[x]==="")&&defaults[x]?defaults[x]:was[x]; if(!same(form[x],old)) prop[x]=form[x]; });
   const comps=[];
@@ -10981,22 +11141,23 @@ function propUseDrawn_(i){ if(i==="") return; const pg=(polys||[])[+i]; if(!pg||
 function propClearBnd_(){ const t=_ppTract; if(!t) return; if(!confirm("Remove the property outline for "+t+"?")) return;
   propSaveLocal_({tract:t, boundary:[]}, null); propRender_(true); try{ lioRender_(); }catch(e){} }
 function propSummaryHtml_(s){
-  const f2=x=>(Math.round(x*100)/100).toFixed(2);
-  let h=`<table style="width:100%;border-collapse:collapse;font-size:13px;color:#e8f0e6"><tr style="color:#a9c9b0;text-align:left"><th style="padding:4px">Compartment</th><th>Class</th><th style="text-align:right">ac</th><th style="text-align:right;padding-right:4px">ha</th></tr>`;
-  s.rows.forEach(r=>{ h+=`<tr style="border-top:1px solid #2a4030"><td style="padding:4px">${esc(r.name)}${r.src==="manual"?' <small style="color:#e8c35a">manual</small>':""}</td><td>${esc(PROP_CLS_LABEL[r.cls]||"")}</td><td style="text-align:right">${f2(r.ac)}</td><td style="text-align:right;padding-right:4px">${f2(r.ha)}</td></tr>`; });
+  const f2=x=>(Math.round(x*100)/100).toFixed(2), td=`style="text-align:right"`, tdl=`style="text-align:right;padding-right:4px"`;
+  const tag=r=>r.adjSrc==="typed"?' <small style="color:#e8c35a">typed</small>':r.adjSrc==="layer"?' <small style="color:#e8c35a">layer</small>':"";
+  let h=`<table style="width:100%;border-collapse:collapse;font-size:13px;color:#e8f0e6"><tr style="color:#a9c9b0;text-align:left"><th style="padding:4px">Compartment</th><th>Class</th><th ${td}>ha</th><th ${td}>ac</th><th ${tdl}>adj. ac</th></tr>`;
+  s.rows.forEach(r=>{ h+=`<tr style="border-top:1px solid #2a4030"><td style="padding:4px">${esc(r.name)}</td><td>${esc(PROP_CLS_LABEL[r.cls]||"")}</td><td ${td}>${f2(r.ha)}</td><td ${td}>${f2(r.ac)}</td><td ${tdl}>${f2(r.adj)}${tag(r)}</td></tr>`; });
   ["MFTIP","CLTIP","INELIGIBLE",""].forEach(k=>{ const b=s.byClass[k]; if(!b.n) return;
-    h+=`<tr style="border-top:1px solid #33623a;color:#cfe3d2"><td style="padding:4px" colspan="2">${esc(PROP_CLS_LABEL[k])} (${b.n})</td><td style="text-align:right">${f2(b.ac)}</td><td style="text-align:right;padding-right:4px">${f2(b.ha)}</td></tr>`; });
-  h+=`<tr style="border-top:2px solid #4caf50;font-weight:700"><td style="padding:4px" colspan="2">Total</td><td style="text-align:right">${f2(s.total.ac)}</td><td style="text-align:right;padding-right:4px">${f2(s.total.ha)}</td></tr>`;
-  if(s.mpac!=null) h+=`<tr style="color:#cfe3d2"><td style="padding:4px" colspan="2">MPAC assessment</td><td style="text-align:right">${f2(s.mpac)}</td><td style="text-align:right;padding-right:4px">${f2(s.mpac/HA_AC)}</td></tr>`;
-  h+=`</table><div style="margin:10px 0;padding:10px;border-radius:8px;background:#10240f;border:1px solid #33623a;font-size:14px;color:${s.diffAc!=null&&Math.abs(s.diffAc)>=0.01?"#ffd24a":"#cfe3d2"}">${esc(s.msg)}</div>`;
+    h+=`<tr style="border-top:1px solid #33623a;color:#cfe3d2"><td style="padding:4px" colspan="2">${esc(PROP_CLS_LABEL[k])} (${b.n})</td><td ${td}>${f2(b.ha)}</td><td ${td}>${f2(b.ac)}</td><td ${tdl}>${f2(b.adj)}</td></tr>`; });
+  h+=`<tr style="border-top:2px solid #4caf50;font-weight:700"><td style="padding:4px" colspan="2">Total</td><td ${td}>${f2(s.total.ha)}</td><td ${td}>${f2(s.total.ac)}</td><td ${tdl}>${f2(s.total.adj)}</td></tr>`;
+  if(s.mpac!=null) h+=`<tr style="color:#cfe3d2"><td style="padding:4px" colspan="2">MPAC assessment</td><td ${td}>${f2(s.mpac/HA_AC)}</td><td ${td}></td><td ${tdl}>${f2(s.mpac)}</td></tr>`;
+  h+=`</table><div style="font-size:11px;color:#8fae95;margin-top:4px">The maps' labels and title block use the adjusted acres.</div><div style="margin:10px 0;padding:10px;border-radius:8px;background:#10240f;border:1px solid #33623a;font-size:14px;color:${s.diffAc!=null&&Math.abs(s.diffAc)>=0.01?"#ffd24a":"#cfe3d2"}">${esc(s.msg)}</div>`;
   return h;
 }
 function propSummaryText_(s){
-  const f2=x=>(Math.round(x*100)/100).toFixed(2), L=["Compartment\tClass\tAcres\tHectares"];
-  s.rows.forEach(r=>L.push([r.name+(r.src==="manual"?" (manual)":""), PROP_CLS_LABEL[r.cls]||"", f2(r.ac), f2(r.ha)].join("\t")));
-  ["MFTIP","CLTIP","INELIGIBLE",""].forEach(k=>{ const b=s.byClass[k]; if(b.n) L.push([PROP_CLS_LABEL[k]+" total","",f2(b.ac),f2(b.ha)].join("\t")); });
-  L.push(["Total","",f2(s.total.ac),f2(s.total.ha)].join("\t"));
-  if(s.mpac!=null) L.push(["MPAC assessment","",f2(s.mpac),f2(s.mpac/HA_AC)].join("\t"));
+  const f2=x=>(Math.round(x*100)/100).toFixed(2), L=["Compartment\tClass\tHectares\tAcres\tAdjusted acres"];
+  s.rows.forEach(r=>L.push([r.name+(r.adjSrc==="typed"?" (typed)":r.adjSrc==="layer"?" (layer)":""), PROP_CLS_LABEL[r.cls]||"", f2(r.ha), f2(r.ac), f2(r.adj)].join("\t")));
+  ["MFTIP","CLTIP","INELIGIBLE",""].forEach(k=>{ const b=s.byClass[k]; if(b.n) L.push([PROP_CLS_LABEL[k]+" total","",f2(b.ha),f2(b.ac),f2(b.adj)].join("\t")); });
+  L.push(["Total","",f2(s.total.ha),f2(s.total.ac),f2(s.total.adj)].join("\t"));
+  if(s.mpac!=null) L.push(["MPAC assessment","",f2(s.mpac/HA_AC),"",f2(s.mpac)].join("\t"));
   L.push(s.msg); return L.join("\n");
 }
 let _ppLastSummary=null;
@@ -11021,7 +11182,10 @@ const LIO_LAYERS=[
   {k:"waterbody", label:"Water bodies",       svc:"LIO_Open01", id:25, name:"OHN Waterbody",             fields:"OGF_ID,WATERBODY_TYPE,OFFICIAL_NAME_LABEL,PERMANENCY", on:true},
   {k:"wetland",   label:"Wetlands",           svc:"LIO_Open01", id:15, name:"Wetland With Significance", fields:"OGF_ID,WETLAND_TYPE,WETLAND_SIGNIFICANCE,EVALUATED_WETLAND_NAME", on:true},
   {k:"contour",   label:"Contours",           svc:"LIO_Open01", id:29, name:"Contour",                   fields:"OGF_ID,ELEVATION", off:0.00002, on:false},
-  {k:"building",  label:"Buildings",          svc:"LIO_Open01", id:34, name:"Building To Scale",         fields:"OGF_ID,BUILDING_TYPE", on:false}
+  {k:"building",  label:"Buildings",          svc:"LIO_Open01", id:34, name:"Building To Scale",         fields:"OGF_ID,BUILDING_TYPE", on:false},
+  /* v383: for Map 4's woodland shading around the property. Open07/29, checked 2026-10-08: no token,
+     polygons, WOODED_AREA_TYPE "Treed", "within 10 metres". */
+  {k:"woodland",  label:"Woodland",           svc:"LIO_Open07", id:29, name:"Wooded Area",               fields:"OGF_ID,WOODED_AREA_TYPE", off:0.00002, on:false, opt:true}
 ];
 const LIO_PAGE=1000, LIO_MAX_PAGES=25, LIO_TIMEOUT_MS=20000;
 let lioVis={}; LIO_LAYERS.forEach(L_=>{ lioVis[L_.k]=L_.on; });
@@ -11099,7 +11263,9 @@ async function lioEnsure_(tract, force, quiet){
     if(!ext){ lioStatus_(`No outline or compartments for <b>${esc(tract)}</b> yet — the provincial layers need one of them.`); if(!quiet) toast("Load or draw the property outline or its compartments first",true); return; }
     const want=lioPad_(ext,LIO_MARGIN_M), need=lioPad_(ext,LIO_MARGIN_M*0.8);
     let cache=null; try{ cache=await ldbGet(lioKey_(tract)); }catch(e){}
-    const complete=c=>c&&c.layers&&LIO_LAYERS.every(L_=>c.layers[L_.k]&&c.layers[L_.k].fc);
+    /* opt: a layer added later (woodland, v383) does not make every copy already saved count as incomplete
+       — Map 4 fetches it for itself when it is missing. */
+    const complete=c=>c&&c.layers&&LIO_LAYERS.every(L_=>L_.opt||(c.layers[L_.k]&&c.layers[L_.k].fc));
     if(!force && cache && !cache.partial && lioCovers_(cache.bbox,need) && complete(cache)){ lioUse_(tract,cache); return; }
     if(isOffline()){
       if(cache){ lioUse_(tract,cache); lioStatus_(`Showing the copy saved ${esc(lioWhen_(cache.at))}. No signal to fetch more.`); }
@@ -11162,7 +11328,8 @@ const LIO_STYLE={
   waterbody:{color:"#4fc3f7", weight:1, opacity:0.9, fillColor:"#29b6f6", fillOpacity:0.35},
   wetland:  {color:"#26a69a", weight:1, opacity:0.9, fillColor:"#4db6ac", fillOpacity:0.25, dashArray:"3 3"},
   contour:  {color:"#d7b377", weight:1, opacity:0.7, fill:false},
-  building: {color:"#212121", weight:1, opacity:0.9, fillColor:"#eeeeee", fillOpacity:0.6}
+  building: {color:"#212121", weight:1, opacity:0.9, fillColor:"#eeeeee", fillOpacity:0.6},
+  woodland: {color:"#7cbf72", weight:1, opacity:0.6, fillColor:"#9ed39a", fillOpacity:0.3}
 };
 function lioToggle_(k){ lioVis[k]=!lioVis[k]; try{ STORE&&STORE.setItem("fi_liovis",JSON.stringify(lioVis)); }catch(e){} lioRender_(); }
 function lioTogglesHtml_(){
@@ -11192,6 +11359,8 @@ function lioRender_(){
     at.textContent=LIO_ATTRIB; mv.appendChild(at); } }
   if(at) at.style.display=any?"block":"none";
   lioLabels_();
+  try{ mnRender_(); }catch(e){}
+  try{ csRender_(); }catch(e){}
 }
 /* Lot and concession numbers, only when zoomed in enough to read them. */
 function lioLabels_(){
@@ -11421,6 +11590,1119 @@ async function imgTest_(){
   } finally { _imgTesting=false; }
   imgRender_(); line(out.map(esc).join("<br>"));
   if(imgSource_().id!=="esri") imgDraw_();
+}
+/* ============ v383 — MFTIP Map 4 and Map 6 ============
+   Chris's choices (2026-10-08): both maps in one build; the plain style is Map 4 ("Property Map and
+   Surrounding Area"), the aerial one Map 6 ("Detailed Property Map"); made from the property sheet as a
+   letter-size PDF and JPEG, a copy in the account's Drive; laid out like his sample — letter portrait,
+   the map on top, the title block across the bottom.
+   Everything is drawn on the phone onto one canvas (200 dpi, 1700 × 2200 px) from what v380 keeps:
+   the property record, the compartments and their classes and areas, the property outline, and the
+   provincial layers (fetched for the map's own extent when it is wider than the saved copy). Map 6
+   draws the aerial photo chosen under Layers (v382). Web Mercator, north up; the scale bar is in true
+   ground metres at the property's latitude. */
+/* v385: the page — letter (the MFTIP size) or tabloid, as the Street Tree app offers. Everything below
+   reads these, so one map is drawn the same way on any of them; text keeps its size in inches. */
+const MM_DPI=200;
+const MM_PAGES={letter:{name:"Letter 8.5 × 11 in (MFTIP)", short:"8.5 × 11 in", w:8.5, h:11},
+  tabloid:{name:"Tabloid 11 × 17 in, portrait", short:"11 × 17 in", w:11, h:17},
+  tabloidL:{name:"Tabloid 17 × 11 in, landscape", short:"17 × 11 in", w:17, h:11}};
+let MM_PAGE="letter", MM_W=1700, MM_H=2200;
+let MM_FRAME={x:110, y:110, w:1480, h:1440};            // the map itself
+let MM_TB={x:110, y:1570, w:1480, h:520};               // the title block below it
+function mmSetPage_(k){ MM_PAGE=MM_PAGES[k]?k:"letter"; const p=MM_PAGES[MM_PAGE];
+  MM_W=Math.round(p.w*MM_DPI); MM_H=Math.round(p.h*MM_DPI);
+  MM_TB={x:110, y:MM_H-630, w:MM_W-220, h:520}; MM_FRAME={x:110, y:110, w:MM_W-220, h:MM_TB.y-20-110}; }
+const MM_SCALES=[500,750,1000,1500,2000,2500,3000,4000,5000,6000,7500,10000,12500,15000,20000,25000,30000,40000,50000,75000,100000];
+const MM_DEF={
+  4:{title:"Map 4  Property Map and Surrounding Area", pad:2.4, aerial:false, layers:{woodland:1,lots:1,roads:1,roadnames:1,water:1,waterbody:1,wetland:1,building:1,contour:0}, hatch:"auto", plots:false},
+  6:{title:"Map 6  Detailed Property Map",              pad:1.25, aerial:true,  layers:{woodland:0,lots:1,roads:1,roadnames:1,water:1,waterbody:1,wetland:1,building:1,contour:1}, hatch:"none", plots:false}
+};
+const MM_COL={boundary:"#e8141c", comp:"#3c9a1e", wood:"#b4d8b0", water:"#2f7fe0", openwater:"#a9d6f2", road:"#111", lot:"#555", contour:"#b07d3a", building:"#111"};
+function mmOpts_(kind){ const d=MM_DEF[kind], saved=(function(){ try{ return JSON.parse((STORE&&STORE.getItem("fi_mmopts"+kind))||"null"); }catch(e){ return null; } })()||{};
+  return {kind:kind, title:d.title, pad:d.pad, aerial:d.aerial, layers:Object.assign({},d.layers,saved.layers||{}), hatch:saved.hatch||d.hatch, plots:saved.plots!=null?!!saved.plots:d.plots, scale:saved.scale||"auto",
+    page:MM_PAGES[saved.page]?saved.page:"letter", extent:saved.extent==="view"?"view":"fit", viewBox:null,
+    firm:(function(){ try{ return (STORE&&STORE.getItem("fi_mmfirm"))||""; }catch(e){ return ""; } })()}; }
+function mmSaveOpts_(o){ try{ STORE&&STORE.setItem("fi_mmopts"+o.kind,JSON.stringify({layers:o.layers,hatch:o.hatch,plots:o.plots,scale:o.scale,page:o.page,extent:o.extent})); STORE&&STORE.setItem("fi_mmfirm",o.firm||""); }catch(e){} }
+/* ---- projection ---- */
+function mmMerc_(lat,lon){ const s=Math.sin(Math.max(-85,Math.min(85,lat))*Math.PI/180); return [lon/360+0.5, 0.5-Math.log((1+s)/(1-s))/(4*Math.PI)]; }   // 0..1 world units
+/* The frame: centre, world-px per page-px, and the real scale. */
+function mmView_(ext, o){
+  /* "The view on the phone's map now" (v385): that box, as it is, instead of the property with a margin. */
+  const byView=o.extent==="view" && Array.isArray(o.viewBox) && o.viewBox.length===4;
+  if(byView) ext=o.viewBox;
+  const lat=(ext[1]+ext[3])/2, cos=Math.cos(lat*Math.PI/180);
+  const a=mmMerc_(ext[3],ext[0]), b=mmMerc_(ext[1],ext[2]);          // NW, SE
+  const pad=byView?1:o.pad;
+  const cx=(a[0]+b[0])/2, cy=(a[1]+b[1])/2, ww=Math.max(1e-9,b[0]-a[0])*pad, wh=Math.max(1e-9,b[1]-a[1])*pad;
+  const EARTH=40075016.686;                                          // metres per world unit at the equator
+  let upp=Math.max(ww/MM_FRAME.w, wh/MM_FRAME.h);                     // world units per page px
+  const groundPerPx=upp*EARTH*cos, inchM=0.0254/MM_DPI;
+  let scale=groundPerPx/inchM;
+  if(o.scale && o.scale!=="auto" && isFinite(+o.scale)) scale=+o.scale;
+  else scale=MM_SCALES.find(s=>s>=scale*0.999)||Math.ceil(scale/10000)*10000;
+  upp=scale*inchM/(EARTH*cos);
+  return mmViewFrom_({cx, cy, upp, scale, cos, lat});
+}
+function mmViewFrom_(q){ const cx=q.cx, cy=q.cy, upp=q.upp, scale=q.scale, cos=q.cos, lat=q.lat, inchM=0.0254/MM_DPI;
+  return {cx, cy, upp, scale, cos, lat, mPerPx:scale*inchM, params:{cx,cy,upp,scale,cos,lat},
+    toPx:(la,lo)=>{ const m=mmMerc_(la,lo); return [MM_FRAME.x+MM_FRAME.w/2+(m[0]-cx)/upp, MM_FRAME.y+MM_FRAME.h/2+(m[1]-cy)/upp]; },
+    bbox:()=>{ const x0=cx-MM_FRAME.w/2*upp, x1=cx+MM_FRAME.w/2*upp, y0=cy-MM_FRAME.h/2*upp, y1=cy+MM_FRAME.h/2*upp;
+      const lon=x=>(x-0.5)*360, latOf=y=>{ const n=Math.PI-2*Math.PI*y; return 180/Math.PI*Math.atan(0.5*(Math.exp(n)-Math.exp(-n))); };
+      return [+lon(x0).toFixed(6), +latOf(y1).toFixed(6), +lon(x1).toFixed(6), +latOf(y0).toFixed(6)]; } };
+}
+/* ---- geometry helpers ---- */
+function mmGeomParts_(g){            // → {polys:[[ring,…],…], lines:[[pt,…],…], pts:[pt,…]} in [lat,lon]
+  const out={polys:[],lines:[],pts:[]}; if(!g||!g.coordinates) return out;
+  const ll=c=>[c[1],c[0]];
+  if(g.type==="Polygon") out.polys.push(g.coordinates.map(r=>r.map(ll)));
+  else if(g.type==="MultiPolygon") g.coordinates.forEach(p=>out.polys.push(p.map(r=>r.map(ll))));
+  else if(g.type==="LineString") out.lines.push(g.coordinates.map(ll));
+  else if(g.type==="MultiLineString") g.coordinates.forEach(l=>out.lines.push(l.map(ll)));
+  else if(g.type==="Point") out.pts.push(ll(g.coordinates));
+  else if(g.type==="MultiPoint") g.coordinates.forEach(c=>out.pts.push(ll(c)));
+  return out;
+}
+function mmPath_(ctx,V,rings){ ctx.beginPath(); rings.forEach(r=>{ r.forEach((q,i)=>{ const p=V.toPx(q[0],q[1]); if(i) ctx.lineTo(p[0],p[1]); else ctx.moveTo(p[0],p[1]); }); if(ctx.closePath) ctx.closePath(); }); }
+function mmLine_(ctx,V,pts){ ctx.beginPath(); pts.forEach((q,i)=>{ const p=V.toPx(q[0],q[1]); if(i) ctx.lineTo(p[0],p[1]); else ctx.moveTo(p[0],p[1]); }); }
+function mmDash_(ctx,a){ if(ctx.setLineDash) ctx.setLineDash(a); }
+/* A point well inside a polygon for its label: the grid point farthest from every edge. */
+function mmInside_(ringsPx, clip){
+  const outer=ringsPx[0]; if(!outer||outer.length<3) return null;
+  let x0=1/0,y0=1/0,x1=-1/0,y1=-1/0; outer.forEach(p=>{ x0=Math.min(x0,p[0]); y0=Math.min(y0,p[1]); x1=Math.max(x1,p[0]); y1=Math.max(y1,p[1]); });
+  if(clip){ x0=Math.max(x0,clip.x+60); y0=Math.max(y0,clip.y+50); x1=Math.min(x1,clip.x+clip.w-60); y1=Math.min(y1,clip.y+clip.h-50); if(x1<=x0||y1<=y0) return null; }   // only the part on the map
+  const inside=(x,y)=>{ let c=false; ringsPx.forEach(r=>{ for(let i=0,j=r.length-1;i<r.length;j=i++){ const a=r[i],b=r[j]; if(((a[1]>y)!==(b[1]>y)) && (x<(b[0]-a[0])*(y-a[1])/(b[1]-a[1])+a[0])) c=!c; } }); return c; };
+  const segD=(x,y,a,b)=>{ const dx=b[0]-a[0], dy=b[1]-a[1], L=dx*dx+dy*dy; let t=L?((x-a[0])*dx+(y-a[1])*dy)/L:0; t=Math.max(0,Math.min(1,t)); const ex=a[0]+t*dx-x, ey=a[1]+t*dy-y; return Math.sqrt(ex*ex+ey*ey); };
+  let best=null, bd=-1; const N=14;
+  for(let i=1;i<N;i++) for(let j=1;j<N;j++){ const x=x0+(x1-x0)*i/N, y=y0+(y1-y0)*j/N; if(!inside(x,y)) continue;
+    let d=1/0; ringsPx.forEach(r=>{ for(let k=0,m=r.length-1;k<r.length;m=k++) d=Math.min(d,segD(x,y,r[k],r[m])); }); if(d>bd){ bd=d; best=[x,y]; } }
+  return best?{x:best[0],y:best[1],room:bd}:{x:(x0+x1)/2,y:(y0+y1)/2,room:0};
+}
+function mmPatterns_(ctx){
+  const mk=(w,h,draw)=>{ try{ const c=document.createElement("canvas"); c.width=w; c.height=h; const g=c.getContext("2d"); if(!g) return null; draw(g); return ctx.createPattern?ctx.createPattern(c,"repeat"):null; }catch(e){ return null; } };
+  return {
+    cltip: mk(20,20,g=>{ g.lineCap="square"; g.beginPath(); g.moveTo(10,0); g.lineTo(10,20); g.moveTo(0,10); g.lineTo(20,10);
+      g.strokeStyle="rgba(255,255,255,.75)"; g.lineWidth=4.2; g.stroke(); g.strokeStyle="#1e8a3c"; g.lineWidth=2; g.stroke(); }),
+    hatch: mk(22,22,g=>{ g.strokeStyle="#111"; g.lineWidth=1.6; g.beginPath(); g.moveTo(0,0); g.lineTo(22,22); g.moveTo(22,0); g.lineTo(0,22); g.stroke(); }),
+    wetland: mk(40,30,g=>{ g.fillStyle="rgba(225,244,215,.85)"; g.fillRect(0,0,40,30); g.strokeStyle="#3a9a2a"; g.lineWidth=1.6; g.beginPath();
+      [[8,20],[28,8]].forEach(p=>{ g.moveTo(p[0]-5,p[1]); g.lineTo(p[0]+5,p[1]); g.moveTo(p[0],p[1]); g.lineTo(p[0],p[1]-7); g.moveTo(p[0],p[1]); g.lineTo(p[0]-4,p[1]-6); g.moveTo(p[0],p[1]); g.lineTo(p[0]+4,p[1]-6); }); g.stroke(); })
+  };
+}
+/* ---- the data for one property ---- */
+function mmData_(tract){
+  const p=propGet_(tract)||{}, comps=propCompsGeo_(tract).filter(c=>c.polygons.length), sum=propSummary_(tract);
+  const outline=(Array.isArray(p.boundary)&&p.boundary.length)?p.boundary:null;
+  const cls=n=>((propComp_(tract,n)||{}).cls||"");
+  /* v386: the label is the compartment's adjusted acres (or acres / hectares, as the property says) — the same figures as the area summary. */
+  const show=propLabelShow_(p), byName={}; sum.rows.forEach(r=>{ byName[propK_(r.name)]=r; });
+  const label=c=>{ const r=byName[propK_(c.name)]||{ha:c.calcHa||0,ac:(c.calcHa||0)*HA_AC,adj:(c.calcHa||0)*HA_AC};
+    const v=show==="ha"?r.ha:show==="ac"?r.ac:r.adj, u=show==="ha"?"ha":"ac"; return (v>=100?v.toFixed(1):v.toFixed(2))+" "+u; };
+  /* v385: each compartment carries its class and label as plain values, so the data can be frozen in a version. */
+  comps.forEach(c=>{ c.cls=cls(c.name); c.label=label(c); });
+  return {p, comps, sum, outline, cls, label};
+}
+/* Which class is hatched: the smaller of MFTIP-eligible and not eligible, by area. CLTIP has its own pattern (v386). */
+function mmHatchClass_(d, choice){
+  if(choice==="none") return null;
+  if(choice==="eligible") return "elig"; if(choice==="ineligible") return "inel";
+  const A=b=>(b.adj!=null?b.adj:b.ac), e=A(d.sum.byClass.MFTIP), n=A(d.sum.byClass.INELIGIBLE);
+  if(!(e>0)||!(n>0)) return null;
+  return n<=e ? "inel" : "elig";
+}
+/* Provincial features for the map's extent: the saved copy if it covers it, else fetched now. */
+async function mmLayers_(tract, bbox, want, notes){
+  let cache=null; try{ cache=await ldbGet(lioKey_(tract)); }catch(e){}
+  const out={};
+  /* A location map at 1:50,000 or more spans many kilometres: contours and buildings there would be
+     tens of thousands of features and unreadable anyway. */
+  const wideKm=(bbox[2]-bbox[0])*111.32*Math.cos((bbox[1]+bbox[3])/2*Math.PI/180);
+  if(wideKm>6){ want=Object.assign({},want); ["contour","building"].forEach(k=>{ if(want[k]){ want[k]=0; notes.push((k==="contour"?"Contours":"Buildings")+" are left off a map this wide"); } }); }
+  await Promise.all(LIO_LAYERS.filter(L_=>want[L_.k]).map(async L_=>{
+    const have=cache&&cache.layers&&cache.layers[L_.k]&&cache.layers[L_.k].fc;
+    if(have && lioCovers_(cache.bbox,bbox)){ out[L_.k]=have; return; }
+    /* The map reaches further than the copy saved for the field (property + 500 m): fetch it for the
+       whole map now, or say what is missing. */
+    if(!isOffline()){ try{ const f=await lioFetchLayer_(L_,bbox); out[L_.k]=f; if(f.cut) notes.push(L_.label+": too many to fetch for the whole map — only part is shown"); return; }
+      catch(e){ notes.push(L_.label+" could not be fetched for the whole map"+(have?" — only the saved area near the property is shown":"")); } }
+    else notes.push(L_.label+(have?": only the saved area near the property (no signal)":": not on this phone yet (no signal)"));
+    if(have) out[L_.k]=have;
+  }));
+  return out;
+}
+async function mmTiles_(ctx, V, src, notes, onPct){
+  const zf=Math.log2(1/(V.upp*256));                 // the fractional zoom whose pixels match the page
+  const zt=Math.max(1,Math.min(src.maxNative||19, Math.ceil(zf)));
+  const n=Math.pow(2,zt), size=1/(n*V.upp);          // one tile, in page px
+  const x0=Math.floor((V.cx-MM_FRAME.w/2*V.upp)*n), x1=Math.floor((V.cx+MM_FRAME.w/2*V.upp)*n);
+  const y0=Math.floor((V.cy-MM_FRAME.h/2*V.upp)*n), y1=Math.floor((V.cy+MM_FRAME.h/2*V.upp)*n);
+  const jobs=[]; for(let x=x0;x<=x1;x++) for(let y=y0;y<=y1;y++) jobs.push({x,y});
+  if(jobs.length>420) throw new Error("too many photo tiles at this scale — choose a smaller scale number");
+  let done=0, miss=0, k=0;
+  const load=u=>Promise.race([tmapLoadImg_(u), new Promise(r=>setTimeout(()=>r(null),12000))]);    // one stalled tile must not hold the map
+  const worker=async()=>{ while(k<jobs.length){ const j=jobs[k++]; const im=await load(imgTileUrl_(src,j.x,j.y,zt));
+      if(im){ const px=MM_FRAME.x+MM_FRAME.w/2+(j.x/n-V.cx)/V.upp, py=MM_FRAME.y+MM_FRAME.h/2+(j.y/n-V.cy)/V.upp; ctx.drawImage(im,px,py,size+0.6,size+0.6); } else miss++;
+      done++; if(onPct && done%12===0) onPct(Math.round(done/jobs.length*100)); } };
+  await Promise.all([0,1,2,3,4,5,6,7].map(worker));
+  if(miss) notes.push(miss+" of "+jobs.length+" photo tiles did not load"+(miss===jobs.length?" — "+src.name+" may not cover this property":""));
+  return {zoom:zt, tiles:jobs.length, missing:miss};
+}
+/* Everything a map draws, as plain data — gathered live, or taken from a saved version (v385). */
+async function mmGather_(tract, o, V, notes){
+  const d=mmData_(tract);
+  const L=await mmLayers_(tract, V.bbox(), o.layers, notes);
+  let roads={auto:[],typed:[]};
+  if(o.layers.roadnames){ try{ roads=rnApply_(tract, await rnRoads_(tract, V.bbox(), notes)); }catch(e){ notes.push("Road names: "+String(e.message||e)); } }
+  let plots=[];
+  if(o.plots){ const g=tmapGroupByTract_(), key=Object.keys(g).find(t=>propK_(t)===propK_(tract)); plots=((key&&g[key].plots)||[]).map(q=>({lat:q.lat,lon:q.lon,num:q.num})); }
+  /* Only what touches the map is kept: a saved version should not carry the whole province. */
+  const bb=V.bbox(), near=f=>{ const g=mmGeomParts_(f.geometry); let w=1/0,s=1/0,e=-1/0,n=-1/0; const add=q=>{ if(q[1]<w)w=q[1]; if(q[1]>e)e=q[1]; if(q[0]<s)s=q[0]; if(q[0]>n)n=q[0]; };
+    g.polys.forEach(pg=>(pg[0]||[]).forEach(add)); g.lines.forEach(l=>l.forEach(add)); g.pts.forEach(add); return e>=bb[0]&&w<=bb[2]&&n>=bb[1]&&s<=bb[3]; };
+  const layers={}; Object.keys(L).forEach(k=>{ const fc=L[k]; if(fc&&fc.features) layers[k]={type:"FeatureCollection",features:fc.features.filter(near)}; });
+  return {prop:d.p, sum:d.sum, outline:d.outline, ext:propExtent_(tract),
+    comps:d.comps.map(c=>({name:c.name, polygons:c.polygons, cls:c.cls, label:c.label})),
+    layers, roads, plots, notes:mnFor_(tract, o.kind)};
+}
+/* Draw one map. Returns {canvas, notes, scale, hatch, view, data}. `frozen` = a saved version to draw again. */
+async function mmRender_(tract, o, onPct, frozen){
+  const notes=[];
+  mmSetPage_(o.page||"letter");
+  let V, D;
+  if(frozen){ V=mmViewFrom_(frozen.view); D=frozen.data; }
+  else { const ext=propExtent_(tract); if(!ext) throw new Error("this property has no outline or compartments to map");
+    V=mmView_(ext,o); if(o.extent==="view" && !(Array.isArray(o.viewBox)&&o.viewBox.length===4)) notes.push("the phone's map was not open, so the map was fitted to the property");
+    D=await mmGather_(tract,o,V,notes); }
+  const cv=document.createElement("canvas"); cv.width=MM_W; cv.height=MM_H;
+  const ctx=cv.getContext("2d"); if(!ctx) throw new Error("this phone could not draw the map");
+  const P=mmPatterns_(ctx);
+  ctx.fillStyle="#fff"; ctx.fillRect(0,0,MM_W,MM_H);
+  ctx.lineJoin="round"; ctx.lineCap="round";
+  // ── the map ──
+  ctx.save(); ctx.beginPath(); if(ctx.rect) ctx.rect(MM_FRAME.x,MM_FRAME.y,MM_FRAME.w,MM_FRAME.h); if(ctx.clip) ctx.clip();
+  let photo=null;
+  if(o.aerial){ ctx.fillStyle="#d9d9d9"; ctx.fillRect(MM_FRAME.x,MM_FRAME.y,MM_FRAME.w,MM_FRAME.h);
+    const src=o.src||(frozen&&frozen.imagery&&IMAGERY.find(x=>x.id===frozen.imagery.id))||imgSource_(); photo=src;
+    try{ const t=await mmTiles_(ctx,V,src,notes,onPct);
+      /* Not one tile: no coverage here, or a server that will not let a photo be printed (no CORS) —
+         either way, Esri, and say so. */
+      if(t.tiles && t.missing===t.tiles && src.id!=="esri"){ notes.pop(); notes.push(src.name+" gave no photo for this property — Esri was used");
+        ctx.fillStyle="#d9d9d9"; ctx.fillRect(MM_FRAME.x,MM_FRAME.y,MM_FRAME.w,MM_FRAME.h); photo=IMAGERY[0]; await mmTiles_(ctx,V,IMAGERY[0],notes,onPct); }
+    }catch(e){ notes.push(String(e.message||e)); } }
+  const L=D.layers||{};
+  const present={};
+  /* Only what reaches the frame is drawn — and only that counts for the legend. */
+  const onMap=g=>{ let x0=1/0,y0=1/0,x1=-1/0,y1=-1/0; const add=q=>{ const p=V.toPx(q[0],q[1]); if(p[0]<x0)x0=p[0]; if(p[0]>x1)x1=p[0]; if(p[1]<y0)y0=p[1]; if(p[1]>y1)y1=p[1]; };
+    g.polys.forEach(pg=>(pg[0]||[]).forEach(add)); g.lines.forEach(l=>l.forEach(add)); g.pts.forEach(add);
+    return x1>=MM_FRAME.x && x0<=MM_FRAME.x+MM_FRAME.w && y1>=MM_FRAME.y && y0<=MM_FRAME.y+MM_FRAME.h; };
+  const eachF=(k,fn)=>{ const fc=L[k]; if(!fc||!fc.features) return; fc.features.forEach(f=>{ const g=mmGeomParts_(f.geometry); if(onMap(g)) fn(g,f.properties||{}); }); };
+  const halo=o.aerial;      // over a photo, lines need a light edge to be seen
+  if(o.layers.woodland) eachF("woodland",g=>{ g.polys.forEach(r=>{ mmPath_(ctx,V,r); ctx.fillStyle=MM_COL.wood; ctx.fill("evenodd"); present.wood=1; }); });
+  /* The compartments are woodland — except the ones classed Not eligible (a house, a field), left white. */
+  if(!o.aerial) D.comps.forEach(c=>{ if(c.cls==="INELIGIBLE") return; c.polygons.forEach(r=>{ mmPath_(ctx,V,r); ctx.fillStyle=MM_COL.wood; ctx.fill("evenodd"); present.wood=1; }); });
+  if(o.layers.waterbody) eachF("waterbody",g=>g.polys.forEach(r=>{ mmPath_(ctx,V,r); ctx.fillStyle=MM_COL.openwater; ctx.fill("evenodd"); ctx.strokeStyle=MM_COL.water; ctx.lineWidth=2; ctx.stroke(); present.openwater=1; }));
+  if(o.layers.wetland) eachF("wetland",g=>g.polys.forEach(r=>{ mmPath_(ctx,V,r); ctx.fillStyle=P.wetland||"rgba(120,200,110,.35)"; ctx.fill("evenodd"); ctx.strokeStyle="#5fbf4a"; ctx.lineWidth=2; mmDash_(ctx,[6,5]); ctx.stroke(); mmDash_(ctx,[]); present.wetland=1; }));
+  if(o.layers.contour) eachF("contour",(g,pr)=>g.lines.forEach(l=>{ mmLine_(ctx,V,l); ctx.strokeStyle=MM_COL.contour; ctx.lineWidth=+pr.ELEVATION%10===0?2.6:1.4; ctx.stroke(); present.contour=1; }));
+  // hatching of the smaller eligibility class (inside the property)
+  const hc=mmHatchClass_(D,o.hatch);
+  if(hc){ D.comps.forEach(c=>{ const k=c.cls, isElig=k==="MFTIP", isInel=k==="INELIGIBLE";
+      if((hc==="inel"&&isInel)||(hc==="elig"&&isElig)) c.polygons.forEach(r=>{ mmPath_(ctx,V,r); ctx.fillStyle=P.hatch||"rgba(0,0,0,.25)"; ctx.fill("evenodd"); present.hatch=1; }); }); }
+  // v386: CLTIP compartments always carry their own green grid hatch, on both maps
+  D.comps.forEach(c=>{ if(c.cls!=="CLTIP") return; c.polygons.forEach(r=>{ mmPath_(ctx,V,r); ctx.fillStyle=P.cltip||"rgba(30,138,60,.3)"; ctx.fill("evenodd"); present.cltip=1; }); });
+  if(o.layers.water) eachF("water",(g,pr)=>g.lines.forEach(l=>{ mmLine_(ctx,V,l); if(halo){ ctx.strokeStyle="rgba(255,255,255,.7)"; ctx.lineWidth=7; ctx.stroke(); }
+    ctx.strokeStyle=MM_COL.water; ctx.lineWidth=4; mmDash_(ctx,/intermit/i.test(String(pr.PERMANENCY||""))?[14,8]:[]); ctx.stroke(); mmDash_(ctx,[]); present.water=1; }));
+  if(o.layers.lots) eachF("lots",g=>g.polys.forEach(r=>{ mmPath_(ctx,V,r); ctx.strokeStyle=halo?"rgba(255,255,255,.85)":MM_COL.lot; ctx.lineWidth=2; mmDash_(ctx,[3,6]); ctx.stroke(); mmDash_(ctx,[]); present.lots=1; }));
+  if(o.layers.roads) eachF("roads",g=>g.lines.forEach(l=>{ mmLine_(ctx,V,l); if(halo){ ctx.strokeStyle="rgba(255,255,255,.8)"; ctx.lineWidth=9; ctx.stroke(); } ctx.strokeStyle=MM_COL.road; ctx.lineWidth=5; ctx.stroke(); present.roads=1; }));
+  if(o.layers.building) eachF("building",g=>{ const pts=g.pts.slice(); g.polys.forEach(r=>{ const o0=r[0]; if(!o0||!o0.length) return; let a=0,b=0; o0.forEach(q=>{ a+=q[0]; b+=q[1]; }); pts.push([a/o0.length,b/o0.length]); });
+    pts.forEach(q=>{ const p=V.toPx(q[0],q[1]); ctx.beginPath(); ctx.arc(p[0],p[1],9,0,Math.PI*2); ctx.fillStyle=MM_COL.building; ctx.fill(); if(halo){ ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.stroke(); } present.building=1; }); });
+  // the property outline, then the compartments on top of it
+  const outlineRings=D.outline || null;
+  if(halo) D.comps.forEach(c=>c.polygons.forEach(r=>{ mmPath_(ctx,V,r); ctx.strokeStyle="rgba(255,255,255,.6)"; ctx.lineWidth=8; ctx.stroke(); }));
+  if(outlineRings){ outlineRings.forEach(r=>{ mmPath_(ctx,V,[r]); if(halo){ ctx.strokeStyle="rgba(255,255,255,.7)"; ctx.lineWidth=15; ctx.stroke(); } ctx.strokeStyle=MM_COL.boundary; ctx.lineWidth=11; ctx.stroke(); }); present.boundary=1; }
+  D.comps.forEach(c=>c.polygons.forEach(r=>{ mmPath_(ctx,V,r); ctx.strokeStyle=MM_COL.comp; ctx.lineWidth=5; ctx.stroke(); present.comp=1; }));
+  // plots (Map 6, if asked)
+  if(o.plots) (D.plots||[]).forEach(q=>{ const p=V.toPx(q.lat,q.lon); ctx.beginPath(); ctx.arc(p[0],p[1],11,0,Math.PI*2); ctx.fillStyle="#ffd400"; ctx.fill(); ctx.strokeStyle="#111"; ctx.lineWidth=2.5; ctx.stroke();
+      if(q.num){ ctx.font="bold 24px Arial, Helvetica, sans-serif"; ctx.textAlign="left"; ctx.textBaseline="middle"; mmHaloText_(ctx,String(q.num),p[0]+15,p[1],"#111","#fff"); } present.plots=1; });
+  // labels: compartments first, then road names, then lots where there is room
+  const boxes=[];
+  const free=b=>b.x>MM_FRAME.x+4&&b.y>MM_FRAME.y+4&&b.x+b.w<MM_FRAME.x+MM_FRAME.w-4&&b.y+b.h<MM_FRAME.y+MM_FRAME.h-4&&!boxes.some(a=>b.x<a.x+a.w&&b.x+b.w>a.x&&b.y<a.y+a.h&&b.y+b.h>a.y);
+  ctx.textAlign="center"; ctx.textBaseline="middle";
+  D.comps.forEach(c=>{
+    let big=null, area=-1; c.polygons.forEach(r=>{ const px=r.map(ring=>ring.map(q=>V.toPx(q[0],q[1]))); let x0=1/0,x1=-1/0,y0=1/0,y1=-1/0; px[0].forEach(p=>{ x0=Math.min(x0,p[0]); x1=Math.max(x1,p[0]); y0=Math.min(y0,p[1]); y1=Math.max(y1,p[1]); }); const a=(x1-x0)*(y1-y0); if(a>area){ area=a; big=px; } });
+    if(!big) return; const at=mmInside_(big, MM_FRAME); if(!at) return;
+    const l1=c.name, l2=c.label||""; ctx.font="bold 34px Arial, Helvetica, sans-serif";
+    const w=Math.max(ctx.measureText(l1).width, ctx.measureText(l2).width)+12, h=84, b={x:at.x-w/2,y:at.y-h/2,w,h};
+    boxes.push(b);
+    const fg=o.aerial?"#fff":"#111", bg=o.aerial?"#111":"#fff";
+    mmHaloText_(ctx,l1,at.x,at.y-20,fg,bg); mmHaloText_(ctx,l2,at.x,at.y+21,fg,bg);
+  });
+  if(o.layers.roadnames && D.roads){ try{ if(rnDraw_(ctx,V,tract,D.roads,boxes,o.aerial,D.ext)) present.roadnames=1; }catch(e){ notes.push("Road names: "+String(e.message||e)); } }
+  if(o.layers.lots) eachF("lots",(g,pr)=>{ const t1=String(pr.LOT_IDENT||"").trim(), t2=String(pr.CONCESSION_IDENT||"").trim(); if(!t1&&!t2) return;
+    g.polys.forEach(r=>{ const at=mmInside_(r.map(ring=>ring.map(q=>V.toPx(q[0],q[1]))), MM_FRAME); if(!at) return;
+      ctx.font="28px Arial, Helvetica, sans-serif"; const w=Math.max(ctx.measureText(t1).width,ctx.measureText(t2).width)+12, b={x:at.x-w/2,y:at.y-36,w,h:72};
+      if(!free(b)) return; boxes.push(b); const fg=o.aerial?"#fff":"#222", bg=o.aerial?"#000":"#fff"; mmHaloText_(ctx,t1,at.x,at.y-16,fg,bg); mmHaloText_(ctx,t2,at.x,at.y+18,fg,bg); }); });
+  // v385: the notes and arrows, on top of everything
+  mnDrawOn_(ctx, V, D.notes||[]);
+  ctx.restore();
+  // ── frame and title block ──
+  mmTitleBlock_(ctx, {p:D.prop||{}, sum:D.sum}, o, V, present, hc, photo);
+  if(!D.comps.length) notes.push("no compartments found for this property");
+  const un=D.comps.filter(c=>!c.cls).length; if(un && o.kind===4) notes.push(un+" compartment"+(un===1?" has":"s have")+" no MFTIP class, so "+(un===1?"it is":"they are")+" not hatched");
+  if(frozen) notes.push("made again from the version saved "+String(frozen.at||"").slice(0,10)+(o.aerial?" — the aerial photo is fetched fresh, everything else is as it was saved":""));
+  return {canvas:cv, notes, scale:V.scale, hatch:hc, photo:photo?photo.name:"", view:V.params, data:D, imagery:photo?{id:photo.id,name:photo.name}:null};
+}
+function mmHaloText_(ctx,t,x,y,fg,bg){ ctx.lineWidth=fg==="#fff"?5:7; ctx.lineJoin="round"; ctx.strokeStyle=bg; if(ctx.strokeText) ctx.strokeText(t,x,y); ctx.fillStyle=fg; ctx.fillText(t,x,y); }
+function mmNice_(m){ const s=[10,20,25,50,100,200,250,500,1000,2000,2500,5000]; return s.reduce((b,v)=>v<=m?v:b, s[0]); }
+function mmTitleBlock_(ctx, d, o, V, present, hc, photo){
+  const F="Arial, Helvetica, sans-serif", T=MM_TB;
+  // borders: the double outer frame of the sample, the map frame, the block's rules
+  ctx.strokeStyle="#111"; ctx.lineWidth=6; ctx.strokeRect(70,70,MM_W-140,MM_H-140); ctx.lineWidth=2; ctx.strokeRect(86,86,MM_W-172,MM_H-172);
+  ctx.lineWidth=2.5; ctx.strokeRect(MM_FRAME.x,MM_FRAME.y,MM_FRAME.w,MM_FRAME.h); ctx.strokeRect(T.x,T.y,T.w,T.h);
+  const xMid=T.x+860, yRow1=T.y+120, yFoot=T.y+T.h-100;
+  ctx.beginPath(); ctx.moveTo(xMid,T.y); ctx.lineTo(xMid,yFoot); ctx.moveTo(T.x,yRow1); ctx.lineTo(xMid,yRow1); ctx.moveTo(T.x,yFoot); ctx.lineTo(T.x+T.w,yFoot); ctx.stroke();
+  ctx.textAlign="left"; ctx.textBaseline="alphabetic"; ctx.fillStyle="#111";
+  // title + north arrow
+  mmFitFont_(ctx,o.title.replace(/\s{2,}/," "),40,26,xMid-T.x-150,F); ctx.fillText(o.title.replace(/\s{2,}/," "), T.x+24, T.y+72);
+  { const cx=xMid-70, cy=T.y+60, r=44; ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle="#111"; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(cx,cy-34); ctx.lineTo(cx+22,cy-6); ctx.lineTo(cx+8,cy-6); ctx.lineTo(cx+8,cy+4); ctx.lineTo(cx-8,cy+4); ctx.lineTo(cx-8,cy-6); ctx.lineTo(cx-22,cy-6); ctx.closePath(); ctx.fillStyle="#fff"; ctx.fill();
+    ctx.font="bold 34px "+F; ctx.textAlign="center"; ctx.fillText("N",cx,cy+36); ctx.textAlign="left"; ctx.fillStyle="#111"; }
+  // location and owner
+  const p=d.p, L=[];
+  if(p.roll) L.push("Roll: "+p.roll); if(p.address) L.push(p.address); if(p.lotcon) L.push(p.lotcon); if(p.township) L.push(p.township); if(p.municipality) L.push(p.municipality);
+  ctx.font="bold 28px "+F; ctx.fillText("Location of Property", T.x+24, yRow1+40);
+  ctx.font="27px "+F; (L.length?L:["(property details not entered)"]).slice(0,6).forEach((t,i)=>ctx.fillText(mmFit_(ctx,t,470), T.x+24, yRow1+76+i*33));
+  const x2=T.x+490;
+  ctx.font="bold 28px "+F; ctx.fillText("Owner", x2, yRow1+40); ctx.font="27px "+F; ctx.fillText(mmFit_(ctx,p.owner||"",xMid-x2-120), x2+100, yRow1+40);
+  const s=d.sum, f2=v=>(Math.round(v*100)/100).toFixed(2);
+  ctx.font="bold 28px "+F; ctx.fillText("Area of Property", x2, yRow1+110);
+  const aw=xMid-x2-16;
+  const A=b=>(b.adj!=null?b.adj:b.ac);      // adjusted acres (v386); a version saved before v386 has only acres
+  [["Total Area: "+f2(A(s.total))+" ac",146],["Eligible MFTIP Area: "+f2(A(s.byClass.MFTIP))+" ac",179],["CLTIP Area: "+f2(A(s.byClass.CLTIP))+" ac",212]]
+    .forEach(a=>{ mmFitFont_(ctx,a[0],27,18,aw,F); ctx.fillText(a[0], x2, yRow1+a[1]); });
+  // credits
+  ctx.font="22px "+F;
+  const cr=["Base mapping: Land Information Ontario, contains information licensed under the Open Government Licence – Ontario."];
+  if(present.roadnames) cr.push("Road names: Statistics Canada Road Network File, Statistics Canada Open Licence.");
+  const dot=t=>/[.!?]$/.test(t)?t:t+".";
+  if(photo) cr.push("Photo: "+dot(photo.credit||photo.name));
+  if(o.firm) cr.push("Forest resource mapping: "+dot(o.firm));
+  /* Three lines at most: the font steps down until the credits fit. */
+  { const text=cr.join(" "); let fs=22; for(;fs>=16;fs--){ ctx.font=fs+"px "+F; if(mmWrapCount_(ctx,text,xMid-T.x-40)<=3) break; }
+    mmWrap_(ctx, text, T.x+24, yFoot-14-2*(fs+3), xMid-T.x-40, fs+3); }
+  // legend
+  ctx.font="bold 30px "+F; ctx.fillText("LEGEND", xMid+22, T.y+44);
+  const items=[];
+  if(present.boundary) items.push(["Property boundary", (x,y)=>{ ctx.strokeStyle=MM_COL.boundary; ctx.lineWidth=9; ctx.strokeRect(x+3,y+4,40,18); }]);
+  if(present.comp) items.push(["Compartments", (x,y)=>{ ctx.strokeStyle=MM_COL.comp; ctx.lineWidth=6; ctx.strokeRect(x+3,y+4,40,18); }]);
+  if(present.roads) items.push(["Roads", (x,y)=>{ ctx.strokeStyle=MM_COL.road; ctx.lineWidth=5; ctx.beginPath(); ctx.moveTo(x,y+13); ctx.lineTo(x+46,y+13); ctx.stroke(); }]);
+  if(present.water) items.push(["Watercourse", (x,y)=>{ ctx.strokeStyle=MM_COL.water; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(x,y+13); ctx.lineTo(x+46,y+13); ctx.stroke(); }]);
+  if(present.openwater) items.push(["Open water", (x,y)=>{ ctx.fillStyle=MM_COL.openwater; ctx.fillRect(x+2,y+2,42,22); ctx.strokeStyle=MM_COL.water; ctx.lineWidth=2; ctx.strokeRect(x+2,y+2,42,22); }]);
+  if(present.wetland) items.push(["Wetland", (x,y)=>{ ctx.fillStyle=mmPatterns_(ctx).wetland||"#cfe9c4"; ctx.fillRect(x+2,y+2,42,22); ctx.strokeStyle="#5fbf4a"; ctx.lineWidth=2; ctx.strokeRect(x+2,y+2,42,22); }]);
+  if(present.wood) items.push(["Woodland", (x,y)=>{ ctx.fillStyle=MM_COL.wood; ctx.fillRect(x+2,y+2,42,22); }]);
+  if(present.building) items.push(["Building structure", (x,y)=>{ ctx.beginPath(); ctx.arc(x+23,y+13,10,0,Math.PI*2); ctx.fillStyle=MM_COL.building; ctx.fill(); }]);
+  if(present.lots) items.push(["Lots & concessions", (x,y)=>{ if(o.aerial){ ctx.fillStyle="#9aa59a"; ctx.fillRect(x+2,y+2,42,22); } ctx.strokeStyle=o.aerial?"#fff":MM_COL.lot; ctx.lineWidth=2; mmDash_(ctx,[3,6]); ctx.strokeRect(x+3,y+4,40,18); mmDash_(ctx,[]); }]);
+  if(present.contour) items.push(["Contours", (x,y)=>{ ctx.strokeStyle=MM_COL.contour; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(x,y+18); ctx.quadraticCurveTo?ctx.quadraticCurveTo(x+23,y-2,x+46,y+18):ctx.lineTo(x+46,y+18); ctx.stroke(); }]);
+  if(present.plots) items.push(["Plot locations", (x,y)=>{ ctx.beginPath(); ctx.arc(x+23,y+13,10,0,Math.PI*2); ctx.fillStyle="#ffd400"; ctx.fill(); ctx.strokeStyle="#111"; ctx.lineWidth=2; ctx.stroke(); }]);
+  if(present.cltip) items.push(["CLTIP area", (x,y)=>{ ctx.fillStyle=mmPatterns_(ctx).cltip||"#9fd3a8"; ctx.fillRect(x+2,y+2,42,22); ctx.strokeStyle="#1e8a3c"; ctx.lineWidth=2; ctx.strokeRect(x+2,y+2,42,22); }]);
+  if(present.hatch) items.push([hc==="elig"?"MFTIP eligible area":"Ineligible MFTIP area", (x,y)=>{ ctx.fillStyle=mmPatterns_(ctx).hatch||"#999"; ctx.fillRect(x+2,y+2,42,22); ctx.strokeStyle="#111"; ctx.lineWidth=1.5; ctx.strokeRect(x+2,y+2,42,22); }]);
+  ctx.font="26px "+F; ctx.textAlign="left";
+  const colW=(T.x+T.w-xMid-30)/2, rows=Math.ceil(items.length/2);
+  items.forEach((it,i)=>{ const col=i<rows?0:1, row=i<rows?i:i-rows, x=xMid+22+col*colW, y=T.y+68+row*44; it[1](x,y); ctx.fillStyle="#111"; mmFitFont_(ctx,it[0],26,17,colW-64,F); ctx.fillText(mmFit_(ctx,it[0],colW-64), x+56, y+22); });
+  // footer: scale bar, scale and date, firm
+  const len=mmNice_(V.mPerPx*360), px=len/V.mPerPx, sx=T.x+60, sy=yFoot+55;
+  ctx.fillStyle="#111"; ctx.fillRect(sx,sy,px/2,20); ctx.fillStyle="#fff"; ctx.fillRect(sx+px/2,sy,px/2,20); ctx.strokeStyle="#111"; ctx.lineWidth=2.5; ctx.strokeRect(sx,sy,px,20);
+  ctx.fillStyle="#111"; ctx.font="24px "+F; ctx.textAlign="center"; ctx.fillText("0",sx,sy-10); ctx.fillText(String(len/2),sx+px/2,sy-10); ctx.textAlign="left"; ctx.fillText(String(len)+" Metres",sx+px-14,sy-10);
+  const dt=new Date(), mo=["Jan","Feb","Mar","Apr","May","June","July","Aug","Sept","Oct","Nov","Dec"][dt.getMonth()];
+  ctx.font="24px "+F; ctx.fillText(mo+" "+dt.getDate()+", "+dt.getFullYear()+"   ·   Scale 1:"+V.scale.toLocaleString("en-CA")+" at "+MM_PAGES[MM_PAGE].short, sx+px+170, sy-6);
+  ctx.fillText("WGS 84 · Web Mercator", sx+px+170, sy+26);
+  if(o.firm){ ctx.font="bold 30px "+F; ctx.textAlign="right"; ctx.fillStyle="#2f7a2a"; ctx.fillText(mmFit_(ctx,o.firm,330), T.x+T.w-24, sy+12); ctx.textAlign="left"; ctx.fillStyle="#111"; }
+}
+/* The largest font from `big` down to `small` that fits; below that the text is cut with "…". */
+function mmFitFont_(ctx,t,big,small,w,F){ for(let s=big;s>=small;s--){ ctx.font=s+"px "+F; if(ctx.measureText(String(t)).width<=w) return s; } return small; }
+function mmFit_(ctx,t,w){ t=String(t||""); if(ctx.measureText(t).width<=w) return t; while(t.length>3 && ctx.measureText(t+"…").width>w) t=t.slice(0,-1); return t+"…"; }
+function mmWrapCount_(ctx,text,w){ const words=String(text).split(/\s+/); let n=0, cur=""; words.forEach(wd=>{ const t=cur?cur+" "+wd:wd; if(ctx.measureText(t).width>w && cur){ n++; cur=wd; } else cur=t; }); return n+(cur?1:0); }
+function mmWrap_(ctx,text,x,y,w,lh){ const words=String(text).split(/\s+/), lines=[]; let cur="";
+  words.forEach(wd=>{ const t=cur?cur+" "+wd:wd; if(ctx.measureText(t).width>w && cur){ lines.push(cur); cur=wd; } else cur=t; }); if(cur) lines.push(cur);
+  lines.slice(0,3).forEach((l,i)=>ctx.fillText(l,x,y+i*lh)); return lines; }
+/* ---- making the files ---- */
+let _mmBusy=false, _mmLast=null;
+async function mmMake_(kind, tract, o, frozen){
+  if(_mmBusy){ toast("A map is already being made",true); return; }
+  if(o.aerial && isOffline()){ toast("Map 6 needs signal for the aerial photo",true); return; }
+  const s=propSummary_(tract);
+  if(!frozen && s.mpac!=null && Math.abs(s.diffAc)>=0.01 && !confirm("The compartments' adjusted acres add up to "+s.total.adj.toFixed(2)+" ac, but the MPAC acres are "+s.mpac.toFixed(2)+".\n\n"+s.msg+"\n\nMake the map anyway?")) return;
+  _mmBusy=true; if(!frozen) mmSaveOpts_(o);
+  try{
+    toast("Drawing Map "+kind+"…");
+    let r=await mmRender_(tract,o,pct=>toast("Map "+kind+" — aerial photo "+pct+"%"),frozen);
+    let jpg=null;
+    try{ jpg=r.canvas.toDataURL("image/jpeg",0.9); }
+    catch(e){       // a photo server without the headers a canvas needs: draw it again on Esri
+      if(!o.aerial) throw e;
+      r=await mmRender_(tract,Object.assign({},o,{src:IMAGERY[0]}),null,frozen); r.notes.push("the chosen photo cannot be printed from this phone, so Esri was used");
+      jpg=r.canvas.toDataURL("image/jpeg",0.9); }
+    const pg=MM_PAGES[MM_PAGE];
+    const pdf=tmapPdf_([{bytes:tmapB64ToBytes_(jpg), w:MM_W, h:MM_H}], Math.round(pg.w*72), Math.round(pg.h*72));
+    const base=("Map"+kind+"_"+tract).replace(/[^A-Za-z0-9_-]+/g,"_").slice(0,60)+"_"+nowStr().slice(0,10);
+    const pdfBlob=new Blob([pdf],{type:"application/pdf"});
+    const jpgBlob=new Blob([tmapB64ToBytes_(jpg)],{type:"image/jpeg"});
+    const toDrive=connected && !isOffline();
+    _mmLast={kind, tract, base, pdfBlob, jpgBlob, jpg, notes:r.notes, scale:r.scale, toDrive, page:MM_PAGE, o, view:r.view, data:r.data, imagery:r.imagery, frozen:!!frozen};
+    if(toDrive){ try{ driveSave_(pdfBlob, base+".pdf", "map"); driveSave_(jpgBlob, base+".jpg", "map"); }catch(e){} }
+    mmShowResult_();
+  } catch(e){ toast("Map "+kind+" could not be made: "+String(e&&e.message||e),true); }
+  finally{ _mmBusy=false; }
+}
+function mmShowResult_(){
+  const m=_mmLast; if(!m) return;
+  showDataSheet_("Map "+m.kind+" — "+m.tract,
+    `<img src="${m.jpg}" alt="Map ${m.kind}" style="display:block;width:100%;border-radius:6px;border:1px solid #33623a;background:#fff">`+
+    `<div style="font-size:12px;color:#a9c9b0;margin:8px 0">${esc(MM_PAGES[m.page||"letter"].short)}, scale 1:${m.scale.toLocaleString("en-CA")} — print at 100% (not "fit to page") for the scale to hold. ${m.toDrive?"A copy is being sent to Drive with your map exports.":"No signal, so it was not sent to Drive — save it here."}</div>`+
+    (m.notes.length?`<div style="font-size:12px;color:#e8c35a;margin:0 0 8px;line-height:1.5">${m.notes.map(esc).join("<br>")}</div>`:"")+
+    `<div style="display:flex;gap:8px;margin-bottom:8px"><button type="button" class="btn submit" style="flex:1" onclick="mmDownload_('pdf')">Save PDF</button><button type="button" class="btn ghost" style="flex:1" onclick="mmDownload_('jpg')">Save JPEG</button></div>`+
+    (m.frozen?"":`<button type="button" class="btn ghost" style="width:100%;margin-bottom:8px" onclick="mvSave_()">💾 Save this map as a version</button>`)+
+    `<button type="button" class="btn ghost" style="width:100%" onclick="openPropSheet_(_ppTract)">◂ Back to the property</button>`);
+}
+/* On an iPhone the share sheet is the dependable way to keep a file (Save to Files, Mail, AirDrop);
+   a download link is the fallback. */
+function mmDownload_(k){ const m=_mmLast; if(!m) return; const b=k==="pdf"?m.pdfBlob:m.jpgBlob, name=m.base+"."+k;
+  try{ if(typeof File!=="undefined" && navigator.canShare){ const f=new File([b],name,{type:b.type});
+      if(navigator.canShare({files:[f]})){ navigator.share({files:[f],title:name}).catch(()=>{}); return; } } }catch(e){}
+  const url=URL.createObjectURL(b), a=document.createElement("a");
+  a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),60000); }
+/* The options, then make it. */
+function mmOpen_(kind){
+  const t=_ppTract; if(!t){ toast("Choose the property first",true); return; }
+  const o=mmOpts_(kind), names={woodland:"Woodland (provincial)",lots:"Lots & concessions",roads:"Roads",roadnames:"Road names",water:"Watercourses",waterbody:"Water bodies",wetland:"Wetlands",building:"Buildings",contour:"Contours"};
+  const chk=(k)=>`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmL_${k}" ${o.layers[k]?"checked":""} style="width:20px;height:20px"> ${esc(names[k])}</label>`;
+  const sel=(id,opts,v)=>`<select id="${id}" style="width:100%;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+opts.map(x=>`<option value="${esc(x[0])}"${String(v)===x[0]?" selected":""}>${esc(x[1])}</option>`).join("")+`</select>`;
+  showDataSheet_("Map "+kind+" — "+t,
+    `<div style="font-size:13px;color:#a9c9b0;line-height:1.5;margin-bottom:10px">${esc(o.title.replace(/\s{2,}/," "))}. ${kind===6?"On the aerial photo chosen under Layers ("+esc(imgSource_().name)+").":"Plain background, with woodland shaded and the smaller MFTIP class hatched."}</div>`+
+    `<div style="font-size:12px;color:#a9c9b0;margin:6px 0 3px">Page</div>`+sel("mmPage",Object.keys(MM_PAGES).map(k=>[k,MM_PAGES[k].name]),o.page)+
+    `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Area shown</div>`+sel("mmExtent",[["fit","Fit the property"],["view","The view on the phone's map now"]],o.extent)+
+    `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Scale</div>`+sel("mmScale",[["auto","Fit the property (automatic)"]].concat(MM_SCALES.map(s=>[String(s),"1:"+s.toLocaleString("en-CA")])),o.scale)+
+    `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Hatching</div>`+sel("mmHatch",[["auto","The smaller class (automatic)"],["ineligible","Not eligible"],["eligible","MFTIP eligible"],["none","None"]],o.hatch)+
+    `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Layers</div>`+Object.keys(names).map(chk).join("")+
+    `<div style="font-size:11px;color:#8fae95;margin:2px 0 6px">Notes and arrows: the ✎ Text button on the map. Those set for this map are printed.</div>`+
+    (kind===6?`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmPlots" ${o.plots?"checked":""} style="width:20px;height:20px"> Numbered plot locations</label>`:"")+
+    `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Road names — untick one to leave it off, or type over it to correct it</div><div id="rnList"></div>`+
+    `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Prepared by (printed on the map)</div><input id="mmFirm" type="text" value="${esc(o.firm)}" placeholder="e.g. your company" style="width:100%;box-sizing:border-box;font-size:16px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
+    `<div style="display:flex;gap:8px;margin:14px 0 6px"><button type="button" class="btn submit" style="flex:1" onclick="mmGo_(${kind})">Make Map ${kind}</button><button type="button" class="btn ghost" style="flex:1" onclick="openPropSheet_(_ppTract)">◂ Back</button></div>`);
+  try{ rnPanel_(kind); }catch(e){}
+}
+function mmGo_(kind){
+  try{ rnSaveForm_(); }catch(e){}
+  const o=mmOpts_(kind), v=id=>{ const el=$(id); return el?el:null; };
+  Object.keys(o.layers).forEach(k=>{ const el=v("mmL_"+k); if(el) o.layers[k]=!!el.checked; });
+  const sc=v("mmScale"); if(sc) o.scale=sc.value||"auto";
+  const pgS=v("mmPage"); if(pgS && MM_PAGES[pgS.value]) o.page=pgS.value;
+  const ex=v("mmExtent"); if(ex) o.extent=ex.value==="view"?"view":"fit";
+  if(o.extent==="view"){ try{ if(typeof fmap!=="undefined"&&fmap){ const b=fmap.getBounds(); o.viewBox=[+b.getWest().toFixed(6),+b.getSouth().toFixed(6),+b.getEast().toFixed(6),+b.getNorth().toFixed(6)]; } }catch(e){} }
+  const h=v("mmHatch"); if(h) o.hatch=h.value||o.hatch;
+  const pl=v("mmPlots"); if(pl) o.plots=!!pl.checked;
+  const f=v("mmFirm"); if(f) o.firm=String(f.value||"").trim().slice(0,60);
+  mmMake_(kind,_ppTract,o);
+}
+/* ============ v384 — road names on Map 4 and Map 6 ============
+   Chris's choices (2026-10-08): names from Statistics Canada's Road Network File, plus labels typed by
+   hand (a private lane, a name the file lacks, or a correction); written in capitals with the type spelled
+   out and laid along the road — "POLLOCK ROAD", as on his sample.
+   The file is StatCan's map service (2025 edition; checked 2026-10-08: GeoJSON, no key, "Pollock RD" near
+   Georgina). Layers 0–4 are its road ranks 1–5. The phone asks it directly; if the browser is not let in,
+   the Sheet asks for it (roadnames). What came back is kept on the phone per property, so Map 4 can be made
+   again with no signal. Typed labels and corrections are kept on this phone, per property. */
+const RN_SERVICES=["https://geo.statcan.gc.ca/geo_wa/rest/services/2025/lrnf000r25s_e/MapServer",
+                   "https://geo.statcan.gc.ca/geo_wa/rest/services/2023/lrnf000r23s_e/MapServer"];
+const RN_LAYERS=[0,1,2,3,4];
+const RN_ATTRIB="Road names: Statistics Canada, Road Network File, licensed under the Statistics Canada Open Licence.";
+const RN_TYPE={RD:"ROAD",ST:"STREET",AVE:"AVENUE",AV:"AVENUE",DR:"DRIVE",CRES:"CRESCENT",CR:"CRESCENT",CRT:"COURT",CT:"COURT",LANE:"LANE",LN:"LANE",
+  TRAIL:"TRAIL",TRL:"TRAIL",LINE:"LINE",CONC:"CONCESSION",SDRD:"SIDEROAD",SIDERD:"SIDEROAD",HWY:"HIGHWAY",BLVD:"BOULEVARD",PL:"PLACE",CIR:"CIRCLE",
+  CIRCT:"CIRCLE",TERR:"TERRACE",PKY:"PARKWAY",PKWY:"PARKWAY",SQ:"SQUARE",TLINE:"TOWNLINE",TOWNLINE:"TOWNLINE",GATE:"GATE",WAY:"WAY",RTE:"ROUTE",
+  ROW:"ROW",HTS:"HEIGHTS",GDNS:"GARDENS",GRV:"GROVE",HILL:"HILL",PT:"POINT",RG:"RANGE",RANG:"RANGE",CLOSE:"CLOSE",ACCESS:"ACCESS",FWY:"FREEWAY",EXPY:"EXPRESSWAY"};
+const RN_DIR={N:"NORTH",S:"SOUTH",E:"EAST",W:"WEST",NE:"NORTHEAST",NW:"NORTHWEST",SE:"SOUTHEAST",SW:"SOUTHWEST"};
+/* "Pollock" + "RD" → "POLLOCK ROAD"; "48" + "HWY" → "HIGHWAY 48"; "5" + "CONC" → "CONCESSION 5". */
+function rnName_(pr){
+  const n=String(pr&&pr.NAME||"").trim(), t0=String(pr&&pr.TYPE||"").trim().toUpperCase(), d0=String(pr&&pr.DIR||"").trim().toUpperCase();
+  if(!n) return "";
+  const t=RN_TYPE[t0]||t0, d=RN_DIR[d0]||d0;
+  const core=/^\d+[A-Z]?$/i.test(n) && t ? (t+" "+n) : (n+(t?" "+t:""));
+  return (core+(d?" "+d:"")).replace(/\s+/g," ").toUpperCase();
+}
+function rnKey_(t){ return "rn:"+propK_(t); }
+function rnUser_(t){ try{ return JSON.parse((STORE&&STORE.getItem("fi_rn_"+propK_(t)))||"null")||{ov:{},add:[]}; }catch(e){ return {ov:{},add:[]}; } }
+function rnUserSet_(t,u){ try{ STORE&&STORE.setItem("fi_rn_"+propK_(t),JSON.stringify(u)); }catch(e){} }
+function rnFetchJson_(url){ return Promise.race([fetch(url).then(r=>{ if(r&&r.ok===false) throw new Error("HTTP "+r.status); return r.json(); }), new Promise((_,rej)=>setTimeout(()=>rej(new Error("timed out")),20000))]); }
+/* One layer for a box: StatCan directly, else by way of the Sheet. */
+async function rnLayer_(layer, bbox){
+  const q="/"+layer+"/query?geometry="+bbox.join(",")+"&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=NAME,TYPE,DIR&returnGeometry=true&outSR=4326&geometryPrecision=6&f=geojson";
+  for(const base of RN_SERVICES){ try{ const j=await rnFetchJson_(base+q); if(j&&Array.isArray(j.features)) return j.features; }catch(e){} }
+  if(connected && propBackendOk){
+    const r=await new Promise(res=>jsonp_("action=roadnames&bbox="+bbox.join(",")+"&layer="+layer, x=>res(x), 30000));
+    if(r&&r.ok&&Array.isArray(r.features)) return r.features;
+    throw new Error((r&&r.error)||"the road name service did not answer");
+  }
+  throw new Error("the road name service did not answer");
+}
+/* The named roads for a box, merged by name: [{name, lines:[[ [lat,lon],… ],…]}]. Kept per property. */
+async function rnRoads_(tract, bbox, notes){
+  let cache=null; try{ cache=await ldbGet(rnKey_(tract)); }catch(e){}
+  if(cache && lioCovers_(cache.bbox,bbox)) return cache.roads;
+  if(isOffline()){ if(cache){ notes.push("Road names: only the area saved earlier (no signal)"); return cache.roads; } notes.push("Road names: none on this phone yet (no signal)"); return []; }
+  const by={}; let failed=0;
+  await Promise.all(RN_LAYERS.map(async L=>{ try{ (await rnLayer_(L,bbox)).forEach(f=>{ const nm=rnName_(f.properties||{}); if(!nm) return; const g=mmGeomParts_(f.geometry);
+      const r=by[nm]||(by[nm]={name:nm,lines:[]}); g.lines.forEach(l=>r.lines.push(l.map(q=>[+q[0].toFixed(6),+q[1].toFixed(6)]))); }); }catch(e){ failed++; } }));
+  if(failed===RN_LAYERS.length){ notes.push("Road names could not be looked up just now"+(cache?" — the names saved earlier are used":"")); return cache?cache.roads:[]; }
+  if(failed) notes.push("Some road names could not be looked up just now");
+  const roads=Object.values(by).sort((a,b)=>a.name.localeCompare(b.name));
+  try{ await ldbPut(rnKey_(tract),{bbox:bbox, at:new Date().toISOString(), roads:roads}); }catch(e){}
+  return roads;
+}
+/* Corrections and typed labels applied: [{text, lines}] for the automatic ones, [{text,a,b}] typed. */
+function rnApply_(tract, roads){
+  const u=rnUser_(tract), auto=[];
+  roads.forEach(r=>{ const ov=u.ov[r.name]||{}; if(ov.hide) return; auto.push({text:String(ov.text||r.name).toUpperCase(), lines:r.lines}); });
+  return {auto, typed:(u.add||[]).filter(x=>x&&x.text&&x.a&&x.b)};
+}
+/* Lay a name along a road: on the longest visible stretch, at the point in its middle, turned to the
+   road's direction there (measured over the length of the text), kept upright; skipped where it would
+   sit on another label. */
+function rnDraw_(ctx, V, tract, roads, boxes, aerial, ext){
+  const F="Arial, Helvetica, sans-serif", inF=p=>p[0]>MM_FRAME.x+20&&p[0]<MM_FRAME.x+MM_FRAME.w-20&&p[1]>MM_FRAME.y+20&&p[1]<MM_FRAME.y+MM_FRAME.h-20;
+  const {auto,typed}=(roads&&roads.auto)?roads:rnApply_(tract,roads); let drawn=0;      // v385: already applied when it comes from a saved version
+  /* The property itself is kept clear where the road allows; a road that only shows across it is still named. */
+  const ob=(()=>{ const e=ext||propExtent_(tract); if(!e) return null; const a=V.toPx(e[3],e[0]), b=V.toPx(e[1],e[2]); return {x:a[0],y:a[1],w:b[0]-a[0],h:b[1]-a[1]}; })();
+  const put=(text,x,y,ang,force,avoid)=>{
+    if(ang>Math.PI/2) ang-=Math.PI; if(ang<-Math.PI/2) ang+=Math.PI;
+    ctx.font="bold 28px "+F; const w=ctx.measureText(text).width+10, h=36;
+    const cw=Math.abs(Math.cos(ang))*w+Math.abs(Math.sin(ang))*h, ch=Math.abs(Math.sin(ang))*w+Math.abs(Math.cos(ang))*h;
+    x+=Math.sin(ang)*26; y-=Math.cos(ang)*26;            // just beside the road, not on top of its line
+    const b={x:x-cw/2,y:y-ch/2,w:cw,h:ch};
+    if(b.x<MM_FRAME.x+4||b.y<MM_FRAME.y+4||b.x+b.w>MM_FRAME.x+MM_FRAME.w-4||b.y+b.h>MM_FRAME.y+MM_FRAME.h-4) return false;
+    const hit=a=>b.x<a.x+a.w&&b.x+b.w>a.x&&b.y<a.y+a.h&&b.y+b.h>a.y;
+    if(!force && (boxes.some(hit) || (avoid && ob && hit(ob)))) return false;
+    boxes.push(b);
+    ctx.save(); if(ctx.translate) ctx.translate(x,y); if(ctx.rotate) ctx.rotate(ang); ctx.textAlign="center"; ctx.textBaseline="middle";
+    mmHaloText_(ctx,text,0,0,aerial?"#fff":"#111",aerial?"#000":"#fff"); ctx.restore(); drawn++; return true;
+  };
+  typed.forEach(t=>{ const a=V.toPx(t.a[0],t.a[1]), b=V.toPx(t.b[0],t.b[1]); const x=(a[0]+b[0])/2, y=(a[1]+b[1])/2; if(!inF([x,y])) return;
+    put(String(t.text).toUpperCase(),x,y,Math.atan2(b[1]-a[1],b[0]-a[0]),true); });      // placed by hand: always drawn
+  auto.forEach(r=>{
+    // visible runs, in page px
+    let best=null, bestLen=0;
+    /* Each segment is cut to the frame (Liang–Barsky), so a long straight road whose ends are both off
+       the page still has its middle. */
+    const X0=MM_FRAME.x+20, X1=MM_FRAME.x+MM_FRAME.w-20, Y0=MM_FRAME.y+20, Y1=MM_FRAME.y+MM_FRAME.h-20;
+    const clip=(a,b)=>{ let t0=0,t1=1; const dx=b[0]-a[0], dy=b[1]-a[1];
+      for(const [pp,qq] of [[-dx,a[0]-X0],[dx,X1-a[0]],[-dy,a[1]-Y0],[dy,Y1-a[1]]]){ if(pp===0){ if(qq<0) return null; continue; } const r=qq/pp; if(pp<0){ if(r>t1) return null; if(r>t0) t0=r; } else { if(r<t0) return null; if(r<t1) t1=r; } }
+      return [[a[0]+t0*dx,a[1]+t0*dy],[a[0]+t1*dx,a[1]+t1*dy], t1<1]; };
+    r.lines.forEach(l=>{ let run=[]; const flush=()=>{ if(run.length>1){ let L=0; for(let i=1;i<run.length;i++) L+=Math.hypot(run[i][0]-run[i-1][0],run[i][1]-run[i-1][1]); if(L>bestLen){ bestLen=L; best=run; } } run=[]; };
+      for(let i=1;i<l.length;i++){ const c=clip(V.toPx(l[i-1][0],l[i-1][1]),V.toPx(l[i][0],l[i][1])); if(!c){ flush(); continue; }
+        if(!run.length) run.push(c[0]); else { const last=run[run.length-1]; if(Math.hypot(last[0]-c[0][0],last[1]-c[0][1])>0.5){ flush(); run.push(c[0]); } }
+        run.push(c[1]); if(c[2]) flush(); }
+      flush(); });
+    if(!best) return;
+    ctx.font="bold 28px "+F; const tw=ctx.measureText(r.text).width;
+    if(bestLen<tw*0.8) return;                              // too short a stretch to carry the name
+    const at=d=>{ let acc=0; for(let i=1;i<best.length;i++){ const s=Math.hypot(best[i][0]-best[i-1][0],best[i][1]-best[i-1][1]); if(acc+s>=d){ const t=s?(d-acc)/s:0; return [best[i-1][0]+(best[i][0]-best[i-1][0])*t, best[i-1][1]+(best[i][1]-best[i-1][1])*t]; } acc+=s; } return best[best.length-1]; };
+    const tryAt=avoid=>{ for(const f of [0.5,0.35,0.65,0.2,0.8,0.1,0.9]){ const mid=bestLen*f, p=at(mid), p0=at(Math.max(0,mid-tw/2)), p1=at(Math.min(bestLen,mid+tw/2));
+      if(put(r.text,p[0],p[1],Math.atan2(p1[1]-p0[1],p1[0]-p0[0]),false,avoid)) return true; } return false; };
+    if(!tryAt(true)) tryAt(false);
+  });
+  return drawn;
+}
+/* ---- the options page: names found, corrections, typed labels ---- */
+async function rnPanel_(kind){
+  const box=$("rnList"); if(!box) return;
+  const t=_ppTract, ext=propExtent_(t); if(!ext){ box.innerHTML=""; return; }
+  box.innerHTML=`<div style="font-size:12px;color:#a9c9b0">Looking up road names…</div>`;
+  const o=mmOpts_(kind), V=mmView_(ext,o), notes=[];
+  let roads=[]; try{ roads=await rnRoads_(t, V.bbox(), notes); }catch(e){ notes.push(String(e.message||e)); }
+  _rnShown=roads.map(r=>r.name);
+  const u=rnUser_(t);
+  let h=roads.length?roads.map((r,i)=>{ const ov=u.ov[r.name]||{};
+      return `<div style="display:flex;gap:6px;align-items:center;margin:0 0 5px"><input type="checkbox" id="rnShow${i}" ${ov.hide?"":"checked"} style="width:20px;height:20px">`+
+        `<input id="rnText${i}" type="text" value="${esc(ov.text||r.name)}" style="flex:1;min-width:0;font-size:16px;padding:6px;border-radius:7px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></div>`; }).join("")
+    : `<div style="font-size:12px;color:#8fae95">No named roads found in the map's area.</div>`;
+  (u.add||[]).forEach((x,i)=>{ h+=`<div style="display:flex;gap:6px;align-items:center;margin:0 0 5px;font-size:14px;color:#e8f0e6"><span style="flex:1">✎ ${esc(x.text)}</span><button type="button" class="btn ghost" onclick="rnRemove_(${i},${kind})">Remove</button></div>`; });
+  h+=`<button type="button" class="btn ghost" style="width:100%;margin-top:4px" onclick="rnAddStart_(${kind})">＋ Add a road label (private lane, missing name)</button>`;
+  if(notes.length) h+=`<div style="font-size:11px;color:#e8c35a;margin-top:6px">${notes.map(esc).join("<br>")}</div>`;
+  box.innerHTML=h;
+}
+let _rnShown=[];
+function rnSaveForm_(){
+  const t=_ppTract; if(!t||!_rnShown.length) return; const u=rnUser_(t);
+  _rnShown.forEach((nm,i)=>{ const s=$("rnShow"+i), x=$("rnText"+i); if(!s||!x) return;
+    const text=String(x.value||"").trim().toUpperCase(), hide=!s.checked;
+    if(!hide && (!text || text===nm)) delete u.ov[nm]; else u.ov[nm]={hide:hide, text:text&&text!==nm?text.slice(0,60):undefined}; });
+  rnUserSet_(t,u);
+}
+function rnRemove_(i,kind){ const t=_ppTract, u=rnUser_(t); rnSaveForm_(); (u.add||[]).splice(i,1); rnUserSet_(t,u); mmOpen_(kind); }
+/* A typed label: two taps along the road on the map — where it starts and which way it runs. */
+let _rnPlace=null;
+function rnAddStart_(kind){
+  rnSaveForm_();
+  const text=prompt("The road's name, as it should appear on the map:",""); if(text===null) return;
+  const s=String(text).trim().toUpperCase().slice(0,60); if(!s){ toast("No name typed",true); return; }
+  _rnPlace={kind, text:s, tract:_ppTract, pts:[]};
+  closeDataSheet_(); openMap();
+  toast("Tap two points along the road for "+s+" — the label goes between them");
+}
+function rnTap_(ll){
+  if(!_rnPlace) return false;
+  _rnPlace.pts.push([+ll.lat.toFixed(6),+ll.lng.toFixed(6)]);
+  if(_rnPlace.pts.length<2){ toast("Now the second point along the road"); return true; }
+  const t=_rnPlace.tract, u=rnUser_(t); (u.add=u.add||[]).push({text:_rnPlace.text, a:_rnPlace.pts[0], b:_rnPlace.pts[1]}); rnUserSet_(t,u);
+  const kind=_rnPlace.kind; _rnPlace=null; toast("Road label added");
+  closeMap(); _ppTract=t; mmOpen_(kind);
+  return true;
+}
+/* ============ v385 — notes and arrows on the maps ============
+   Ported from the Street Tree app (its "notes and arrows on the map"). A note is one tap; an arrow is
+   two — the tail, then the head. The SIZE IS IN INCHES ON THE PAPER (Small 0.10 … Extra large 0.26), so
+   a note is the same size on the printed map at any scale; the phone shows an approximation. Bold and a
+   colour as there. Chris's choices (2026-10-08): kept with the property and shared through the Sheet;
+   each note says which map it belongs on — both (the default), Map 4 only or Map 6 only. */
+const MN_SIZES=[["s",0.10,"Small"],["m",0.14,"Medium"],["l",0.19,"Large"],["xl",0.26,"Extra large"]];
+function mnSizeIn_(c){ const r=MN_SIZES.find(x=>x[0]===c); return r?r[1]:0.14; }
+let mnLayer=null, _mnPlace=null, _mnTmp=[];
+function mnAll_(){ return Object.values(PROPS.notes||{}).filter(n=>n&&n.id); }
+function mnOf_(tract){ const k=propK_(tract); return mnAll_().filter(n=>propK_(n.tract)===k); }
+/* The ones a map prints: both, or that map's own. */
+function mnFor_(tract, kind){ return mnOf_(tract).filter(n=>n.maps==="both"||!n.maps||String(n.maps)===String(kind)).map(n=>({kind:n.kind,pts:n.pts,text:n.text,size:n.size,bold:!!n.bold,color:n.color})); }
+function mnNewId_(){ return "N"+Date.now().toString(36).toUpperCase()+Math.floor(Math.random()*46656).toString(36).toUpperCase().padStart(3,"0"); }
+let _mnPushT=null;
+/* Typing in a note changes it on every key: the Sheet hears about it once the typing pauses. */
+function mnTouch_(n){ PROPS.notes=PROPS.notes||{}; PROPS.notes[n.id]=n; (propDirty.notes=propDirty.notes||{})[n.id]=Date.now(); propPersist_(); mnRender_();
+  if(_mnPushT) clearTimeout(_mnPushT); _mnPushT=setTimeout(()=>{ _mnPushT=null; if(propBackendOk) propPush_().then(()=>{}); else propSync_(); },1500); }
+function mnSet_(id,k,v){ const n=(PROPS.notes||{})[id]; if(!n) return; n[k]=v; mnTouch_(n); }
+function mnDelete_(id){ const n=(PROPS.notes||{})[id]; if(!n) return;
+  if(!confirm(n.kind==="arrow"?"Delete this arrow?":"Delete this note?")) return;
+  delete PROPS.notes[id]; if(propDirty.notes) delete propDirty.notes[id];
+  (propDirty.noteDel=propDirty.noteDel||[]).push(id); propPersist_(); mnRender_(); mnOpen_();
+  if(propBackendOk) propPush_().then(()=>{}); }
+/* ---- on the phone's map ---- */
+function mnRender_(){
+  if(typeof fmap==="undefined"||!fmap||!window.L) return;
+  if(!mnLayer){ try{ mnLayer=L.layerGroup().addTo(fmap); }catch(e){ return; } }
+  mnLayer.clearLayers();
+  mnOf_(propActiveTract_()).forEach(a=>{
+    const col=a.color||"#D32F2F", fs=Math.max(9,Math.round(mnSizeIn_(a.size)*108));
+    if(a.kind==="arrow"){ if(!a.pts||a.pts.length<2) return;
+      const w=Math.max(2,Math.round(mnSizeIn_(a.size)*26));
+      L.polyline(a.pts,{color:"#fff",weight:w+3,opacity:.85,interactive:false}).addTo(mnLayer);
+      L.polyline(a.pts,{color:col,weight:w,interactive:false}).addTo(mnLayer);
+      const n=a.pts.length, p0=a.pts[n-2], p1=a.pts[n-1], ang=Math.atan2(p1[0]-p0[0],(p1[1]-p0[1])*Math.cos(p1[0]*Math.PI/180))*180/Math.PI, px=Math.round(fs*1.6);
+      L.marker(p1,{interactive:false,keyboard:false,icon:L.divIcon({className:"",iconSize:[px,px],iconAnchor:[px/2,px/2],
+        html:`<svg width="${px}" height="${px}" viewBox="0 0 100 100" style="transform:rotate(${90-ang}deg);overflow:visible"><polygon points="50,6 88,84 50,64 12,84" fill="${esc(col)}" stroke="#fff" stroke-width="7" stroke-linejoin="round"></polygon></svg>`})}).addTo(mnLayer);
+    } else { if(!a.pts||!a.pts.length||!String(a.text||"").trim()) return;
+      L.marker(a.pts[0],{interactive:false,keyboard:false,icon:L.divIcon({className:"",iconSize:null,iconAnchor:[0,Math.round(fs*0.6)],
+        html:`<div style="font:${a.bold?"700":"400"} ${fs}px/${Math.round(fs*1.2)}px system-ui,sans-serif;color:${esc(col)};white-space:pre;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 2px #fff">${esc(a.text)}</div>`})}).addTo(mnLayer);
+    }
+  });
+}
+/* ---- on the printed map (inside the map frame's clip) ---- */
+function mnDrawOn_(ctx, V, list){
+  if(!list||!list.length) return;
+  const F="Arial, Helvetica, sans-serif";
+  ctx.save(); ctx.lineJoin="round"; ctx.lineCap="round";
+  list.forEach(a=>{
+    const col=a.color||"#D32F2F";
+    if(a.kind==="arrow"){ if(!a.pts||a.pts.length<2) return;
+      const w=Math.max(2,Math.round(MM_DPI*mnSizeIn_(a.size)*0.34)), pts=a.pts.map(q=>V.toPx(+q[0],+q[1]));
+      const shaft=()=>{ ctx.beginPath(); pts.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); };
+      shaft(); ctx.strokeStyle="rgba(255,255,255,.88)"; ctx.lineWidth=w*2.1; ctx.stroke();
+      shaft(); ctx.strokeStyle=col; ctx.lineWidth=w; ctx.stroke();
+      const q0=pts[pts.length-2], q1=pts[pts.length-1], ang=Math.atan2(q1[1]-q0[1],q1[0]-q0[0]), hl=w*4.2, hw=w*2.2;
+      ctx.save(); if(ctx.translate) ctx.translate(q1[0],q1[1]); if(ctx.rotate) ctx.rotate(ang);
+      ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-hl,hw); ctx.lineTo(-hl*0.72,0); ctx.lineTo(-hl,-hw); if(ctx.closePath) ctx.closePath();
+      ctx.strokeStyle="rgba(255,255,255,.88)"; ctx.lineWidth=w*1.4; ctx.stroke(); ctx.fillStyle=col; ctx.fill(); ctx.restore();
+      return; }
+    const txt=String(a.text||"").replace(/\r/g,""); if(!txt.trim()||!a.pts||!a.pts.length) return;
+    const p=V.toPx(+a.pts[0][0],+a.pts[0][1]), fs=Math.round(MM_DPI*mnSizeIn_(a.size)), lh=Math.round(fs*1.2);
+    ctx.font=(a.bold?"bold ":"")+fs+"px "+F; ctx.textAlign="left"; ctx.textBaseline="alphabetic";
+    txt.split("\n").forEach((ln,i)=>{ const y=p[1]+i*lh; ctx.strokeStyle="rgba(255,255,255,.92)"; ctx.lineWidth=Math.max(2,fs*0.26); if(ctx.strokeText) ctx.strokeText(ln,p[0],y); ctx.fillStyle=col; ctx.fillText(ln,p[0],y); });
+  });
+  ctx.restore();
+}
+/* ---- placing one ---- */
+function mnStart_(kind){
+  const t=propActiveTract_(); if(!t){ toast("Choose the property first: Layers → Property shown on the map",true); return; }
+  closeDataSheet_(); mnCancel_(true);
+  _mnPlace={kind, tract:t, pts:[]};
+  toast(kind==="arrow"?"Tap the tail of the arrow, then the head":"Tap the map where the note goes");
+}
+function mnCancel_(quiet){ _mnPlace=null; try{ _mnTmp.forEach(m=>fmap.removeLayer(m)); }catch(e){} _mnTmp=[]; if(!quiet) toast("Cancelled"); }
+function mnTap_(ll){
+  if(!_mnPlace) return false;
+  _mnPlace.pts.push([+ll.lat.toFixed(7),+ll.lng.toFixed(7)]);
+  try{ _mnTmp.push(L.circleMarker([ll.lat,ll.lng],{radius:5,color:"#fff",weight:2,fillColor:"#D32F2F",fillOpacity:1,interactive:false}).addTo(fmap)); }catch(e){}
+  if(_mnPlace.kind==="arrow" && _mnPlace.pts.length<2){ toast("Now tap the head of the arrow"); return true; }
+  const n={id:mnNewId_(), tract:_mnPlace.tract, kind:_mnPlace.kind, pts:_mnPlace.pts.slice(), text:"", size:"m", bold:false, color:"#D32F2F", maps:"both"};
+  mnCancel_(true); mnTouch_(n);
+  mnOpen_(n.id);
+  return true;
+}
+/* ---- the list: words, size, bold, colour, which map ---- */
+function mnOpen_(focusId){
+  const t=propActiveTract_();
+  const list=t?mnOf_(t):[];
+  const sel=(id,opts,v,on)=>`<select id="${id}" onchange="${on}" style="font-size:16px;padding:6px;border-radius:7px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+opts.map(o=>`<option value="${esc(o[0])}"${String(v)===o[0]?" selected":""}>${esc(o[1])}</option>`).join("")+`</select>`;
+  let h=`<div style="font-size:12px;color:#a9c9b0;line-height:1.5;margin-bottom:8px">${t?`On <b>${esc(t)}</b>. `:"Choose the property first (Layers → Property shown on the map). "}A note is one tap on the map; an arrow is two — the tail, then the head. Sizes are as printed on the paper.</div>`+
+    `<div style="display:flex;gap:8px;margin-bottom:10px"><button type="button" class="btn submit" style="flex:1" onclick="mnStart_('text')">＋ Text</button><button type="button" class="btn submit" style="flex:1" onclick="mnStart_('arrow')">＋ Arrow</button></div>`;
+  if(t && !list.length) h+=`<div style="font-size:12px;color:#8fae95">No notes or arrows on this property yet.</div>`;
+  h+=list.map(a=>`<div style="border:1px solid #2a4030;border-radius:8px;padding:8px;margin-bottom:6px">`+
+      (a.kind==="arrow"?`<div style="font-size:13px;color:#eafae8;margin-bottom:6px">➜ Arrow</div>`
+        :`<textarea id="mn_t_${esc(a.id)}" rows="2" placeholder="What does it say? Return starts a new line." oninput="mnSet_('${esc(a.id)}','text',this.value)" style="width:100%;box-sizing:border-box;font-size:16px;padding:7px;border-radius:7px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">${esc(a.text||"")}</textarea>`)+
+      `<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px">`+
+      sel("mn_s_"+a.id,MN_SIZES.map(s=>[s[0],s[2]+" — "+s[1].toFixed(2)+" in"]),a.size||"m",`mnSet_('${esc(a.id)}','size',this.value)`)+
+      (a.kind==="arrow"?"":`<label style="font-size:14px;color:#e8f0e6;display:flex;align-items:center;gap:4px"><input type="checkbox" ${a.bold?"checked":""} onchange="mnSet_('${esc(a.id)}','bold',this.checked)" style="width:20px;height:20px"> Bold</label>`)+
+      `<input type="color" value="${esc(a.color||"#D32F2F")}" onchange="mnSet_('${esc(a.id)}','color',this.value)" style="width:44px;height:34px;border:none;background:none">`+
+      sel("mn_m_"+a.id,[["both","Both maps"],["4","Map 4 only"],["6","Map 6 only"]],a.maps||"both",`mnSet_('${esc(a.id)}','maps',this.value)`)+
+      `<button type="button" class="btn ghost" onclick="mnGoTo_('${esc(a.id)}')">Show</button><button type="button" class="btn ghost" onclick="mnDelete_('${esc(a.id)}')">Delete</button></div></div>`).join("");
+  showDataSheet_("Notes and arrows", h);
+  if(focusId) setTimeout(()=>{ const el=$("mn_t_"+focusId); if(el) try{ el.focus(); }catch(e){} },150);
+}
+function mnGoTo_(id){ const a=(PROPS.notes||{})[id]; if(!a||!a.pts||!a.pts.length) return; closeDataSheet_();
+  try{ if(a.pts.length>1) fmap.fitBounds(L.latLngBounds(a.pts).pad(0.4)); else fmap.setView(a.pts[0],Math.max(fmap.getZoom(),18)); }catch(e){} }
+
+/* ============ v387 — the compartment layer made from the property boundary ============
+   The property outline is copied, then cut into compartments with cut lines drawn across it. Every piece
+   is built from the outline's own corners and the cut lines' corners, so the compartments fit the
+   property exactly and fit each other — no slivers, no gaps.
+   · Kept with the property (PROPS.shapes[id] = {id, tract, name, rings:[outer, holes…]}) and sent to the
+     Sheet's "Compartment Shapes" tab; the class stays with the compartment's name, as before.
+   · While a property has pieces, they ARE its compartments: loaded files and drawn areas for it are not
+     counted (propCompsGeo_). Pieces with the same name are the parts of one compartment.
+   Corners are kept to 1e-7° (about a centimetre) everywhere, so a shared corner is the same number in
+   every piece, on every phone and in the Sheet. */
+const CG_EDGE_M=0.05, CG_VTX_M=0.02;
+const cgR_=v=>Math.round(v*1e7)/1e7;
+const cgLL_=p=>[cgR_(p[0]),cgR_(p[1])];
+const cgKey_=p=>Math.round(p[0]*1e7)+","+Math.round(p[1]*1e7);
+/* A flat projection in metres around a point: plenty for a property. */
+function cgProj_(lat0,lon0){ const ky=110574, kx=111320*Math.cos(lat0*Math.PI/180);
+  return {xy:p=>[(p[1]-lon0)*kx,(p[0]-lat0)*ky], ll:q=>cgLL_([lat0+q[1]/ky, lon0+q[0]/kx])}; }
+function cgArea_(r){ let a=0; for(let i=0,n=r.length;i<n;i++){ const p=r[i], q=r[(i+1)%n]; a+=p[0]*q[1]-q[0]*p[1]; } return a/2; }
+function cgInRing_(x,y,r){ let c=false; for(let i=0,j=r.length-1;i<r.length;j=i++){ const a=r[i], b=r[j];
+  if(((a[1]>y)!==(b[1]>y)) && (x < (b[0]-a[0])*(y-a[1])/(b[1]-a[1])+a[0])) c=!c; } return c; }
+function cgInRings_(x,y,rs){ let c=false; rs.forEach(r=>{ if(cgInRing_(x,y,r)) c=!c; }); return c; }
+/* where segment a→b meets segment p→q: t along a→b, u along p→q (null if parallel or apart) */
+function cgHit_(a,b,p,q){ const rx=b[0]-a[0], ry=b[1]-a[1], sx=q[0]-p[0], sy=q[1]-p[1], d=rx*sy-ry*sx; if(Math.abs(d)<1e-12) return null;
+  const t=((p[0]-a[0])*sy-(p[1]-a[1])*sx)/d, u=((p[0]-a[0])*ry-(p[1]-a[1])*rx)/d; return {t,u}; }
+function cgSegD_(x,y,a,b){ const dx=b[0]-a[0], dy=b[1]-a[1], L=dx*dx+dy*dy; let u=L?((x-a[0])*dx+(y-a[1])*dy)/L:0; u=Math.max(0,Math.min(1,u));
+  const ex=a[0]+u*dx-x, ey=a[1]+u*dy-y; return {d:Math.sqrt(ex*ex+ey*ey), u}; }
+function cgDedupe_(r){ const o=[]; r.forEach(p=>{ if(!o.length||cgKey_(o[o.length-1])!==cgKey_(p)) o.push(p); }); while(o.length>1&&cgKey_(o[0])===cgKey_(o[o.length-1])) o.pop(); return o; }
+function cgPieceHa_(rings){ return geoPolysHa_([rings]); }      // the same measure as the area summary
+/* The point halfway along a line, and its length. */
+function cgMid_(pts){ let len=0; for(let i=1;i<pts.length;i++) len+=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]);
+  let h=len/2; for(let i=1;i<pts.length;i++){ const d=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]); if(h<=d&&d>0){ const f=h/d; return {len, p:[pts[i-1][0]+f*(pts[i][0]-pts[i-1][0]), pts[i-1][1]+f*(pts[i][1]-pts[i-1][1])]}; } h-=d; }
+  return {len, p:pts[0]}; }
+/* Where the cut line crosses the piece: the stretches of the line inside it, end to end ("chords"). */
+function cgChords_(rings, line, P){
+  const R=rings.map(r=>r.map(P.xy)), L=line.map(P.xy), hits=[];
+  for(let k=0;k<L.length-1;k++) R.forEach((r,ri)=>{ for(let i=0,n=r.length;i<n;i++){ const h=cgHit_(L[k],L[k+1],r[i],r[(i+1)%n]);
+    if(h && h.t>=-1e-9 && h.t<=1+1e-9 && h.u>=-1e-9 && h.u<1-1e-9) hits.push({k, t:Math.max(0,Math.min(1,h.t)), ri, i, pt:[L[k][0]+h.t*(L[k+1][0]-L[k][0]), L[k][1]+h.t*(L[k+1][1]-L[k][1])]}); } });
+  hits.sort((a,b)=>(a.k+a.t)-(b.k+b.t));
+  const H=[]; hits.forEach(h=>{ const l=H[H.length-1]; if(!l||Math.hypot(l.pt[0]-h.pt[0],l.pt[1]-h.pt[1])>1e-6) H.push(h); });
+  const out=[];
+  for(let j=0;j<H.length-1;j++){ const a=H[j], b=H[j+1];
+    const pts=[a.pt]; for(let k=a.k+1;k<=b.k;k++) pts.push(L[k]); pts.push(b.pt);
+    const mid=cgMid_(pts); if(mid.len<CG_EDGE_M || !cgInRings_(mid.p[0],mid.p[1],R)) continue;
+    out.push({xy:pts, holes:(a.ri>0||b.ri>0)});
+  }
+  return out;
+}
+/* The point's place on the outer ring: the edge it lies on, or the corner it is. */
+function cgOnRing_(r, q){ let best=null; for(let i=0,n=r.length;i<n;i++){ const s=cgSegD_(q[0],q[1],r[i],r[(i+1)%n]); if(!best||s.d<best.d) best={i, u:s.u, d:s.d}; }
+  return best && best.d<=CG_EDGE_M ? best : null; }
+/* Split one piece along one chord (whose ends are on its outer ring). Returns [ringsA, ringsB] or a reason. */
+function cgSplit_(rings, chordXY, P){
+  const RL=rings[0], R=RL.map(P.xy), n=R.length;
+  const e1=cgOnRing_(R,chordXY[0]), e2=cgOnRing_(R,chordXY[chordXY.length-1]);
+  if(!e1||!e2) return "edge";
+  const end=(e,q)=>{ const a=R[e.i], b=R[(e.i+1)%n];
+    if(Math.hypot(q[0]-a[0],q[1]-a[1])<=CG_VTX_M) return {ll:RL[e.i], i:e.i, u:0};
+    if(Math.hypot(q[0]-b[0],q[1]-b[1])<=CG_VTX_M) return {ll:RL[(e.i+1)%n], i:(e.i+1)%n, u:0};
+    return {ll:P.ll(q), i:e.i, u:e.u}; };
+  const A1=end(e1,chordXY[0]), A2=end(e2,chordXY[chordXY.length-1]);
+  if(cgKey_(A1.ll)===cgKey_(A2.ll)) return "loop";
+  const inner=chordXY.slice(1,-1).map(P.ll);
+  const walk=(f,t)=>{ let c=(t.i-f.i+n)%n; if(c===0 && f.u>t.u) c=n; const o=[]; for(let m=0;m<c;m++) o.push(RL[(f.i+1+m)%n]); return o; };
+  const ringA=cgDedupe_([A1.ll].concat(walk(A1,A2),[A2.ll],inner.slice().reverse()));
+  const ringB=cgDedupe_([A2.ll].concat(walk(A2,A1),[A1.ll],inner));
+  const ok=r=>r.length>=3 && Math.abs(cgArea_(r.map(P.xy)))>0.01;
+  if(!ok(ringA)||!ok(ringB)) return "thin";
+  const ha=[ringA], hb=[ringB], Axy=ringA.map(P.xy);
+  rings.slice(1).forEach(h=>{ const q=P.xy(h[0]); (cgInRing_(q[0],q[1],Axy)?ha:hb).push(h); });
+  return [ha,hb];
+}
+/* Put corners into a piece's edges where they lie on them (a cut that ends on a neighbour's edge gives
+   the neighbour that corner too, so the two share it exactly). */
+function cgInsert_(rings, pts, P){
+  return rings.map(r=>{ let out=r.slice();
+    pts.forEach(p=>{ const keys=out.map(cgKey_); if(keys.indexOf(cgKey_(p))>=0) return;
+      const q=P.xy(p), X=out.map(P.xy);
+      for(let i=0,n=X.length;i<n;i++){ const s=cgSegD_(q[0],q[1],X[i],X[(i+1)%n]);
+        if(s.d<=CG_EDGE_M && s.u>1e-6 && s.u<1-1e-6){ out.splice(i+1,0,p); break; } } });
+    return out; });
+}
+/* Cut every piece the line crosses from edge to edge. pieces: [{id,name,rings}]. */
+function cgCut_(pieces, line){
+  if(!line||line.length<2) return {err:"Tap at least two points for the cut line"};
+  const P=cgProj_(line[0][0],line[0][1]);
+  if(cgLineCross_(line.map(P.xy))) return {err:"The cut line crosses itself — draw it without loops"};
+  // reach 25 cm past each end, so a line started or ended right on an edge still crosses it
+  const Lx=line.map(P.xy), ext=(a,b)=>{ const d=Math.hypot(a[0]-b[0],a[1]-b[1])||1; return [a[0]+0.25*(a[0]-b[0])/d, a[1]+0.25*(a[1]-b[1])/d]; };
+  Lx[0]=ext(Lx[0],Lx[1]); Lx[Lx.length-1]=ext(Lx[Lx.length-1],Lx[Lx.length-2]);      // ext: 25 cm (below)
+  const L=Lx.map(P.ll);
+  let out=[], cut=0, ends=[], why="";
+  pieces.forEach(pc=>{
+    const chords=cgChords_(pc.rings, L, P);
+    if(!chords.length){ out.push(pc); return; }
+    if(chords.some(c=>c.holes)){ why="hole"; out.push(pc); return; }
+    let cur=[pc.rings];
+    for(const ch of chords){
+      const mid=cgMid_(ch.xy).p;
+      const at=cur.findIndex(rs=>cgInRings_(mid[0],mid[1],rs.map(r=>r.map(P.xy))));
+      if(at<0) continue;
+      const sp=cgSplit_(cur[at], ch.xy, P);
+      if(typeof sp==="string"){ why=why||sp; continue; }
+      cur.splice(at,1,sp[0],sp[1]); ends.push(P.ll(ch.xy[0]), P.ll(ch.xy[ch.xy.length-1]));
+    }
+    if(cur.length===1){ out.push(pc); return; }
+    cut++;
+    cur.sort((a,b)=>cgPieceHa_(b)-cgPieceHa_(a));
+    cur.forEach((rs,i)=>out.push(i===0 ? Object.assign({},pc,{rings:rs}) : {id:null, name:null, tract:pc.tract, rings:rs, from:pc.id}));
+  });
+  if(!cut) return {err: why==="hole" ? "That cut runs into a hole in the property — cut either side of it" : "The cut line has to cross a piece from one edge to another"};
+  // snap the cut's ends to the real corners now in the pieces, then give neighbours those corners
+  const corners={}; out.forEach(pc=>pc.rings.forEach(r=>r.forEach(p=>{ corners[cgKey_(p)]=p; })));
+  const endPts=ends.map(e=>{ const q=P.xy(e); let best=null; Object.values(corners).forEach(c=>{ const v=P.xy(c), d=Math.hypot(v[0]-q[0],v[1]-q[1]); if(d<=CG_EDGE_M&&(!best||d<best.d)) best={d,c}; }); return best?best.c:e; });
+  out=out.map(pc=>Object.assign({},pc,{rings:cgInsert_(pc.rings,endPts,P)}));
+  if(!cgSound_(out, cgLayerHa_(pieces), P)) return {err:"That cut would leave an odd shape — try a simpler line"};
+  return {pieces:out, cut, partly:!!why};
+}
+/* Join two pieces that share an edge. */
+function cgMerge_(a, b){
+  const P=cgProj_(a.rings[0][0][0],a.rings[0][0][1]);
+  let ra=cgInsert_(a.rings, [].concat(...b.rings), P), rb=cgInsert_(b.rings, [].concat(...a.rings), P);
+  const ccw=r=>cgArea_(r.map(P.xy))>0?r:r.slice().reverse();
+  const A=ccw(ra[0]), B=ccw(rb[0]), ll={};
+  const edges=r=>r.map((p,i)=>{ const q=r[(i+1)%r.length]; ll[cgKey_(p)]=p; return [cgKey_(p),cgKey_(q)]; });
+  const ea=edges(A), eb=edges(B), setB={}; eb.forEach(e=>setB[e[0]+">"+e[1]]=1);
+  const shared={}; ea.forEach(e=>{ if(setB[e[1]+">"+e[0]]) shared[e[0]+">"+e[1]]=shared[e[1]+">"+e[0]]=1; });
+  if(!Object.keys(shared).length) return {err:"Those two pieces do not share an edge"};
+  const rest=ea.concat(eb).filter(e=>!shared[e[0]+">"+e[1]]), from={};
+  rest.forEach((e,i)=>{ (from[e[0]]||(from[e[0]]=[])).push(i); });
+  const used={}, rings=[];
+  for(let s=0;s<rest.length;s++){ if(used[s]) continue; const ring=[]; let i=s, guard=0;
+    while(!used[i] && guard++<100000){ used[i]=1; ring.push(ll[rest[i][0]]); const nx=(from[rest[i][1]]||[]).find(j=>!used[j]); if(nx===undefined) break; i=nx; }
+    if(ring.length>=3) rings.push(cgDedupe_(ring)); }
+  if(!rings.length) return {err:"Those two pieces could not be joined"};
+  rings.sort((x,y)=>Math.abs(cgArea_(y.map(P.xy)))-Math.abs(cgArea_(x.map(P.xy))));
+  const res=[rings[0]].concat(rings.slice(1), ra.slice(1), rb.slice(1));
+  if(!cgSound_([{rings:res}], cgPieceHa_(a.rings)+cgPieceHa_(b.rings), P)) return {err:"Those two pieces could not be joined cleanly (they meet only at a point, or wrap round another piece)"};
+  return {rings:res};
+}
+/* Does a ring cross itself? (a corner dragged too far) */
+function cgSelfCross_(r, P){ const X=r.map(P.xy), n=X.length, keys={};
+  for(let i=0;i<n;i++){ const k=cgKey_(r[i]); if(keys[k]) return true; keys[k]=1; }           // a corner used twice: pinched
+  for(let i=0;i<n;i++){ const a=X[(i+n-1)%n], b=X[i], c=X[(i+1)%n], ux=b[0]-a[0], uy=b[1]-a[1], vx=c[0]-b[0], vy=c[1]-b[1];
+    const cr=ux*vy-uy*vx, dt=ux*vx+uy*vy, lu=Math.hypot(ux,uy), lv=Math.hypot(vx,vy);
+    if(lu>0&&lv>0&&Math.abs(cr)<1e-6*lu*lv&&dt<0) return true; }                                  // an edge turning straight back: a spike
+  for(let i=0;i<n;i++) for(let j=i+2;j<n;j++){ if(i===0&&j===n-1) continue; const h=cgHit_(X[i],X[(i+1)%n],X[j],X[(j+1)%n]);
+    if(h && h.t>1e-9 && h.t<1-1e-9 && h.u>1e-9 && h.u<1-1e-9) return true; } return false; }
+/* Does a line cross itself? */
+function cgLineCross_(L){ for(let i=0;i<L.length-1;i++) for(let j=i+2;j<L.length-1;j++){ const h=cgHit_(L[i],L[i+1],L[j],L[j+1]);
+  if(h && h.t>=0 && h.t<=1 && h.u>=0 && h.u<=1) return true; } return false; }
+/* Do two pieces overlap? (an edge of one properly crossing an edge of the other, or a corner of one well inside the other) */
+function cgOverlap_(a, b, P){
+  const A=a.rings.map(r=>r.map(P.xy)), B=b.rings.map(r=>r.map(P.xy));
+  for(const ra of A) for(let i=0;i<ra.length;i++) for(const rb of B) for(let j=0;j<rb.length;j++){ const h=cgHit_(ra[i],ra[(i+1)%ra.length],rb[j],rb[(j+1)%rb.length]);
+    if(h && h.t>1e-6 && h.t<1-1e-6 && h.u>1e-6 && h.u<1-1e-6) return true; }
+  const deep=(R,S)=>R[0].some(q=>{ if(!cgInRings_(q[0],q[1],S)) return false; let d=1/0; S.forEach(r=>{ for(let j=0;j<r.length;j++) d=Math.min(d,cgSegD_(q[0],q[1],r[j],r[(j+1)%r.length]).d); }); return d>CG_EDGE_M; });
+  return deep(A,B)||deep(B,A);
+}
+function cgLayerHa_(list){ return list.reduce((t,c)=>t+cgPieceHa_(c.rings),0); }
+/* A layer is sound when no piece crosses itself and the pieces' areas still add up as they did. */
+function cgSound_(list, wantHa, P){
+  for(const c of list) for(const r of c.rings) if(r.length<3 || cgSelfCross_(r,P) || Math.abs(cgArea_(r.map(P.xy)))<0.01) return false;
+  return wantHa==null || Math.abs(cgLayerHa_(list)-wantHa) < 0.0005;          // 5 m²: rounding to the centimetre stays far below this
+}
+
+/* ---- the pieces, kept with the property ---- */
+function csAll_(){ return Object.values(PROPS.shapes||{}).filter(c=>c&&c.id); }
+function csOf_(tract){ const k=propK_(tract); return csAll_().filter(c=>propK_(c.tract)===k).sort((a,b)=>String(a.name).localeCompare(String(b.name),undefined,{numeric:true})); }
+function csNewId_(){ return "S"+Date.now().toString(36).toUpperCase()+Math.floor(Math.random()*1679616).toString(36).toUpperCase().padStart(4,"0"); }
+function csNextName_(tract, taken){ const used={}; csOf_(tract).forEach(c=>used[propK_(c.name)]=1); (taken||[]).forEach(n=>used[propK_(n)]=1);
+  for(let i=1;;i++){ const n="C-"+i; if(!used[propK_(n)]) return n; } }
+let _csUndo=[], _csPushT=null;
+/* Replace a property's pieces with `list`, as one step that Undo can take back. */
+function csCommit_(tract, list, label, noUndo){
+  const k=propK_(tract), before=csOf_(tract);
+  if(!noUndo){ _csUndo.push({tract, label, pieces:JSON.parse(JSON.stringify(before))}); if(_csUndo.length>30) _csUndo.shift(); }
+  PROPS.shapes=PROPS.shapes||{}; propDirty.shapes=propDirty.shapes||{}; propDirty.shapeDel=propDirty.shapeDel||[];
+  const now={}, taken=[]; list.forEach(c=>{ if(c.name) taken.push(c.name); });
+  list.forEach(c=>{ const id=c.id||csNewId_(), name=c.name||csNextName_(tract,taken); if(!c.name) taken.push(name);
+    now[id]={id, tract:String(tract).trim(), name, rings:c.rings.map(r=>r.map(cgLL_))}; });
+  before.forEach(c=>{ if(!now[c.id]){ delete PROPS.shapes[c.id]; delete propDirty.shapes[c.id]; if(propDirty.shapeDel.indexOf(c.id)<0) propDirty.shapeDel.push(c.id); } });
+  const stamp=Date.now();
+  Object.values(now).forEach(c=>{ const was=PROPS.shapes[c.id]; if(was && JSON.stringify([was.name,was.rings])===JSON.stringify([c.name,c.rings])) return;
+    PROPS.shapes[c.id]=c; propDirty.shapes[c.id]=stamp; propDirty.shapeDel=propDirty.shapeDel.filter(x=>x!==c.id); });
+  void k; propPersist_(); csRender_();
+  if(_csPushT) clearTimeout(_csPushT); _csPushT=setTimeout(()=>{ _csPushT=null; if(propBackendOk) propPush_().then(()=>{}); else propSync_(); },1500);
+}
+function csUndo_(){ const t=_csEd?_csEd.tract:propActiveTract_(); let i=_csUndo.length-1; while(i>=0 && propK_(_csUndo[i].tract)!==propK_(t)) i--;
+  if(i<0){ toast("Nothing to undo"); return; }
+  const u=_csUndo.splice(i,1)[0]; csCommit_(u.tract, u.pieces, "undo", true); toast("Undone: "+u.label); csBar_(); }
+/* Start the layer: a copy of the property outline — each separate part of it one piece, holes kept. */
+function csFromOutline_(tract){
+  const t=tract||_ppTract||propActiveTract_(), p=propGet_(t)||{}, rings=(Array.isArray(p.boundary)?p.boundary:[]).filter(r=>r&&r.length>=3).map(r=>cgDedupe_(r.map(cgLL_)));
+  if(!rings.length){ toast("Save the property outline first (property sheet → Property outline)",true); return false; }
+  if(csOf_(t).length && !confirm("Start the compartment layer again from the property outline? The "+csOf_(t).length+" pieces made so far are replaced (Undo can bring them back).")) return false;
+  const outers=[], holes=[];
+  rings.forEach((r,i)=>{ let inside=0; rings.forEach((o,j)=>{ if(j!==i&&propRingIn_(r,o)) inside++; }); (inside%2?holes:outers).push(r); });
+  const pieces=outers.map(o=>({id:null, name:null, rings:[o]}));
+  holes.forEach(h=>{ const pc=pieces.find(pc=>propRingIn_(h,pc.rings[0])); if(pc) pc.rings.push(h); });
+  csCommit_(t, pieces, "start from the outline");
+  toast(pieces.length===1?"The property outline is copied as one piece — now cut it into compartments":"The outline's "+pieces.length+" parts are copied as pieces — now cut them into compartments");
+  return true;
+}
+/* Rename a piece and set its class. The class belongs to the compartment name (as before), so a new name takes
+   the old name's class unless it already has one. */
+function csSetAttr_(id, name, cls){
+  const c=(PROPS.shapes||{})[id]; if(!c) return false; name=String(name||"").trim().slice(0,60);
+  if(!name){ toast("A compartment needs a name",true); return false; }
+  const old=c.name, list=csOf_(c.tract).map(x=>x.id===id?Object.assign({},x,{name}):x);
+  csCommit_(c.tract, list, "rename "+old+" → "+name);
+  const oldRec=propComp_(c.tract,old)||{}, newRec=propComp_(c.tract,name)||{};
+  const want = cls!=null ? cls : (newRec.cls || oldRec.cls || "");
+  if(String(want)!==String(newRec.cls||"")) propSaveLocal_({tract:c.tract}, [{name, cls:want}]);
+  return true;
+}
+/* ---- the editor on the map ---- */
+let _csEd=null, csLayer=null, _csTmp=[];
+function csEdit_(tract){
+  const t=tract||_ppTract||propActiveTract_(); if(!t){ toast("Choose the property first",true); return; }
+  if(!csOf_(t).length && !csFromOutline_(t)) return;
+  propSetActive_(t); closeDataSheet_(); try{ mnCancel_(true); }catch(e){}
+  _csEd={tract:t, mode:"idle", line:[], pick:null};
+  csRender_(); csBar_(); csZoom_();
+}
+function csZoom_(){ try{ const b=[]; csOf_(_csEd.tract).forEach(c=>c.rings[0].forEach(p=>b.push(p))); if(b.length&&fmap) fmap.fitBounds(b,{padding:[30,30]}); }catch(e){} }
+function csDone_(){ _csEd=null; csTmpClear_(); csBarRemove_(); csRender_(); openPropSheet_(propActiveTract_()); }
+let _csBarEl=null;
+function csBarRemove_(){ const bar=$("csBar")||_csBarEl; _csBarEl=null; try{ if(bar&&bar.parentNode) bar.parentNode.removeChild(bar); else if(bar&&bar.remove) bar.remove(); }catch(e){} }
+function csTmpClear_(){ try{ _csTmp.forEach(m=>fmap.removeLayer(m)); }catch(e){} _csTmp=[]; }
+function csMode_(m){ if(!_csEd) return; _csEd.mode=m; _csEd.line=[]; _csEd.pick=null; csTmpClear_(); csRender_(); csBar_();
+  toast(m==="cut"?"Tap points across the piece, starting and ending outside it (or on its edge) — then Apply cut"
+       :m==="merge"?"Tap the two pieces to join"
+       :m==="move"?"Drag a corner. Corners of the property outline stay put; one on the outline's edge slides along it"
+       :"Tap a piece to name it and set its class"); }
+function csBar_(){
+  if(!_csEd){ csBarRemove_(); return; }
+  let bar=$("csBar")||_csBarEl; if(!bar){ bar=document.createElement("div"); bar.id="csBar"; document.body.appendChild(bar); } _csBarEl=bar;
+  bar.style.cssText=("position:fixed;left:8px;right:8px;bottom:10px;z-index:5450;background:rgba(16,36,15,.96);border:1px solid #4caf50;border-radius:12px;padding:8px;color:#eafae8;font:13px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.5)");
+  const m=_csEd.mode, n=csOf_(_csEd.tract).length, B=(fn,label,on)=>`<button type="button" class="btn ${on?"submit":"ghost"}" style="flex:1;min-width:0;padding:8px 4px;font-size:13px" onclick="${fn}">${label}</button>`;
+  let h=`<div style="margin-bottom:6px"><b>Compartment layer</b> · ${esc(_csEd.tract)} · ${n} piece${n===1?"":"s"}</div>`;
+  const chk=csCheck_(_csEd.tract); if(!chk.ok) h+=`<div style="color:#ffd24a;font-size:12px;margin-bottom:6px">${chk.over?"Some pieces overlap — two phones may have cut it at the same time. Join or undo until they fit, or start again from the outline.":"The pieces add up to "+chk.layHa.toFixed(2)+" ha but the outline is "+chk.propHa.toFixed(2)+" ha — the outline may have changed since. Start again from the outline to match it."}</div>`;
+  if(m==="cut") h+=`<div style="margin-bottom:6px;color:#cfe3d2">${_csEd.line.length} point${_csEd.line.length===1?"":"s"} on the cut line</div><div style="display:flex;gap:6px">`+
+     B("csApplyCut_()","✂ Apply cut",true)+B("csLineUndo_()","↶ Point")+B("csMode_('idle')","Cancel")+`</div>`;
+  else h+=`<div style="display:flex;gap:6px;flex-wrap:wrap">`+B("csMode_('cut')","✂ Cut",m==="cut")+B("csMode_('merge')","⊕ Merge",m==="merge")+B("csMode_('move')","✥ Corners",m==="move")+
+     B("csUndo_()","↶ Undo")+B("csDone_()","✓ Done")+`</div>`+(m==="idle"?`<div style="margin-top:6px;color:#a9c9b0;font-size:12px">Tap a piece to name it and set its class.</div>`:"");
+  bar.innerHTML=h;
+}
+/* A tap snaps to a corner of a piece within 14 px, so a cut can start exactly where an earlier one ended. */
+function csSnap_(ll){
+  let best=null; const pt=fmap&&fmap.latLngToContainerPoint?fmap.latLngToContainerPoint(ll):null; if(!pt) return [ll.lat,ll.lng];
+  csOf_(_csEd.tract).forEach(c=>c.rings.forEach(r=>r.forEach((p,i)=>{ const q=fmap.latLngToContainerPoint({lat:p[0],lng:p[1]}), d=Math.hypot(q.x-pt.x,q.y-pt.y);
+    if(d<=14 && (!best||d<best.d)) best={d,p}; })));
+  return best?best.p:[ll.lat,ll.lng];
+}
+function csPieceAt_(lat,lon){ const P=cgProj_(lat,lon); let hit=null;
+  csOf_(_csEd?_csEd.tract:propActiveTract_()).forEach(c=>{ if(cgInRings_(0,0,c.rings.map(r=>r.map(P.xy)))) hit=c; }); return hit; }
+function csTap_(ll){
+  if(!_csEd) return false;
+  const m=_csEd.mode;
+  if(m==="cut"){ const p=csSnap_(ll); _csEd.line.push(cgLL_(p));
+    try{ csTmpClear_(); _csTmp.push(L.polyline(_csEd.line,{color:"#ff3b30",weight:3,dashArray:"8 6",interactive:false}).addTo(fmap));
+      _csEd.line.forEach(q=>_csTmp.push(L.circleMarker(q,{radius:5,color:"#fff",weight:2,fillColor:"#ff3b30",fillOpacity:1,interactive:false}).addTo(fmap))); }catch(e){}
+    csBar_(); return true; }
+  const pc=csPieceAt_(ll.lat,ll.lng);
+  if(m==="merge"){ if(!pc){ toast("Tap inside a piece"); return true; }
+    if(!_csEd.pick){ _csEd.pick=pc.id; csRender_(); toast("Now tap the piece to join to "+pc.name); return true; }
+    if(_csEd.pick===pc.id){ _csEd.pick=null; csRender_(); toast("Unselected"); return true; }
+    const a=PROPS.shapes[_csEd.pick], b=pc; _csEd.pick=null;
+    if(!confirm("Join "+b.name+" into "+a.name+"? The joined piece keeps the name "+a.name+".")){ csRender_(); return true; }
+    csMergeIds_(a.id,b.id); return true; }
+  if(m==="move") return false;
+  if(pc){ csAttrOpen_(pc.id); return true; }
+  return false;
+}
+function csLineUndo_(){ if(!_csEd||!_csEd.line.length) return; _csEd.line.pop(); const l=_csEd.line.slice(); _csEd.line=[]; csTmpClear_(); l.forEach(p=>csTap_({lat:p[0],lng:p[1]})); csBar_(); }
+function csApplyCut_(){
+  if(!_csEd) return; const t=_csEd.tract;
+  const r=cgCut_(csOf_(t), _csEd.line);
+  if(r.err){ toast(r.err,true); return; }
+  csCommit_(t, r.pieces, "cut");
+  _csEd.line=[]; csTmpClear_(); csBar_();
+  toast((r.cut===1?"Cut — tap the new piece to name it":"Cut through "+r.cut+" pieces")+(r.partly?". Part of the line did not cross a piece cleanly and was not used":""));
+}
+function csMergeIds_(ida, idb){
+  const a=PROPS.shapes[ida], b=PROPS.shapes[idb]; if(!a||!b) return false;
+  const r=cgMerge_(a,b); if(r.err){ toast(r.err,true); csRender_(); return false; }
+  csCommit_(a.tract, csOf_(a.tract).filter(c=>c.id!==idb).map(c=>c.id===ida?Object.assign({},c,{rings:r.rings}):c), "join "+b.name+" into "+a.name);
+  toast("Joined"); return true;
+}
+/* Does the layer still fit the property? (pieces overlapping — two phones cut it at once — or the outline changed since) */
+function csCheck_(tract){ const pcs=csOf_(tract), out=csOutline_(tract); if(!pcs.length||!out.length) return {ok:true};
+  const lay=cgLayerHa_(pcs), prop=propOutlineHa_(out); let over=false;
+  const P=cgProj_(pcs[0].rings[0][0][0],pcs[0].rings[0][0][1]);
+  for(let i=0;i<pcs.length&&!over;i++) for(let j=i+1;j<pcs.length&&!over;j++) if(cgOverlap_(pcs[i],pcs[j],P)) over=true;
+  return {ok:!over && Math.abs(lay-prop)<0.01, over, layHa:lay, propHa:prop}; }
+/* The property outline's corners and edges, which a corner may not leave. */
+function csOutline_(tract){ const p=propGet_(tract)||{}; return (Array.isArray(p.boundary)?p.boundary:[]).filter(r=>r&&r.length>=3).map(r=>r.map(cgLL_)); }
+/* Move every piece's copy of one corner. Returns a reason it cannot, or "" when done. */
+function csMoveCorner_(tract, key, to){
+  const out=csOutline_(tract), P=cgProj_(to[0],to[1]); let dest=cgLL_(to);
+  const okeys={}; out.forEach(r=>r.forEach(p=>okeys[cgKey_(p)]=1));
+  if(okeys[key]) return "fixed";
+  // a corner on the outline's edge stays on it: it slides to the nearest point of the outline
+  let onEdge=false; const pcs=csOf_(tract), at=pcs.map(c=>c.rings.map(r=>r.findIndex(p=>cgKey_(p)===key)));
+  let from=null; pcs.forEach((c,i)=>at[i].forEach((j,ri)=>{ if(j>=0) from=c.rings[ri][j]; })); if(!from) return "none";
+  const Pf=cgProj_(from[0],from[1]), fq=Pf.xy(from);
+  out.forEach(r=>{ const X=r.map(Pf.xy); for(let i=0;i<X.length;i++){ if(cgSegD_(fq[0],fq[1],X[i],X[(i+1)%X.length]).d<=CG_EDGE_M) onEdge=true; } });
+  /* it slides along the outline edge it is on — only that edge, never round the outline's corner */
+  if(onEdge){ let seg=null; out.forEach(r=>{ const X=r.map(Pf.xy); for(let i=0;i<X.length;i++){ const s=cgSegD_(fq[0],fq[1],X[i],X[(i+1)%X.length]); if(!seg||s.d<seg.d) seg={d:s.d, a:r[i], b:r[(i+1)%r.length]}; } });
+    const a=P.xy(seg.a), b=P.xy(seg.b), q=P.xy(dest), L=Math.hypot(b[0]-a[0],b[1]-a[1]), m=Math.min(0.49, CG_EDGE_M*2/(L||1));
+    let u=L?((q[0]-a[0])*(b[0]-a[0])+(q[1]-a[1])*(b[1]-a[1]))/(L*L):0.5; u=Math.max(m,Math.min(1-m,u));
+    dest=P.ll([a[0]+u*(b[0]-a[0]), a[1]+u*(b[1]-a[1])]); }
+  const list=pcs.map((c,i)=>Object.assign({},c,{rings:c.rings.map((r,ri)=>at[i][ri]>=0 ? r.map(p=>cgKey_(p)===key?dest:p) : r)}));
+  if(list.some((c,i)=>at[i].some(j=>j>=0) && c.rings.some(r=>cgSelfCross_(r,P)||Math.abs(cgArea_(r.map(P.xy)))<0.01))) return "cross";
+  /* and the moved pieces must not run over any other piece, and the layer must still add up */
+  const moved=list.filter((c,i)=>at[i].some(j=>j>=0));
+  if(moved.some(a=>list.some(b=>b.id!==a.id && cgOverlap_(a,b,P))) || !cgSound_(list, cgLayerHa_(pcs), P)) return "cross";
+  csCommit_(tract, list, "move a corner"); return "";
+}
+function csAttrOpen_(id){
+  const c=(PROPS.shapes||{})[id]; if(!c) return;
+  const rec=propComp_(c.tract,c.name)||{}, ha=cgPieceHa_(c.rings), parts=csOf_(c.tract).filter(x=>propK_(x.name)===propK_(c.name)).length;
+  const opts=MFTIP_CLASSES.map(o=>`<option value="${esc(o[0])}"${String(rec.cls||"")===o[0]?" selected":""}>${esc(o[1])}</option>`).join("");
+  showDataSheet_("Compartment", `<div style="font-size:12px;color:#a9c9b0;margin-bottom:8px">${ha.toFixed(2)} ha · ${(ha*HA_AC).toFixed(2)} ac on the map${parts>1?` · one of ${parts} pieces named ${esc(c.name)} (they count as one compartment)`:""}</div>`+
+    `<label style="display:block;margin-bottom:8px"><span style="display:block;font-size:12px;color:#a9c9b0">Name</span><input id="csName" type="text" value="${esc(c.name)}" style="width:100%;box-sizing:border-box;font-size:16px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></label>`+
+    `<label style="display:block;margin-bottom:10px"><span style="display:block;font-size:12px;color:#a9c9b0">MFTIP class</span><select id="csCls" style="font-size:16px;padding:7px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">${opts}</select></label>`+
+    `<div style="font-size:11px;color:#8fae95;margin-bottom:10px">Give two pieces the same name to count them as one compartment.</div>`+
+    `<div style="display:flex;gap:8px"><button type="button" class="btn submit" style="flex:1" onclick="csAttrSave_('${esc(id)}')">Save</button><button type="button" class="btn ghost" style="flex:1" onclick="closeDataSheet_()">Cancel</button></div>`);
+}
+function csAttrSave_(id){ const n=$("csName"), k=$("csCls"); if(csSetAttr_(id, n?n.value:"", k?k.value:null)){ closeDataSheet_(); csRender_(); } }
+const CS_FILL={MFTIP:"#4caf50", CLTIP:"#1e8a3c", INELIGIBLE:"#9e9e9e", "":"#ffd24a"};
+function csRender_(){
+  if(typeof fmap==="undefined"||!fmap||typeof L==="undefined") return;
+  if(!csLayer){ try{ csLayer=L.layerGroup().addTo(fmap); }catch(e){ return; } }
+  csLayer.clearLayers();
+  const t=_csEd?_csEd.tract:propActiveTract_(); if(!t) return;
+  const pcs=csOf_(t);
+  pcs.forEach(c=>{ const cls=(propComp_(t,c.name)||{}).cls||"", pick=_csEd&&_csEd.pick===c.id;
+    L.polygon(c.rings,{color:pick?"#ff3b30":"#fff", weight:pick?4:2, fillColor:CS_FILL[cls]||"#ffd24a", fillOpacity:_csEd?.35:.15, interactive:false}).addTo(csLayer);
+    const ctr=c.rings[0].reduce((a,p)=>[a[0]+p[0]/c.rings[0].length,a[1]+p[1]/c.rings[0].length],[0,0]);
+    L.marker(ctr,{interactive:false,keyboard:false,icon:L.divIcon({className:"",iconSize:[120,20],iconAnchor:[60,10],
+      html:`<div style="text-align:center;font:700 12px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000">${esc(c.name)}${cls?"":" ·?"}</div>`})}).addTo(csLayer); });
+  if(_csEd&&_csEd.mode==="move"){
+    const okeys={}; csOutline_(t).forEach(r=>r.forEach(p=>okeys[cgKey_(p)]=1)); const seen={};
+    pcs.forEach(c=>c.rings.forEach(r=>r.forEach(p=>{ const k=cgKey_(p); if(seen[k]) return; seen[k]=1; const fixed=!!okeys[k];
+      const mk=L.marker(p,{draggable:!fixed,keyboard:false,icon:L.divIcon({className:"",iconSize:[18,18],iconAnchor:[9,9],
+        html:`<div style="width:14px;height:14px;border-radius:50%;border:2px solid #fff;background:${fixed?"#777":"#ff3b30"}"></div>`})}).addTo(csLayer);
+      if(!fixed) mk.on("dragend",e=>{ const q=e.target.getLatLng(), why=csMoveCorner_(t,k,[q.lat,q.lng]);
+        if(why==="cross") toast("That would make a piece cross itself — the corner is put back",true); csRender_(); }); })));
+  }
+}
+/* ---- the shapefile of the layer (UTM 17N): NAME, TRACT, CLASS, AREA_HA, AREA_AC, ADJ_AC ---- */
+function csExportShp_(tract){
+  const t=tract||_ppTract||propActiveTract_(), pcs=csOf_(t); if(!pcs.length){ toast("No compartment layer for "+t+" yet",true); return; }
+  const S=propSummary_(t), byName={}; S.rows.forEach(r=>byName[propK_(r.name)]=r);
+  const feats=[], recs=[];
+  pcs.forEach((c,i)=>{ const parts=c.rings.map((r,ri)=>{ const u=r.map(p=>utm17n_(p[0],p[1])); let sa=0; for(let a=0;a<u.length;a++){ const b=(a+1)%u.length; sa+=u[a].x*u[b].y-u[b].x*u[a].y; }
+      const cw = ri===0 ? (sa<0) : (sa>0); const q=(cw?u:u.slice().reverse()); q.push({x:q[0].x,y:q[0].y}); return q; });   // shapefile: outer clockwise, holes counter-clockwise
+    let xmin=1/0,ymin=1/0,xmax=-1/0,ymax=-1/0; parts.forEach(q=>q.forEach(p=>{ xmin=Math.min(xmin,p.x); ymin=Math.min(ymin,p.y); xmax=Math.max(xmax,p.x); ymax=Math.max(ymax,p.y); }));
+    feats.push({parts, box:{xmin,ymin,xmax,ymax}});
+    const r=byName[propK_(c.name)]||{}, ha=cgPieceHa_(c.rings), share=(r.ha>0)?ha/r.ha:1;
+    recs.push([i+1, c.name, c.tract, (propComp_(t,c.name)||{}).cls||"", ha.toFixed(4), (ha*HA_AC).toFixed(2), ((r.adj!=null?r.adj:ha*HA_AC)*share).toFixed(2)]); });
+  const {shp,shx}=shpMulti_(feats);
+  const dbf=buildDbf_([{name:"ID",type:"N",len:8,dec:0},{name:"NAME",type:"C",len:60},{name:"TRACT",type:"C",len:60},{name:"CLASS",type:"C",len:12},{name:"AREA_HA",type:"N",len:14,dec:4},{name:"AREA_AC",type:"N",len:14,dec:2},{name:"ADJ_AC",type:"N",len:14,dec:2}], recs);
+  const base="Compartments_"+String(t).replace(/[^A-Za-z0-9]+/g,"_")+"_"+nowStr().replace(/[: ]/g,"-");
+  const zip=zipStore_([{name:base+".shp",data:shp},{name:base+".shx",data:shx},{name:base+".dbf",data:dbf},{name:base+".prj",data:new TextEncoder().encode(PRJ_17N)},dbfCpgFile_(base)]);
+  const blob=new Blob([zip],{type:"application/zip"}), url=URL.createObjectURL(blob), a=document.createElement("a");
+  a.href=url; a.download=base+".zip"; document.body.appendChild(a); a.click(); a.remove();
+  try{ driveSave_(blob,a.download,"shapefile"); }catch(e){} setTimeout(()=>URL.revokeObjectURL(url),1500);
+  toast(pcs.length+" piece"+(pcs.length===1?"":"s")+" → shapefile (UTM 17N)");
+  return {feats, recs};
+}
+/* Polygon shapefile records with several parts (an outer ring and its holes). */
+function shpMulti_(feats){
+  let X0=1/0,Y0=1/0,X1=-1/0,Y1=-1/0; feats.forEach(f=>{ X0=Math.min(X0,f.box.xmin); Y0=Math.min(Y0,f.box.ymin); X1=Math.max(X1,f.box.xmax); Y1=Math.max(Y1,f.box.ymax); });
+  const allBox={xmin:X0,ymin:Y0,xmax:X1,ymax:Y1};
+  const conts=feats.map(f=>{ const N=f.parts.reduce((a,q)=>a+q.length,0); return 44+4*f.parts.length+16*N; });
+  let shpLen=100, shxLen=100; conts.forEach(c=>{ shpLen+=8+c; shxLen+=8; });
+  const sb=new ArrayBuffer(shpLen),sdv=new DataView(sb); shpHdr_(sb,shpLen/2,allBox,5);
+  const xb=new ArrayBuffer(shxLen),xdv=new DataView(xb); shpHdr_(xb,shxLen/2,allBox,5);
+  let o=100, xo=100;
+  feats.forEach((f,i)=>{ const content=conts[i], offW=o/2, N=f.parts.reduce((a,q)=>a+q.length,0);
+    sdv.setInt32(o,i+1,false);o+=4; sdv.setInt32(o,content/2,false);o+=4; sdv.setInt32(o,5,true);o+=4;
+    sdv.setFloat64(o,f.box.xmin,true);o+=8; sdv.setFloat64(o,f.box.ymin,true);o+=8; sdv.setFloat64(o,f.box.xmax,true);o+=8; sdv.setFloat64(o,f.box.ymax,true);o+=8;
+    sdv.setInt32(o,f.parts.length,true);o+=4; sdv.setInt32(o,N,true);o+=4;
+    let start=0; f.parts.forEach(q=>{ sdv.setInt32(o,start,true);o+=4; start+=q.length; });
+    f.parts.forEach(q=>q.forEach(p=>{ sdv.setFloat64(o,p.x,true);o+=8; sdv.setFloat64(o,p.y,true);o+=8; }));
+    xdv.setInt32(xo,offW,false);xo+=4; xdv.setInt32(xo,content/2,false);xo+=4; });
+  return {shp:new Uint8Array(sb), shx:new Uint8Array(xb)};
+}
+
+/* ============ v385 — saved map versions ============
+   Like the Street Tree app's plan versions: "Save this map as a version" keeps the map's settings and a
+   frozen copy of everything drawn on it — compartments with their classes and labels, the outline, the
+   areas, the provincial features and road names on the map, the plots, the notes and arrows — in the
+   account's Drive. "Make again" draws it from that copy, so it comes out as it was even after the layers
+   have changed. Nothing is ever overwritten: each save is a new version with its own id. Only the aerial
+   photo is fetched again (the photo itself is not stored). */
+function mvSave_(){
+  const m=_mmLast; if(!m||!m.data){ toast("Make the map first",true); return; }
+  if(!connected||isOffline()){ toast("Saving a version needs signal — the PDF and JPEG are already on this phone",true); return; }
+  if(!propBackendOk){ toast("The Sheet has not answered yet — try again in a moment",true); propSync_(); return; }
+  if(!propNotesOk){ toast("Saving map versions needs the v385 Code.gs — ask the office to deploy it",true); return; }
+  const d=new Date(), def="Map "+m.kind+" — "+m.tract+" — "+d.toISOString().slice(0,10);
+  const name=prompt("A name for this version:",def); if(name===null) return;
+  const v={v:1, id:"V"+Date.now().toString(36).toUpperCase()+"-"+Math.floor(Math.random()*46656).toString(36).toUpperCase().padStart(3,"0"),
+    name:String(name).trim().slice(0,120)||def, tract:m.tract, kind:m.kind, at:new Date().toISOString(), by:String(cruiserEmail||""), app:APP_BUILD,
+    opts:{kind:m.o.kind, title:m.o.title, pad:m.o.pad, aerial:m.o.aerial, layers:m.o.layers, hatch:m.o.hatch, plots:m.o.plots, scale:m.o.scale, page:m.page, extent:m.o.extent, firm:m.o.firm},
+    view:m.view, imagery:m.imagery, data:m.data};
+  const text=JSON.stringify(v);
+  toast("Saving the version…");
+  sheetPost_({_action:"mapverput", data:text}).then(j=>{
+    if(j&&j.ok) toast("Saved as “"+v.name+"” ("+(j.kb||Math.round(text.length/1024))+" KB)");
+    else toast("The version was not saved: "+((j&&j.error)||"no answer from the Sheet"),true);
+  }).catch(()=>toast("The version was not saved — no answer from the Sheet",true));
+}
+let _mvItems=[];
+function mvOpen_(){
+  const t=_ppTract; if(!t){ toast("Choose the property first",true); return; }
+  showDataSheet_("Saved map versions — "+t, `<div id="mvBody" style="font-size:13px;color:#cfe3d2">Looking…</div>`+
+    `<button type="button" class="btn ghost" style="width:100%;margin-top:10px" onclick="openPropSheet_(_ppTract)">◂ Back to the property</button>`);
+  if(!connected||isOffline()){ const b=$("mvBody"); if(b) b.textContent="Needs signal — saved versions are kept in the account's Drive."; return; }
+  jsonp_("action=mapverlist&tract="+encodeURIComponent(t), r=>{
+    const b=$("mvBody"); if(!b) return;
+    if(!r||!r.ok){ b.textContent=(r&&r.error)||"The Sheet did not answer."; return; }
+    _mvItems=r.items||[];
+    b.innerHTML=_mvItems.length?_mvItems.map((x,i)=>`<div style="border:1px solid #2a4030;border-radius:8px;padding:8px;margin-bottom:6px">`+
+      `<div style="font-size:14px;color:#eafae8"><b>${esc(x.name)}</b></div><div style="font-size:11px;color:#8fae95;margin:2px 0 6px">Map ${x.kind} · ${esc(String(x.at).slice(0,16).replace("T"," "))}${x.by?" · "+esc(x.by):""} · ${x.kb} KB</div>`+
+      `<button type="button" class="btn submit" onclick="mvMake_(${i})">Make again from this version</button></div>`).join("")
+      :`<div style="color:#8fae95">No versions saved for this property yet. Make a map, then "Save this map as a version".</div>`;
+  }, 30000);
+}
+function mvMake_(i){
+  const it=_mvItems[i]; if(!it) return;
+  const b=$("mvBody"); if(b) b.innerHTML=`<div>Fetching “${esc(it.name)}”…</div>`;
+  jsonp_("action=mapverget&id="+encodeURIComponent(it.id), r=>{
+    if(!r||!r.ok||!r.data||!r.data.view||!r.data.data){ toast("That version could not be fetched"+(r&&r.error?": "+r.error:""),true); mvOpen_(); return; }
+    const v=r.data, o=Object.assign({}, MM_DEF[v.kind]||MM_DEF[4], v.opts||{}, {kind:v.kind});
+    mmMake_(v.kind, v.tract, o, v);
+  }, 90000);
 }
 </script>
 </body>
