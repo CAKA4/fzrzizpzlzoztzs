@@ -780,6 +780,7 @@
     <details class="lgroup" id="lgroupProp"><summary>🏠 Property &amp; provincial layers</summary>
       <div class="lgroup-body">
         <div class="map-field"><label>Property shown on the map (picking one zooms to it)</label><select id="propActiveSel" onchange="propPickActive_(this.value)"></select></div>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:13px;color:#e8f0e6"><input type="checkbox" id="ovLblChk" checked onchange="toggleLabels('ov')" style="width:18px;height:18px"> Property names on the zoomed-out map</label>
         <button type="button" onclick="closeLayersMenu();propZoomTo_()">🔍 Zoom to this property</button>
         <button type="button" onclick="closeLayersMenu();toast('Fetching every property…');propSync_(function(ok){ toast(ok?'Every property is up to date on this phone':'Could not reach the Sheet',!ok); },{all:true})">⟳ Sync all properties (normally only the chosen one is fetched)</button>
         <button type="button" onclick="closeLayersMenu();openPropSheet_()">🏠 Property details &amp; MFTIP areas</button>
@@ -1212,7 +1213,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-10 · v399";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-10 · v400";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -6965,11 +6966,12 @@ function toggleLayerVis(k){ layerVis[k]=!(layerVis[k]!==false); try{ STORE&&STOR
   applyLayerVis_(); renderLayerVis_(); updateLayerStatus(); }
 
 // Labels on/off, per label layer (boundary stand names, imported-point labels). Persisted.
-var labelVis={ bound:true, ref:true };
+var labelVis={ bound:true, ref:true, ov:true };
 try{ if(typeof STORE!=="undefined"&&STORE) Object.assign(labelVis, JSON.parse(STORE.getItem("fi_labelvis"))||{}); }catch(e){}
 function toggleLabels(k){ labelVis[k]=!(labelVis[k]!==false); try{ STORE&&STORE.setItem("fi_labelvis",JSON.stringify(labelVis)); }catch(e){}
   if(k==="bound"){ if(typeof renderLabels==="function") renderLabels(); }
   if(k==="ref"){ if(typeof renderRefLabels==="function") renderRefLabels(); }
+  if(k==="ov"){ if(typeof ovLabels_==="function") ovLabels_(); const el=$("ovLblChk"); if(el) el.checked=labelVis.ov!==false; }
   renderLayerVis_(); }
 
 // Zoom/pan the map to fit a single layer.
@@ -11486,7 +11488,11 @@ function lioTogglesHtml_(){
 const MAP_DETAIL_ZOOM=13, OV_LABEL_MAX=40;
 let ovLayer=null, ovLabelLayer=null, _ovDetail=null, _ovExt={};
 function mapDetail_(){ try{ return !fmap || fmap.getZoom()>=MAP_DETAIL_ZOOM; }catch(e){ return true; } }
-function ovExtOf_(t){ const p=propGet_(t)||{}; const key=t+"|"+(Array.isArray(p.boundary)?p.boundary.length:0); if(_ovExt[key]===undefined) _ovExt[key]=propExtent_(t); return _ovExt[key]; }
+/* where a property is: its outline or compartments; failing those (v400), where its plots are */
+function ovPlotExt_(t){ const k=propK_(t); let w=1/0,s_=1/0,e=-1/0,n=-1/0, any=false;
+  (saved||[]).concat(auditPlots||[]).forEach(q=>{ if(!q||propK_(q.TRACT)!==k) return; const la=parseFloat(q.Y), lo=parseFloat(q.X); if(!isFinite(la)||!isFinite(lo)||(la===0&&lo===0)) return; any=true; if(lo<w)w=lo; if(lo>e)e=lo; if(la<s_)s_=la; if(la>n)n=la; });
+  return any?[w,s_,e,n]:null; }
+function ovExtOf_(t){ const p=propGet_(t)||{}; const key=t+"|"+(Array.isArray(p.boundary)?p.boundary.length:0); if(_ovExt[key]===undefined) _ovExt[key]=propExtent_(t)||ovPlotExt_(t); return _ovExt[key]; }
 function ovRender_(){
   if(typeof fmap==="undefined"||!fmap||!window.L) return;
   if(!ovLayer){ try{ ovLayer=L.layerGroup().addTo(fmap); ovLabelLayer=L.layerGroup().addTo(fmap); fmap.on("moveend zoomend",ovLabels_); }catch(e){ return; } }
@@ -11501,10 +11507,12 @@ function ovRender_(){
   ovLabels_();
 }
 /* names of the properties on screen — all of them when zoomed out, the others when zoomed in (the chosen one has its compartments labelled) */
+/* v400: property names only on the zoomed-out overview, and only while the Layers switch is on */
 function ovLabels_(){
   if(!ovLabelLayer||!fmap) return; ovLabelLayer.clearLayers();
-  const b=fmap.getBounds(), detail=mapDetail_(), active=propK_(propActiveTract_()); let n=0;
-  propTracts_().forEach(t=>{ if(n>=OV_LABEL_MAX) return; if(detail&&propK_(t)===active) return; const e=ovExtOf_(t); if(!e) return; const c=[(e[1]+e[3])/2,(e[0]+e[2])/2]; if(!b.contains(c)) return; n++;
+  if(mapDetail_() || (typeof labelVis!=="undefined"&&labelVis.ov===false)) return;
+  const b=fmap.getBounds(); let n=0;
+  propTracts_().forEach(t=>{ if(n>=OV_LABEL_MAX) return; const e=ovExtOf_(t); if(!e) return; const c=[(e[1]+e[3])/2,(e[0]+e[2])/2]; if(!b.contains(c)) return; n++;
     L.marker(c,{interactive:false,keyboard:false,icon:L.divIcon({className:"ov-lbl",html:`<span style="font:700 11px system-ui;color:#fff;background:rgba(198,40,40,.85);padding:2px 6px;border-radius:9px;white-space:nowrap;position:relative;left:-50%">${esc(t)}</span>`,iconSize:[0,0]})}).addTo(ovLabelLayer); });
 }
 /* crossing the detail zoom redraws the chosen property's layers (they draw nothing below it) */
@@ -11566,7 +11574,7 @@ function propZoomTo_(tract, quiet){ const t=tract||propActiveTract_(); if(!t) re
   return false; }
 function propPickActive_(v){ propSetActive_(v); lioCache=null; lioRender_(); lioOnMapOpen_(); if(v){ closeLayersMenu(); propZoomTo_(v,true); try{ propSync_(null,{tract:v}); }catch(e){} } }      // v399: fetch its detail
 function propActiveOptions_(){ const t=propActiveTract_(); return [["","— choose —"]].concat(propTracts_().map(x=>[x,x])).map(o=>`<option value="${esc(o[0])}"${o[0]===t?" selected":""}>${esc(o[1])}</option>`).join(""); }
-function propMenuOpen_(){ const s=$("propActiveSel"); if(s) s.innerHTML=propActiveOptions_(); lioRender_(); }
+function propMenuOpen_(){ const s=$("propActiveSel"); if(s) s.innerHTML=propActiveOptions_(); const c=$("ovLblChk"); if(c) c.checked=labelVis.ov!==false; lioRender_(); }
 /* ============ v381 — find an address ============
    Esri's World Geocoding Service (the same company as the aerial photo), used as a SEARCH — the
    result is shown on the map, never stored, which is the use Esri allows without a key. Ontario
