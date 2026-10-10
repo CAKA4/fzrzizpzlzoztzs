@@ -779,7 +779,9 @@
 
     <details class="lgroup" id="lgroupProp"><summary>🏠 Property &amp; provincial layers</summary>
       <div class="lgroup-body">
-        <div class="map-field"><label>Property shown on the map</label><select id="propActiveSel" onchange="propPickActive_(this.value)"></select></div>
+        <div class="map-field"><label>Property shown on the map (picking one zooms to it)</label><select id="propActiveSel" onchange="propPickActive_(this.value)"></select></div>
+        <button type="button" onclick="closeLayersMenu();propZoomTo_()">🔍 Zoom to this property</button>
+        <button type="button" onclick="closeLayersMenu();toast('Fetching every property…');propSync_(function(ok){ toast(ok?'Every property is up to date on this phone':'Could not reach the Sheet',!ok); },{all:true})">⟳ Sync all properties (normally only the chosen one is fetched)</button>
         <button type="button" onclick="closeLayersMenu();openPropSheet_()">🏠 Property details &amp; MFTIP areas</button>
         <div id="lioStatus" class="ls-muted" style="font-size:11px;line-height:1.4;padding:2px"></div>
         <div id="lioToggles"></div>
@@ -848,7 +850,7 @@
   <!-- v381: find an address -->
   <div id="findBar" style="display:none;position:absolute;left:10px;right:72px;top:calc(64px + env(safe-area-inset-top));z-index:5450;background:rgba(15,30,13,.96);border:1px solid #33623a;border-radius:10px;padding:8px;box-shadow:0 2px 12px rgba(0,0,0,.5)">
     <form onsubmit="event.preventDefault();findGo_()" style="display:flex;gap:6px;margin:0">
-      <input id="findInput" type="search" enterkeyhint="search" autocomplete="off" placeholder="Address, e.g. 4250 Aurora Rd, Stouffville" style="flex:1;min-width:0;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">
+      <input id="findInput" type="search" enterkeyhint="search" autocomplete="off" placeholder="Property name, or an address (4250 Aurora Rd, Stouffville)" style="flex:1;min-width:0;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">
       <button type="submit" style="flex:none;padding:8px 10px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">Go</button>
       <button type="button" onclick="findClose_()" style="flex:none;padding:8px 10px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#cdebcf;font:inherit;font-size:13px">✕</button>
     </form>
@@ -1016,6 +1018,7 @@
         <button type="button" onclick="closeMore();accountPanel_()">🔐 Account — log in or sign out</button>
         <button type="button" onclick="closeMore();appStatus_()">ℹ️ App status — build, storage, connection</button>
         <button type="button" onclick="closeMore();storagePanel_()">🧮 Storage — what&rsquo;s using space, and free it</button>
+        <button type="button" onclick="closeMore();bigStorePanel_()">📦 The phone&rsquo;s big store — photos, layers per property, tiles</button>
         <button type="button" onclick="closeMore();clearSyncedPanel_()">🧹 Clear synced data — plots and photos already safe</button>
         <button type="button" onclick="closeMore();tilesPanel_()">🛰 Offline imagery — download an area, or clear it</button>
         <button type="button" onclick="closeMore();reportPanel_()">✉ Report a problem to the administrator</button>
@@ -1209,7 +1212,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-09 · v396";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-10 · v399";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -4443,6 +4446,31 @@ function storagePanel_(){
     (otherKb?`<div style="display:flex;padding:7px 0;border-bottom:1px solid #1d3320"><div style="flex:1;color:#8fae95;font-size:13px">Settings and lists</div><div style="color:#8fae95;font-size:12px">${otherKb} KB</div><div style="width:44px"></div></div>`:"")+
     `<div style="color:#5a7a62;font-size:11px;margin-top:10px;line-height:1.4">Photos are stored separately and are not counted here. Clearing a layer does not affect any plot you have collected.</div>`);
 }
+/* v399: the phone's big store — photos, the provincial-layer and road-name caches per property, offline photo tiles —
+   measured without loading it all into memory, with a Clear for the caches of properties other than the chosen one. */
+function ldbEach_(fn){ return new Promise(res=>{ ldbOpen().then(db=>{ const tx=db.transaction(LAYER_STORE,"readonly"), rq=tx.objectStore(LAYER_STORE).openCursor(); rq.onsuccess=()=>{ const c=rq.result; if(!c){ db.close(); res(); return; } try{ fn(String(c.key),c.value); }catch(e){} c.continue(); }; rq.onerror=()=>{ db.close(); res(); }; }).catch(()=>res()); }); }
+function ldbDelete_(key){ return new Promise(res=>{ ldbOpen().then(db=>{ const tx=db.transaction(LAYER_STORE,"readwrite"); tx.objectStore(LAYER_STORE).delete(key); tx.oncomplete=()=>{ db.close(); res(true); }; tx.onerror=()=>{ db.close(); res(false); }; }).catch(()=>res(false)); }); }
+function idbStats_(){ return new Promise(res=>{ const st={n:0,bytes:0,waiting:0}; if(!HAS_IDB){ pendingMem.forEach(r=>{ st.n++; st.bytes+=(r.data||"").length*0.75; if(!r.uploaded) st.waiting++; }); res(st); return; }
+  idbOpen().then(db=>{ const tx=db.transaction(PHOTO_STORE,"readonly"), rq=tx.objectStore(PHOTO_STORE).openCursor(); rq.onsuccess=()=>{ const c=rq.result; if(!c){ db.close(); res(st); return; } const r=c.value||{}; st.n++; st.bytes+=(r.data||"").length*0.75; if(!r.uploaded) st.waiting++; c.continue(); }; rq.onerror=()=>{ db.close(); res(st); }; }).catch(()=>res(st)); }); }
+async function bigStorePanel_(){
+  const mb=b=>(b/1048576).toFixed(b<10485760?1:0)+" MB";
+  let est=null; try{ est=await navigator.storage.estimate(); }catch(e){}
+  const ph=await idbStats_();
+  const per={}; let layerBytes=0, props=0;
+  await ldbEach_((k,v)=>{ const m=k.match(/^(lio|rn):(.*)$/); let n=0; try{ n=JSON.stringify(v).length; }catch(e){} if(m){ const t=m[2]; (per[t]=per[t]||{lio:0,rn:0,bytes:0})[m[1]]+=n; per[t].bytes+=n; } else if(k==="props"||k==="propdirty") props+=n; layerBytes+=n; });
+  let tiles=0; try{ tiles=await caches.open(TILE_CACHE_NAME).then(c=>c.keys()).then(k=>k.length); }catch(e){}
+  const active=propK_(propActiveTract_());
+  const rows=Object.keys(per).sort((a,b)=>per[b].bytes-per[a].bytes).map(t=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #1d3320"><div style="flex:1;color:#eafae8;font-size:13px">${esc(propGet_(t)?propGet_(t).tract:t)}${propK_(t)===active?' <span style="color:#8fae95;font-size:11px">(shown)</span>':""}</div><div style="color:#8fae95;font-size:12px">${mb(per[t].bytes)}</div>`+
+    (propK_(t)===active?`<div style="width:44px"></div>`:`<button type="button" onclick="bigStoreClear_('${esc(t)}')" style="padding:5px 9px;border-radius:7px;border:1px solid #7a3a3a;background:#2a1212;color:#e9c9c9;font:inherit;font-size:11px">Clear</button>`)+`</div>`).join("");
+  showInfoSheet_("The phone's big store",
+    (est&&est.quota?`<div style="font-size:20px;font-weight:700;color:#eafae8">${mb(est.usage||0)} used <span style="font-size:13px;font-weight:400;color:#8fae95">· of about ${mb(est.quota)} the browser allows</span></div><div style="height:6px;border-radius:3px;background:#1d3320;margin:8px 0 12px;overflow:hidden"><div style="height:100%;width:${Math.min(100,Math.round((est.usage||0)/est.quota*100))}%;background:#5aa860"></div></div>`:`<div style="color:#8fae95;font-size:12px;margin-bottom:10px">This browser does not say how much room it allows.</div>`)+
+    `<div style="display:flex;padding:6px 0;border-bottom:1px solid #1d3320"><div style="flex:1;color:#eafae8;font-size:13px">Photos — ${ph.n}${ph.waiting?", "+ph.waiting+" waiting to upload":""}</div><div style="color:#8fae95;font-size:12px">${mb(ph.bytes)}</div></div>`+
+    `<div style="display:flex;padding:6px 0;border-bottom:1px solid #1d3320"><div style="flex:1;color:#eafae8;font-size:13px">Offline photo tiles</div><div style="color:#8fae95;font-size:12px">${tiles} tiles</div></div>`+
+    `<div style="display:flex;padding:6px 0;border-bottom:1px solid #1d3320"><div style="flex:1;color:#eafae8;font-size:13px">Property records (all properties)</div><div style="color:#8fae95;font-size:12px">${mb(props)}</div></div>`+
+    `<div style="color:#a9c9b0;font-size:12px;margin:12px 0 4px">Provincial layers and road names saved per property — ${mb(layerBytes-props)}. Clearing one only means it is fetched again when that property is next shown.</div>`+(rows||`<div style="color:#5a7a62;font-size:12px">None saved yet.</div>`)+
+    `<div style="color:#5a7a62;font-size:11px;margin-top:10px;line-height:1.4">Photos already uploaded can be cleared under Clear synced data; tiles under Offline imagery. iPhones can drop this store after a week unused unless the app is on the Home Screen.</div>`);
+}
+async function bigStoreClear_(t){ let n=0; const keys=[]; await ldbEach_(k=>{ const m=k.match(/^(lio|rn):(.*)$/); if(m&&m[2]===t) keys.push(k); }); for(const k of keys){ if(await ldbDelete_(k)) n++; } toast(n?"Cleared the saved layers for "+t:"Nothing to clear"); try{ const tr=propGet_(t); if(tr){ const key=lioKey_(tr.tract); if(lioCache&&propK_(lioCacheTract)===propK_(t)) lioCache=null; } }catch(e){} bigStorePanel_(); }
 function storageClear_(k){
   const row=STORE_LABELS_.find(x=>x[0]===k);
   if(!row) return;
@@ -6649,6 +6677,7 @@ function initMap(){
   fpins=L.layerGroup().addTo(fmap); fauditpins=L.layerGroup().addTo(fmap); fboundLayer=L.layerGroup().addTo(fmap); flabelLayer=L.layerGroup().addTo(fmap); refLayer=L.layerGroup().addTo(fmap); freflabelLayer=L.layerGroup().addTo(fmap); crewLayer=L.layerGroup().addTo(fmap); liveLayer=L.layerGroup().addTo(fmap); crewRouteLayer=L.layerGroup().addTo(fmap); photoLayer=L.layerGroup().addTo(fmap);
   applyLayerVis_();
   fmap.on("moveend zoomend",rememberMapView_);
+  fmap.on("zoomend",()=>{ try{ mapZoomDetail_(); }catch(e){} });      // v399
   fmap.on("click",e=>{ if(typeof rnTap_==="function" && rnTap_(e.latlng)) return;   // v384: placing a typed road label
     if(typeof csTap_==="function" && csTap_(e.latlng)) return;                       // v387: the compartment layer editor
     if(typeof lnTap_==="function" && lnTap_(e.latlng)) return;                       // v389: drawing a line
@@ -10872,14 +10901,22 @@ function propRollFmt_(v){ const d=String(v==null?"":v).replace(/[^0-9]/g,""); if
 const PROP_FIELDS_=["owner","roll","address","lotcon","township","municipality","mpac","labelArea","labelUnit","boundary"];
 const COMP_FIELDS_=["cls","calcHa","manual","unit"];
 function propPick__(o,f){ const r={}; Object.keys(f||{}).forEach(x=>{ if(o&&o[x]!==undefined) r[x]=o[x]; }); return r; }
-function propSync_(then){
-  if(!_propLoaded){ _propReady.then(()=>propSync_(then)); return; }
+/* v399: a sync is for ONE property's detail unless asked for all — the chosen one (opts.tract, else the active one).
+   The property list and compartments always come whole. A backend before v399 ignores ?tract= and sends all;
+   its reply has no scope, and is merged as a whole. Export-all and "Sync all properties" ask for all. */
+let _propSyncedAll=false;
+function propSync_(then, opts){
+  opts=opts||{};
+  if(!_propLoaded){ _propReady.then(()=>propSync_(then,opts)); return; }
   const fin=ok=>{ _propSyncing=false; if(then) try{ then(ok); }catch(e){} };
   if(_propSyncing){ if(then) setTimeout(()=>then(false),0); return; }
   if(!connected||isOffline()){ if(then) then(false); return; }
   _propSyncing=true;
-  jsonp_("action=propget", r=>{
+  const tract=opts.all?"":(opts.tract||propActiveTract_()||"");
+  jsonp_("action=propget"+(tract?"&tract="+encodeURIComponent(tract):""), r=>{
     if(!r||r.ok!==true||!Array.isArray(r.props)){ fin(false); return; }     // a backend older than v380 says nothing
+    const scope=propK_(r.scope||""); if(!scope) _propSyncedAll=true;         // what the reply covers: one property, or everything
+    const other=rec=>scope && propK_(rec&&rec.tract)!==scope;                  // a record of another property: kept as the phone has it
     propBackendOk=true;
     /* v385: a backend older than v385 sends no notes, and would not understand a note being saved (an
        unknown POST there is taken as a plot). Until it says it knows about notes, the phone's notes stay
@@ -10919,11 +10956,13 @@ function propSync_(then){
          placed or changed while it was going. */
       const nn={}, gone={}, mineIds=Object.assign({}, waitN, propDirty.notes||{}); delB.concat(propDirty.noteDel||[]).forEach(id=>{ gone[id]=1; });
       if(propNotesOk){
+        Object.values(PROPS.notes||{}).forEach(n=>{ if(n&&n.id&&other(n)&&!gone[n.id]) nn[n.id]=n; });
         r.notes.forEach(n=>{ if(n&&n.id&&!gone[n.id]) nn[n.id]=n; });
         Object.keys(mineIds).forEach(id=>{ const mine=(PROPS.notes||{})[id]; if(mine&&!gone[id]) nn[id]=mine; });
       }
       const ns={}, goneS={}, mineS=Object.assign({}, waitS, propDirty.shapes||{}); delS.concat(propDirty.shapeDel||[]).forEach(id=>{ goneS[id]=1; });
       if(propShapesOk){
+        Object.values(PROPS.shapes||{}).forEach(c=>{ if(c&&c.id&&other(c)&&!goneS[c.id]) ns[c.id]=c; });
         r.shapes.forEach(c=>{ if(c&&c.id&&!goneS[c.id]) ns[c.id]=c; });
         Object.keys(mineS).forEach(id=>{ const mine=(PROPS.shapes||{})[id]; if(mine&&!goneS[id]) ns[id]=mine; });
       }
@@ -10932,12 +10971,14 @@ function propSync_(then){
       /* v388: the points, merged the same way; the Drive ids of their photos come with them. */
       const nf={}, goneF={}, mineF=Object.assign({}, waitF, propDirty.feats||{}); delF.concat(propDirty.featDel||[]).forEach(id=>{ goneF[id]=1; });
       if(propFeatsOk){
+        Object.values(PROPS.feats||{}).forEach(f=>{ if(f&&f.id&&other(f)&&!goneF[f.id]) nf[f.id]=f; });
         r.feats.forEach(f=>{ if(f&&f.id&&!goneF[f.id]) nf[f.id]=f; });
         Object.keys(mineF).forEach(id=>{ const mine=(PROPS.feats||{})[id]; if(mine&&!goneF[id]) nf[id]=mine; });
       }
       /* v389: the lines, the same way. */
       const nl={}, goneL={}, mineL=Object.assign({}, waitL, propDirty.lines||{}); delL.concat(propDirty.lineDel||[]).forEach(id=>{ goneL[id]=1; });
       if(propLinesOk){
+        Object.values(PROPS.lines||{}).forEach(l=>{ if(l&&l.id&&other(l)&&!goneL[l.id]) nl[l.id]=l; });
         r.lines.forEach(l=>{ if(l&&l.id&&!goneL[l.id]) nl[l.id]=l; });
         Object.keys(mineL).forEach(id=>{ const mine=(PROPS.lines||{})[id]; if(mine&&!goneL[id]) nl[id]=mine; });
       }
@@ -10946,7 +10987,7 @@ function propSync_(then){
       if(propLinesOk) PROPS.lines=nl;
       /* v396: the planned activities, the same way. */
       { const na={}, goneA={}, mineA=Object.assign({}, waitA, propDirty.acts||{}); delA.concat(propDirty.actDel||[]).forEach(id=>{ goneA[id]=1; });
-        if(propActsOk){ r.acts.forEach(a=>{ if(a&&a.id&&!goneA[a.id]) na[a.id]=a; }); Object.keys(mineA).forEach(id=>{ const mine=(PROPS.acts||{})[id]; if(mine&&!goneA[id]) na[id]=mine; }); PROPS.acts=na; } }
+        if(propActsOk){ Object.values(PROPS.acts||{}).forEach(a=>{ if(a&&a.id&&other(a)&&!goneA[a.id]) na[a.id]=a; }); r.acts.forEach(a=>{ if(a&&a.id&&!goneA[a.id]) na[a.id]=a; }); Object.keys(mineA).forEach(id=>{ const mine=(PROPS.acts||{})[id]; if(mine&&!goneA[id]) na[id]=mine; }); PROPS.acts=na; } }
       propPersist_(); try{ mnRender_(); }catch(e){} try{ csRender_(); }catch(e){} try{ ftRender_(); }catch(e){} try{ lnRender_(); }catch(e){} fin(true);
     });
   }, 30000);
@@ -11165,6 +11206,7 @@ function propRender_(keep){
      `<div style="display:flex;gap:8px;margin-bottom:6px"><button type="button" class="btn ghost" style="flex:1" onclick="mmOpen_(4)">🗺 Map 4 — surrounding area</button><button type="button" class="btn ghost" style="flex:1" onclick="mmOpen_(6)">🛰 Map 6 — detailed, aerial</button></div>`+
      `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="mmOpen_(7)">📅 Map 7 — planned activities</button>`+
      `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="pkOpen_()">📦 Map package — maps + appendices in one PDF</button>`+
+     `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="closeDataSheet_();openMap();setTimeout(function(){ propZoomTo_(_ppTract); },80)">🔍 Show this property on the map</button>`+
      `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="mvOpen_()">💾 Saved map versions</button>`+
      `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="exOpen_()">⤓ Export all layers (one zip, shapefiles + GeoJSON)</button>`;
   h+=`<div style="display:flex;gap:8px;margin:12px 0 6px"><button type="button" class="btn submit" style="flex:1" onclick="propSaveForm_()">Save</button>`+
@@ -11436,6 +11478,39 @@ function lioTogglesHtml_(){
     return `<div class="visrow"><span onclick="lioToggle_('${L_.k}')" style="flex:1;cursor:pointer">${esc(L_.label)} <small>(${n})</small></span>`+
       `<span class="visdot ${on?"on":""}" onclick="lioToggle_('${L_.k}')" style="cursor:pointer">${on?"ON":"OFF"}</span></div>`; }).join("");
 }
+/* ============ v399 — what the map shows at each zoom ============
+   Zoomed out (below MAP_DETAIL_ZOOM) the map is for finding your way: every property's outline and name, roads and
+   the photo — none of the chosen property's detail (points, lines, notes, compartment pieces, provincial lines),
+   which would be unreadable there and is the expensive part to draw. Zoomed in, the chosen property's detail comes
+   back. Tapping an outline in the overview picks that property and zooms to it. */
+const MAP_DETAIL_ZOOM=13, OV_LABEL_MAX=40;
+let ovLayer=null, ovLabelLayer=null, _ovDetail=null, _ovExt={};
+function mapDetail_(){ try{ return !fmap || fmap.getZoom()>=MAP_DETAIL_ZOOM; }catch(e){ return true; } }
+function ovExtOf_(t){ const p=propGet_(t)||{}; const key=t+"|"+(Array.isArray(p.boundary)?p.boundary.length:0); if(_ovExt[key]===undefined) _ovExt[key]=propExtent_(t); return _ovExt[key]; }
+function ovRender_(){
+  if(typeof fmap==="undefined"||!fmap||!window.L) return;
+  if(!ovLayer){ try{ ovLayer=L.layerGroup().addTo(fmap); ovLabelLayer=L.layerGroup().addTo(fmap); fmap.on("moveend zoomend",ovLabels_); }catch(e){ return; } }
+  ovLayer.clearLayers(); _ovExt={};
+  const active=propK_(propActiveTract_());
+  propTracts_().forEach(t=>{ const p=propGet_(t)||{}, isA=propK_(t)===active;
+    if(Array.isArray(p.boundary)&&p.boundary.length){ p.boundary.forEach(r=>{ if(!r||r.length<3) return;
+        const pg=L.polygon(r.map(q=>[+q[0],+q[1]]),{color:isA?"#ff1744":"#c62828",weight:isA?3:1.5,opacity:isA?1:.7,fill:true,fillColor:"#c62828",fillOpacity:isA?0:.08,smoothFactor:1.5,bubblingMouseEvents:false});
+        pg.on("click",()=>{ if(!mapDetail_()||!isA) propPickActive_(t); }); pg.addTo(ovLayer); }); }
+    else { const e=ovExtOf_(t); if(!e) return; const c=[(e[1]+e[3])/2,(e[0]+e[2])/2];
+      const m=L.circleMarker(c,{radius:7,color:"#c62828",weight:2,fillColor:"#fff",fillOpacity:.9,bubblingMouseEvents:false}); m.on("click",()=>propPickActive_(t)); m.addTo(ovLayer); } });
+  ovLabels_();
+}
+/* names of the properties on screen — all of them when zoomed out, the others when zoomed in (the chosen one has its compartments labelled) */
+function ovLabels_(){
+  if(!ovLabelLayer||!fmap) return; ovLabelLayer.clearLayers();
+  const b=fmap.getBounds(), detail=mapDetail_(), active=propK_(propActiveTract_()); let n=0;
+  propTracts_().forEach(t=>{ if(n>=OV_LABEL_MAX) return; if(detail&&propK_(t)===active) return; const e=ovExtOf_(t); if(!e) return; const c=[(e[1]+e[3])/2,(e[0]+e[2])/2]; if(!b.contains(c)) return; n++;
+    L.marker(c,{interactive:false,keyboard:false,icon:L.divIcon({className:"ov-lbl",html:`<span style="font:700 11px system-ui;color:#fff;background:rgba(198,40,40,.85);padding:2px 6px;border-radius:9px;white-space:nowrap;position:relative;left:-50%">${esc(t)}</span>`,iconSize:[0,0]})}).addTo(ovLabelLayer); });
+}
+/* crossing the detail zoom redraws the chosen property's layers (they draw nothing below it) */
+function mapZoomDetail_(){ const d=mapDetail_(); if(_ovDetail===d) return; _ovDetail=d;
+  try{ mnRender_(); }catch(e){} try{ csRender_(); }catch(e){} try{ ftRender_(); }catch(e){} try{ lnRender_(); }catch(e){} try{ lioLayerVis_(); }catch(e){} try{ ovLabels_(); }catch(e){} }
+function lioLayerVis_(){ if(!lioLayer||!fmap) return; const d=mapDetail_(); try{ const pane=fmap.getPane("lioPane"); if(pane) pane.style.display=d?"":"none"; }catch(e){} }
 function lioRender_(){
   const box=$("lioToggles"); if(box) box.innerHTML=lioTogglesHtml_();
   const pt=$("propActiveName"); if(pt) pt.textContent=propActiveTract_()||"none chosen";
@@ -11457,7 +11532,8 @@ function lioRender_(){
     at.style.cssText="position:absolute;left:6px;bottom:calc(4px + env(safe-area-inset-bottom));z-index:900;font:10px system-ui;color:#fff;background:rgba(0,0,0,.45);padding:2px 5px;border-radius:4px;pointer-events:none;max-width:70%";
     at.textContent=LIO_ATTRIB; mv.appendChild(at); } }
   if(at) at.style.display=any?"block":"none";
-  lioLabels_();
+  lioLabels_(); lioLayerVis_();
+  try{ ovRender_(); }catch(e){}
   try{ mnRender_(); }catch(e){}
   try{ csRender_(); }catch(e){}
   try{ ftRender_(); }catch(e){}
@@ -11483,7 +11559,12 @@ function lioOnMapOpen_(){
   ldbGet(lioKey_(t)).then(c=>{ if(c&&c.layers){ lioUse_(t,c); } go(); }).catch(go);
   if(!propBackendOk && connected && !isOffline()) propSync_(ok=>{ if(ok) lioRender_(); });
 }
-function propPickActive_(v){ propSetActive_(v); lioCache=null; lioRender_(); lioOnMapOpen_(); }
+/* v397: picking a property in the Layers menu zooms the map to it (Chris, 2026-10-09); a button does the same again. */
+function propZoomTo_(tract, quiet){ const t=tract||propActiveTract_(); if(!t) return false; const e=propExtent_(t);
+  if(!e){ if(!quiet) toast("No outline or compartments for "+t+" yet — nothing to zoom to",true); return false; }
+  try{ if(typeof fmap!=="undefined"&&fmap&&window.L){ fmap.fitBounds(L.latLngBounds([[e[1],e[0]],[e[3],e[2]]]),{padding:[30,30],maxZoom:17}); return true; } }catch(err){}
+  return false; }
+function propPickActive_(v){ propSetActive_(v); lioCache=null; lioRender_(); lioOnMapOpen_(); if(v){ closeLayersMenu(); propZoomTo_(v,true); try{ propSync_(null,{tract:v}); }catch(e){} } }      // v399: fetch its detail
 function propActiveOptions_(){ const t=propActiveTract_(); return [["","— choose —"]].concat(propTracts_().map(x=>[x,x])).map(o=>`<option value="${esc(o[0])}"${o[0]===t?" selected":""}>${esc(o[1])}</option>`).join(""); }
 function propMenuOpen_(){ const s=$("propActiveSel"); if(s) s.innerHTML=propActiveOptions_(); lioRender_(); }
 /* ============ v381 — find an address ============
@@ -11506,26 +11587,36 @@ function findUrl_(q){
    needs to stand further back. */
 function findZoom_(t){ t=String(t||""); if(/PointAddress|Subaddress|StreetAddress|StreetInt|POI/i.test(t)) return 17;
   if(/StreetName|Postal/i.test(t)) return 15; if(/Locality|Neighborhood|District/i.test(t)) return 13; return 11; }
+/* v398: the Find bar knows the properties too. Typed text that matches a property (any part of its name, or its
+   owner) lists it first, works with no signal, and picking it makes it the property shown and zooms to it. One
+   clear match goes straight there. (Chris, 2026-10-10.) */
+function findProps_(q){ const k=propK_(q); if(!k) return []; const list=propTracts_().map(t=>{ const p=propGet_(t)||{}; return {t, owner:String(p.owner||""), ext:propExtent_(t)}; });
+  return list.filter(x=>propK_(x.t).indexOf(k)>=0 || (x.owner&&propK_(x.owner).indexOf(k)>=0)).sort((a,b)=>(propK_(a.t).indexOf(k)===0?0:1)-(propK_(b.t).indexOf(k)===0?0:1)||a.t.localeCompare(b.t)).slice(0,6); }
+function findPickProp_(t){ propSetActive_(t); try{ lioCache=null; lioRender_(); lioOnMapOpen_(); }catch(e){} const z=propZoomTo_(t); findMsg_(z?"Showing "+t:t+" has no outline or compartments to zoom to yet"); if(z) setTimeout(findClose_,600); }
 function findGo_(){
   const i=$("findInput"), q=String((i&&i.value)||"").trim();
-  if(q.length<3){ findMsg_("Type an address — at least the street and town."); return; }
-  if(isOffline()){ findMsg_("Finding an address needs signal. The map itself still works."); return; }
-  const seq=++_findSeq; findMsg_("Searching…");
+  const props=findProps_(q);
+  if(props.length===1 && q.length>=2){ findPickProp_(props[0].t); return; }
+  if(q.length<3){ if(props.length){ _findHits=[]; findRender_(props); return; } findMsg_("Type a property name, or an address — at least the street and town."); return; }
+  if(isOffline()){ _findHits=[]; if(props.length){ findRender_(props); return; } findMsg_("Finding an address needs signal — a property name still works. The map itself still works."); return; }
+  if(props.length){ _findHits=[]; findRender_(props); }
+  const seq=++_findSeq; if(!props.length) findMsg_("Searching…");      // the properties stay on screen while the addresses are looked up
   let ctl=null; try{ ctl=new AbortController(); }catch(e){}
   const timer=setTimeout(()=>{ try{ ctl&&ctl.abort(); }catch(e){} if(seq===_findSeq) findMsg_("No answer from the address search — try again in a moment."); },15000);
   fetch(findUrl_(q), ctl?{signal:ctl.signal}:{}).then(r=>r.json()).then(j=>{
     clearTimeout(timer); if(seq!==_findSeq) return;                 // an older search answering late is ignored
-    if(j&&j.error){ findMsg_("The address search said: "+String((j.error&&j.error.message)||"error")); return; }
+    if(j&&j.error){ if(!props.length) findMsg_("The address search said: "+String((j.error&&j.error.message)||"error")); return; }
     _findHits=((j&&j.candidates)||[]).filter(c=>c&&c.location&&isFinite(c.location.x)&&isFinite(c.location.y)&&(c.score==null||c.score>=60)).slice(0,6);
-    if(!_findHits.length){ findMsg_("Nothing found for “"+q+"”. Check the spelling, or add the town."); return; }
-    if(_findHits.length===1 || (_findHits[0].score>=99 && !(_findHits[1]&&_findHits[1].score>=99))) { findPick_(0); return; }
-    findRender_();
+    if(!_findHits.length){ if(props.length) return; findMsg_("Nothing found for “"+q+"”. Check the spelling, or add the town."); return; }
+    if(!props.length && (_findHits.length===1 || (_findHits[0].score>=99 && !(_findHits[1]&&_findHits[1].score>=99)))) { findPick_(0); return; }
+    findRender_(props);
   }).catch(()=>{ clearTimeout(timer); if(seq===_findSeq) findMsg_("Couldn't reach the address search — check the signal and try again."); });
 }
 function findMsg_(m){ const r=$("findResults"); if(r) r.innerHTML=`<div style="color:#cfe3d2;font-size:13px;line-height:1.4;padding:4px 2px">${esc(m)}</div>`; }
-function findRender_(){
+function findRender_(props){
   const r=$("findResults"); if(!r) return;
-  let h=_findHits.map((c,i)=>`<button type="button" onclick="findPick_(${i})" style="display:block;width:100%;text-align:left;padding:9px;margin:0 0 5px;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#e8f0e6;font:inherit;font-size:13px">📍 ${esc(c.address||(c.attributes&&c.attributes.Match_addr)||"")}</button>`).join("");
+  let h=(props||[]).map(x=>`<button type="button" onclick="findPickProp_(${JSON.stringify(x.t).replace(/"/g,"&quot;")})" style="display:block;width:100%;text-align:left;padding:9px;margin:0 0 5px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">🏠 ${esc(x.t)}${x.owner?` <span style="color:#a9c9b0">— ${esc(x.owner)}</span>`:""}${x.ext?"":` <span style="color:#e8c35a;font-size:11px">(nothing to zoom to yet)</span>`}</button>`).join("");
+  h+=_findHits.map((c,i)=>`<button type="button" onclick="findPick_(${i})" style="display:block;width:100%;text-align:left;padding:9px;margin:0 0 5px;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#e8f0e6;font:inherit;font-size:13px">📍 ${esc(c.address||(c.attributes&&c.attributes.Match_addr)||"")}</button>`).join("");
   if(findPin) h+=`<button type="button" onclick="findClearPin_()" style="display:block;width:100%;text-align:left;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#cdebcf;font:inherit;font-size:12px">✕ Remove the search pin</button>`;
   r.innerHTML=h;
 }
@@ -12588,7 +12679,7 @@ function mnDelete_(id){ const n=(PROPS.notes||{})[id]; if(!n) return;
 function mnRender_(){
   if(typeof fmap==="undefined"||!fmap||!window.L) return;
   if(!mnLayer){ try{ mnLayer=L.layerGroup().addTo(fmap); }catch(e){ return; } }
-  mnLayer.clearLayers();
+  mnLayer.clearLayers(); if(!mapDetail_()&&!_mnPlace) return;      // v399
   mnOf_(propActiveTract_()).forEach(a=>{
     const col=a.color||"#D32F2F", fs=Math.max(9,Math.round(mnSizeIn_(a.size)*108));
     if(a.kind==="arrow"){ if(!a.pts||a.pts.length<2) return;
@@ -12759,7 +12850,7 @@ function ftSym_(ctx, kind, x, y, s){ const c=ftCol_(kind);
 function ftRender_(){
   if(typeof fmap==="undefined"||!fmap||!window.L) return;
   if(!ftLayer){ try{ ftLayer=L.layerGroup().addTo(fmap); }catch(e){ return; } }
-  ftLayer.clearLayers();
+  ftLayer.clearLayers(); if(!mapDetail_()) return;      // v399: detail only when zoomed in
   ftOf_(propActiveTract_()).forEach(f=>{ const px=26, lab=ftLabel_(f);
     const m=L.marker([+f.lat,+f.lon],{keyboard:false,icon:L.divIcon({className:"",iconSize:[px,px],iconAnchor:[px/2,px/2],
       html:ftSvg_(f.kind,px)+(lab?`<div style="position:absolute;left:${px+3}px;top:${px/2-8}px;font:600 12px/16px system-ui,sans-serif;color:#111;white-space:nowrap;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 2px #fff">${esc(lab)}</div>`:"")})});
@@ -13209,12 +13300,13 @@ function exOpen_(){
     `<div style="display:flex;gap:8px;margin:14px 0 6px"><button type="button" class="btn submit" style="flex:1" onclick="exGo_()">⤓ Export the zip</button><button type="button" class="btn ghost" style="flex:1" onclick="closeDataSheet_()">Cancel</button></div>`;
   showDataSheet_("Export all layers", h);
 }
-function exGo_(){
+async function exGo_(){
   const picked=[]; document.querySelectorAll(".exT").forEach(c=>{ if(c.checked) picked.push(c.value); });
   if(!picked.length){ toast("Tick at least one property",true); return; }
   if(_exBusy){ toast("An export is already being made",true); return; }
   _exBusy=true;
   try{
+    if(!_propSyncedAll && connected && !isOffline()){ toast("Fetching every property's layers first…"); await new Promise(res=>propSync_(()=>res(),{all:true})); }      // v399
     const {files, counts, skipped}=exBuild_(picked);
     const zip=zipStore_(files), base="FRI_layers_"+(picked.length===1?exSafe_(picked[0]):picked.length+"_properties")+"_"+nowStr().replace(/[: ]/g,"-");
     const blob=new Blob([zip],{type:"application/zip"}), url=URL.createObjectURL(blob), a=document.createElement("a");
@@ -13355,7 +13447,7 @@ function lnLabels_(ctx, V, list, boxes, aerial){
 function lnRender_(){
   if(typeof fmap==="undefined"||!fmap||!window.L) return;
   if(!lnLayer){ try{ lnLayer=L.layerGroup().addTo(fmap); }catch(e){ return; } }
-  lnLayer.clearLayers();
+  lnLayer.clearLayers(); if(!mapDetail_()&&!_lnEd) return;      // v399
   lnOf_(propActiveTract_()).forEach(l=>{ const st=lnSt_(l.kind), w=Math.max(3,Math.round(st.w*260));
     const pts=l.pts.map(p=>[+p[0],+p[1]]);
     if(lnIsArea_(l)){ const pg=L.polygon(pts,{color:st.c,weight:Math.max(2,w-1),opacity:.95,fillColor:st.fill==="wetland"?"#9fd3a8":(l.kind==="area"?"#9a9a9a":st.fill),fillOpacity:.45,bubblingMouseEvents:false,dashArray:st.d.length?st.d.map(d=>d*w).join(" "):null});
@@ -13844,7 +13936,7 @@ const CS_FILL={MFTIP:"#4caf50", CLTIP:"#1e8a3c", INELIGIBLE:"#9e9e9e", "":"#ffd2
 function csRender_(){
   if(typeof fmap==="undefined"||!fmap||typeof L==="undefined") return;
   if(!csLayer){ try{ csLayer=L.layerGroup().addTo(fmap); }catch(e){ return; } }
-  csLayer.clearLayers();
+  csLayer.clearLayers(); if(!mapDetail_()&&!_csEd) return;      // v399
   const t=_csEd?_csEd.tract:propActiveTract_(); if(!t) return;
   const pcs=csOf_(t);
   pcs.forEach(c=>{ const cls=(propComp_(t,c.name)||{}).cls||"", pick=_csEd&&_csEd.pick===c.id;
