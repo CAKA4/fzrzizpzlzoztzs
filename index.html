@@ -794,6 +794,7 @@
         <button type="button" onclick="closeLayersMenu();propZoomTo_()">🔍 Zoom to this property</button>
         <button type="button" onclick="closeLayersMenu();toast('Fetching every property…');propSync_(function(ok){ toast(ok?'Every property is up to date on this phone':'Could not reach the Sheet',!ok); },{all:true})">⟳ Sync all properties (normally only the chosen one is fetched)</button>
         <button type="button" onclick="closeLayersMenu();openPropSheet_()">🏠 Property details &amp; MFTIP areas</button>
+        <button type="button" onclick="closeLayersMenu();cltipOpen_()">🗺 Property outline from the CLTIP viewer…</button>
         <div id="lioStatus" class="ls-muted" style="font-size:11px;line-height:1.4;padding:2px"></div>
         <div id="lioToggles"></div>
         <button type="button" onclick="closeLayersMenu();lioEnsure_(propActiveTract_(),true)">↻ Refresh provincial layers</button>
@@ -1225,7 +1226,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-12 · v403";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-12 · v405";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -11175,7 +11176,8 @@ function propRender_(keep){
      (files.length?sel("ppBndFile",[["","Use a loaded file…"]].concat(files),"",`onchange="propUseFile_(this.value)"`):"")+
      (drawn.length?sel("ppBndDrawn",[["","Use a drawn shape…"]].concat(drawn),"",`onchange="propUseDrawn_(this.value)"`):"")+
      (b.length?`<button type="button" class="btn ghost" onclick="propClearBnd_()">Remove outline</button>`:"")+
-     (propCompsGeo_(t).length?`<button type="button" class="btn ghost" onclick="propAutoOutline_(_ppTract)">⬚ Outline from the compartments</button>`:"")+`</div>`+
+     (propCompsGeo_(t).length?`<button type="button" class="btn ghost" onclick="propAutoOutline_(_ppTract)">⬚ Outline from the compartments</button>`:"")+
+     `<button type="button" class="btn ghost" onclick="cltipOpen_(_ppTract)">🗺 From the CLTIP viewer…</button></div>`+
      (b.length&&p.bndAuto?`<div style="font-size:11px;color:#8fae95;margin-bottom:6px">This outline was made from the compartments and follows them when they change.</div>`:"");
   if(!files.length&&!drawn.length) h+=`<div style="font-size:11px;color:#8fae95;margin-bottom:6px">Load the owner's shapefile (Layers → Load &amp; import → Stand boundaries), or draw the outline with the map's Draw tool, then pick it here.</div>`;
   // compartments
@@ -11283,8 +11285,8 @@ function propSaveForm_(thenSummary){
   try{ lioEnsure_(f.prop.tract,false,true); }catch(e){}
   if(thenSummary) propShowSummary_(f.prop.tract); else propRender_();
 }
-function propBndSet_(rings, what){
-  const t=_ppTract; if(!t) return;
+function propBndSet_(rings, what, tract){
+  const t=tract||_ppTract; if(!t) return;
   if(rings.length>200){ toast("That outline has "+rings.length+" separate parts — more than the Sheet keeps (200). Use a file with just the property's outline.",true); return; }
   // keep it under what one Sheet cell holds: thin evenly, never below the shape's corners count of 4
   let pts=rings.reduce((n,r)=>n+r.length,0); const max=1800;
@@ -11304,6 +11306,49 @@ function propUseDrawn_(i){ if(i==="") return; const pg=(polys||[])[+i]; if(!pg||
   propBndSet_([pg.pts.map(p=>[p[0],p[1]])], pg.name||"the drawn shape"); }
 function propClearBnd_(){ const t=_ppTract; if(!t) return; if(!confirm("Remove the property outline for "+t+"?")) return; try{ const k=propK_(t); if(PROPS.props[k]) delete PROPS.props[k].bndAuto; }catch(e){}
   propSaveLocal_({tract:t, boundary:[]}, null); propRender_(true); try{ lioRender_(); }catch(e){} }
+/* ---------- v405 — the provincial CLTIP viewer as a way to get the property outline ----------
+   Chris's route: trace the parcel in the Ministry's CLTIP Eligible Feature Viewer, Export Drawings, load the
+   export here. The export is read straight into the property outline (propBndSet_) — it is NOT added to the
+   compartment (boundary) files, because a parcel outline is not a compartment. The viewer is behind the
+   Ontario Parcel Licence, which the person accepts there, not here. A file whose projection cannot be read is
+   refused rather than guessed (the viewer's data is in a Lambert projection, where a UTM guess lands far away). */
+const CLTIP_VIEWER="https://www.lioapplications.lrc.gov.on.ca/CLTIP/index.html?viewer=CLTIP.CLTIP&locale=en-CA";
+function cltipOpen_(tract){
+  const t=tract||_ppTract||propActiveTract_()||"";
+  const h=`<div style="line-height:1.55">`+
+    `<p style="margin:0 0 8px">The Ministry's <b>CLTIP Eligible Feature Viewer</b> shows the assessment parcels over the aerial photo. Trace the property there, export the drawing, then load it here as the outline${t?` for <b>${esc(t)}</b>`:""}.</p>`+
+    `<ol style="margin:0 0 8px 18px;padding:0">`+
+    `<li>Open the viewer (it opens in a new tab) and accept its licence if it asks.</li>`+
+    `<li><b>Search</b> by roll number or address to find the parcel.</li>`+
+    `<li>Use <b>Draw</b> to trace the parcel edge, closing the shape.</li>`+
+    `<li><b>Export Drawings</b> as a <b>shapefile</b> (a .zip); save it to this phone.</li>`+
+    `<li>Come back and tap <b>Load the export</b> below.</li></ol>`+
+    `<div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 6px">`+
+    `<a class="btn submit" style="text-decoration:none;display:inline-block" href="${CLTIP_VIEWER}" target="_blank" rel="noopener">🗺 Open the CLTIP viewer</a>`+
+    `<label class="btn ghost" style="display:inline-block;cursor:pointer">⬆ Load the export<input type="file" accept=".zip,.shp,.geojson,.json" style="display:none" onchange="cltipLoad_(this.files&&this.files[0],${JSON.stringify(t)})"></label></div>`+
+    (t?"":`<div style="font-size:12px;color:#e8c35a;margin-bottom:6px">Pick the property first (Layers → Property shown on the map) so the outline has somewhere to go.</div>`)+
+    `<div style="font-size:11px;color:#8fae95">The viewer's parcel data is under the Ontario Parcel Licence Agreement shown there; the export is yours to load. The outline is saved to the Properties tab of the Sheet and shared with the crew. A GeoJSON export also works.</div></div>`;
+  showInfoSheet_("Outline from the CLTIP viewer", h);
+}
+function cltipLoad_(file, tract){
+  if(!file) return; const t=tract||_ppTract||propActiveTract_();
+  if(!t){ toast("Pick the property first",true); return; }
+  const lower=(file.name||"").toLowerCase();
+  const done=gj=>{ const fcs=Array.isArray(gj)?gj:[gj]; const rings=[];
+    for(const fc of fcs){ if(!fc||!fc.features) continue;
+      if(looksProjected_(fc)){ toast("That export has no readable projection (.prj) — export it again as a shapefile with its projection, or as GeoJSON",true); return; }
+      fc.features.forEach(ft=>featPolys_(ft).forEach(pg=>pg.forEach(r=>{ if(r&&r.length>=3) rings.push(r.map(q=>[q[0],q[1]])); }))); }
+    if(!rings.length){ toast("The export has no polygon — trace the parcel as a closed shape, not a line",true); return; }
+    const bad=rings.some(r=>r.some(q=>!(q[0]>41&&q[0]<57&&q[1]>-96&&q[1]<-74)));
+    if(bad){ toast("The export landed outside Ontario — its projection was not read. Export it again with the projection.",true); return; }
+    closeInfoSheet_(); propBndSet_(rings, "the CLTIP viewer export", t);
+    try{ if(_ppTract===t) propRender_(true); }catch(e){} };
+  const fail=e=>toast("Couldn't read the export: "+(e&&e.message||e),true);
+  loadMapLibs().then(()=>{
+    if(/\.(geojson|json)$/.test(lower)) file.text().then(x=>ensureWGS84(JSON.parse(x))).then(done).catch(fail);
+    else if(/\.(zip|shp)$/.test(lower)) file.arrayBuffer().then(b=>shp(b)).then(done).catch(fail);
+    else toast("Load the viewer's shapefile export (.zip) or a GeoJSON",true); }).catch(fail);
+}
 function propSummaryHtml_(s){
   const f2=x=>(Math.round(x*100)/100).toFixed(2), td=`style="text-align:right"`, tdl=`style="text-align:right;padding-right:4px"`;
   const tag=r=>r.adjSrc==="typed"?' <small style="color:#e8c35a">typed</small>':r.adjSrc==="layer"?' <small style="color:#e8c35a">layer</small>':"";
@@ -11880,14 +11925,15 @@ function mmOpts_(kind){ const d=MM_DEF[kind], saved=(function(){ try{ return JSO
     standLabels:saved.standLabels!=null?!!saved.standLabels:false,      /* v395: stand description under each compartment label (Map 6) */
     proj:saved.proj==="merc"?"merc":"utm",      /* v396: UTM (NAD83), as the plan's other maps and shapefiles; Web Mercator kept as a choice */
     acts:!!d.acts, actFrom:saved.actFrom||"", actTo:saved.actTo||"",
-    fillAlpha:(saved.fillAlpha!=null&&isFinite(+saved.fillAlpha))?Math.max(20,Math.min(100,+saved.fillAlpha)):100,      /* v401: how solid the fills print (woodland, water, hatching, Map 7 colours) */      /* v396: Map 7's plan window (blank = this year and the nine after) */
+    fillAlpha:(saved.fillAlpha!=null&&isFinite(+saved.fillAlpha))?Math.max(20,Math.min(100,+saved.fillAlpha)):100,
+    labelScale:(saved.labelScale!=null&&isFinite(+saved.labelScale))?Math.max(50,Math.min(160,+saved.labelScale)):100,      /* v404: compartment label size, % of automatic */      /* v401: how solid the fills print (woodland, water, hatching, Map 7 colours) */      /* v396: Map 7's plan window (blank = this year and the nine after) */
     photoYear:mmPhotoYear_(saved),
     firm:(function(){ try{ return (STORE&&STORE.getItem("fi_mmfirm"))||""; }catch(e){ return ""; } })()}; }
 /* v394: the photo year to print — what was typed for this source on this phone, else the year in the source's name ("York Region 2025"), else blank. */
 function mmPhotoYear_(saved){ let src=null; try{ src=imgSource_(); }catch(e){} const id=src?src.id:"", typed=(saved&&saved.photoYears&&saved.photoYears[id])||""; if(typed) return String(typed);
   const m=String(src?src.name:"").match(/\b(19|20)\d\d\b/); return m?m[0]:""; }
 function mmSaveOpts_(o){ try{ const old=JSON.parse((STORE&&STORE.getItem("fi_mmopts"+o.kind))||"null")||{}, py=Object.assign({},old.photoYears||{}); try{ py[imgSource_().id]=String(o.photoYear||""); }catch(e){}
-  STORE&&STORE.setItem("fi_mmopts"+o.kind,JSON.stringify({layers:o.layers,hatch:o.hatch,plots:o.plots,feats:o.feats,lines:o.lines,names:o.names,inset:o.inset,standLabels:o.standLabels,proj:o.proj,actFrom:o.actFrom,actTo:o.actTo,fillAlpha:o.fillAlpha,photoYears:py,scale:o.scale,page:o.page,extent:o.extent})); STORE&&STORE.setItem("fi_mmfirm",o.firm||""); }catch(e){} }
+  STORE&&STORE.setItem("fi_mmopts"+o.kind,JSON.stringify({layers:o.layers,hatch:o.hatch,plots:o.plots,feats:o.feats,lines:o.lines,names:o.names,inset:o.inset,standLabels:o.standLabels,proj:o.proj,actFrom:o.actFrom,actTo:o.actTo,fillAlpha:o.fillAlpha,labelScale:o.labelScale,photoYears:py,scale:o.scale,page:o.page,extent:o.extent})); STORE&&STORE.setItem("fi_mmfirm",o.firm||""); }catch(e){} }
 /* ---- projection ---- */
 /* v396: UTM, zone from the longitude (17 for most of southern Ontario, 18 east of 78°W), forward and inverse.
    The GPS positions are WGS 84; NAD83 (CSRS) differs by under a metre here, so the map is labelled NAD83 / UTM. */
@@ -12233,7 +12279,8 @@ async function mmRender_(tract, o, onPct, frozen){
   /* v401: every part of a compartment is labelled (the largest with the acres and the stand lines, the others
      with the name); a leader line and its anchor take their room in `boxes`, and a leader is only laid where
      it crosses nothing already placed — so labels no longer sit on each other's points. */
-  const F="Arial, Helvetica, sans-serif", sizes=[34,28,22];
+  /* v404: the sizes are automatic (34 → 28 → 22 px as the compartment allows); "Label size" on the options page scales them */
+  const lsc=Math.max(.5,Math.min(1.6,(o.labelScale||100)/100)), F="Arial, Helvetica, sans-serif", sizes=[34,28,22].map(v=>Math.round(v*lsc)), smallFs=Math.round(22*lsc);
   const segFree=(x0,y0,x1,y1)=>{ const n=Math.max(2,Math.ceil(Math.hypot(x1-x0,y1-y0)/14)); for(let i=0;i<=n;i++){ const x=x0+(x1-x0)*i/n, y=y0+(y1-y0)*i/n; if(boxes.some(a=>x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h)) return false; } return true; };
   const segBoxes=(x0,y0,x1,y1)=>{ const n=Math.max(1,Math.ceil(Math.hypot(x1-x0,y1-y0)/16)); for(let i=0;i<=n;i++){ const x=x0+(x1-x0)*i/n, y=y0+(y1-y0)*i/n; boxes.push({x:x-5,y:y-5,w:10,h:10}); } };
   /* v401: every compartment's anchor point takes its room before any label is placed, so no label lands on a neighbour's point */
@@ -12251,15 +12298,15 @@ async function mmRender_(tract, o, onPct, frozen){
       outer2: for(const fs of sizes){ const t0=box(fs,at.x,at.y), st=Math.max(t0.h,40);
         for(const v of [[0,0],[0,-1],[0,1],[-1,0],[1,0],[-1,-1],[1,-1],[-1,1],[1,1],[0,-2],[0,2],[-2,0],[2,0]]){ const t=box(fs,at.x+v[0]*st,at.y+v[1]*st); if(mmBoxIn_(big,t,8)&&free(t)){ b=t; break outer2; } } }
       let leader=null, lead=null;
-      if(!b){ const small=box(22,at.x,at.y), step=Math.max(small.w,small.h)*0.6;
+      if(!b){ const small=box(smallFs,at.x,at.y), step=Math.max(small.w,small.h)*0.6;
         /* the leader runs from the box edge to the point: a spot is taken only if that line crosses nothing placed */
         const leadOf=t=>{ const cx=t.x+t.w/2, cy=t.y+t.h/2, dx=at.x-cx, dy=at.y-cy, L=Math.hypot(dx,dy)||1; const ex=Math.abs(dx)*t.h>Math.abs(dy)*t.w ? t.w/2/Math.abs(dx)*L : t.h/2/Math.abs(dy)*L; return [cx+dx/L*ex, cy+dy/L*ex]; };
         outer: for(const strict of (outPx.length?[true,false]:[false])) for(let k=1;k<=5;k++) for(const ang of [0,180,90,270,45,135,225,315]){ const r=at.room+k*step, x=at.x+Math.cos(ang*Math.PI/180)*r, y=at.y+Math.sin(ang*Math.PI/180)*r;
-          const t=box(22,x,y); if(!free(t)||!mmBoxOut_(big,t)||(strict&&!mmBoxOut_(outPx,t))) continue; const s0=leadOf(t); if(!segFree(s0[0],s0[1],at.x,at.y)) continue; b=t; leader=true; lead=s0; break outer; }
+          const t=box(smallFs,x,y); if(!free(t)||!mmBoxOut_(big,t)||(strict&&!mmBoxOut_(outPx,t))) continue; const s0=leadOf(t); if(!segFree(s0[0],s0[1],at.x,at.y)) continue; b=t; leader=true; lead=s0; break outer; }
         if(!b){ /* nothing clear enough for a clean leader: the nearest free spot, leader crossing or not */
-          outer3: for(let k=1;k<=5;k++) for(const ang of [0,180,90,270,45,135,225,315]){ const r=at.room+k*step, x=at.x+Math.cos(ang*Math.PI/180)*r, y=at.y+Math.sin(ang*Math.PI/180)*r; const t=box(22,x,y); if(free(t)&&mmBoxOut_(big,t)){ b=t; leader=true; lead=leadOf(t); break outer3; } } }
+          outer3: for(let k=1;k<=5;k++) for(const ang of [0,180,90,270,45,135,225,315]){ const r=at.room+k*step, x=at.x+Math.cos(ang*Math.PI/180)*r, y=at.y+Math.sin(ang*Math.PI/180)*r; const t=box(smallFs,x,y); if(free(t)&&mmBoxOut_(big,t)){ b=t; leader=true; lead=leadOf(t); break outer3; } } }
       }
-      if(!b) b=box(22,at.x,at.y);                                  // nowhere clear: the small label where it is
+      if(!b) b=box(smallFs,at.x,at.y);                             // nowhere clear: the small label where it is
       boxes.push(b);
       if(leader){ segBoxes(lead[0],lead[1],at.x,at.y);
         ctx.beginPath(); ctx.moveTo(lead[0],lead[1]); ctx.lineTo(at.x,at.y); ctx.strokeStyle=bg; ctx.lineWidth=6; ctx.stroke(); ctx.strokeStyle=fg; ctx.lineWidth=2.5; ctx.stroke();
@@ -12527,6 +12574,7 @@ function mmOpen_(kind){
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Scale</div>`+sel("mmScale",[["auto","Fit the property (automatic)"]].concat(MM_SCALES.map(s=>[String(s),"1:"+s.toLocaleString("en-CA")])),o.scale)+
     (kind===7?`<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Plan window (years shown)</div><div style="display:flex;gap:8px"><input id="mmActFrom" type="number" inputmode="numeric" placeholder="${new Date().getFullYear()}" value="${esc(o.actFrom||"")}" style="flex:1;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"><input id="mmActTo" type="number" inputmode="numeric" placeholder="${new Date().getFullYear()+9}" value="${esc(o.actTo||"")}" style="flex:1;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></div><div style="font-size:11px;color:#8fae95;margin:3px 0 6px">${acOf_(t).length} activit${acOf_(t).length===1?"y":"ies"} on record — edit them under Planned activities on the property sheet.</div>`:"")+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Projection</div>`+sel("mmProj",[["utm","UTM (NAD83) — zone from the property; the plan's usual grid"],["merc","Web Mercator — as the phone's map and older saved versions"]],o.proj||"utm")+
+    `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Compartment label size (automatic: 0.17 in, smaller where the compartment is tight)</div>`+sel("mmLabel",[["60","Much smaller (60%)"],["80","Smaller (80%)"],["100","Automatic"],["120","Larger (120%)"],["140","Much larger (140%)"]],String(o.labelScale||100))+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Fill transparency (woodland, water, hatching${kind===7?", activity colours":""})</div>`+sel("mmAlpha",[["100","Solid"],["80","Slightly see-through (80%)"],["60","See-through (60%)"],["40","Faint (40%)"]],String(o.fillAlpha||100))+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Hatching</div>`+sel("mmHatch",[["auto","The smaller class (automatic)"],["ineligible","Not eligible"],["eligible","MFTIP eligible"],["none","None"]],o.hatch)+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Layers</div>`+Object.keys(names).map(chk).join("")+
@@ -12556,7 +12604,7 @@ function mmGo_(kind){
   const pl=v("mmPlots"); if(pl) o.plots=!!pl.checked;
   const ft=v("mmFeats"); if(ft) o.feats=!!ft.checked; const ln=v("mmLines"); if(ln) o.lines=!!ln.checked; const nm=v("mmNames"); if(nm) o.names=!!nm.checked; const se=v("mmSens"); o.sensitive=se?(se.value==="exact"?true:(se.value==="general"?"general":false)):false;
   const f=v("mmFirm"); if(f) o.firm=String(f.value||"").trim().slice(0,60);
-  const py=v("mmPhotoYear"); if(py) o.photoYear=String(py.value||"").trim().slice(0,20); const ins=v("mmInset"); if(ins) o.inset=!!ins.checked; const st=v("mmStand"); if(st) o.standLabels=!!st.checked; const pj=v("mmProj"); if(pj) o.proj=pj.value==="merc"?"merc":"utm"; const al=v("mmAlpha"); if(al) o.fillAlpha=+al.value||100; const af=v("mmActFrom"), at=v("mmActTo"); if(af) o.actFrom=String(af.value||"").trim(); if(at) o.actTo=String(at.value||"").trim();
+  const py=v("mmPhotoYear"); if(py) o.photoYear=String(py.value||"").trim().slice(0,20); const ins=v("mmInset"); if(ins) o.inset=!!ins.checked; const st=v("mmStand"); if(st) o.standLabels=!!st.checked; const pj=v("mmProj"); if(pj) o.proj=pj.value==="merc"?"merc":"utm"; const al=v("mmAlpha"); if(al) o.fillAlpha=+al.value||100; const ls=v("mmLabel"); if(ls) o.labelScale=+ls.value||100; const af=v("mmActFrom"), at=v("mmActTo"); if(af) o.actFrom=String(af.value||"").trim(); if(at) o.actTo=String(at.value||"").trim();
   mmMake_(kind,_ppTract,o);
 }
 /* ============ v384 — road names on Map 4 and Map 6 ============
@@ -14149,7 +14197,7 @@ function mvSave_(){
   const name=prompt("A name for this version:",def); if(name===null) return;
   const v={v:1, id:"V"+Date.now().toString(36).toUpperCase()+"-"+Math.floor(Math.random()*46656).toString(36).toUpperCase().padStart(3,"0"),
     name:String(name).trim().slice(0,120)||def, tract:m.tract, kind:m.kind, at:new Date().toISOString(), by:String(cruiserEmail||""), app:APP_BUILD,
-    opts:{kind:m.o.kind, title:m.o.title, pad:m.o.pad, aerial:m.o.aerial, layers:m.o.layers, hatch:m.o.hatch, plots:m.o.plots, feats:m.o.feats, sensitive:m.o.sensitive==="general"?"general":!!m.o.sensitive, lines:m.o.lines, names:m.o.names!==false, inset:!!m.o.inset, standLabels:!!m.o.standLabels, proj:m.o.proj||"utm", acts:!!m.o.acts, actFrom:m.o.actFrom||"", actTo:m.o.actTo||"", fillAlpha:m.o.fillAlpha||100, photoYear:m.o.photoYear||"", scale:m.o.scale, page:m.page, extent:m.o.extent, firm:m.o.firm},
+    opts:{kind:m.o.kind, title:m.o.title, pad:m.o.pad, aerial:m.o.aerial, layers:m.o.layers, hatch:m.o.hatch, plots:m.o.plots, feats:m.o.feats, sensitive:m.o.sensitive==="general"?"general":!!m.o.sensitive, lines:m.o.lines, names:m.o.names!==false, inset:!!m.o.inset, standLabels:!!m.o.standLabels, proj:m.o.proj||"utm", acts:!!m.o.acts, actFrom:m.o.actFrom||"", actTo:m.o.actTo||"", fillAlpha:m.o.fillAlpha||100, labelScale:m.o.labelScale||100, photoYear:m.o.photoYear||"", scale:m.o.scale, page:m.page, extent:m.o.extent, firm:m.o.firm},
     view:m.view, imagery:m.imagery, data:m.data};
   const text=JSON.stringify(v);
   toast("Saving the version…");
