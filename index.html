@@ -792,6 +792,7 @@
         <div class="map-field"><label>Property shown on the map (picking one zooms to it)</label><select id="propActiveSel" onchange="propPickActive_(this.value)"></select></div>
         <label style="display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:13px;color:#e8f0e6"><input type="checkbox" id="ovLblChk" checked onchange="toggleLabels('ov')" style="width:18px;height:18px"> Property names on the zoomed-out map</label>
         <button type="button" onclick="closeLayersMenu();propZoomTo_()">🔍 Zoom to this property</button>
+        <button type="button" onclick="closeLayersMenu();mapOnlyClear_()">👁 Show all properties (after a Find showed only one)</button>
         <button type="button" onclick="closeLayersMenu();toast('Fetching every property…');propSync_(function(ok){ toast(ok?'Every property is up to date on this phone':'Could not reach the Sheet',!ok); },{all:true})">⟳ Sync all properties (normally only the chosen one is fetched)</button>
         <button type="button" onclick="closeLayersMenu();openPropSheet_()">🏠 Property details &amp; MFTIP areas</button>
         <button type="button" onclick="closeLayersMenu();cltipOpen_()">🗺 Property outline from the CLTIP viewer…</button>
@@ -845,6 +846,7 @@
     <!-- tap-to-place button removed: use "＋ Create inventory plot" (crosshair/GPS) instead; tapping conflicted with selecting polygons -->
     <button class="map-tool" id="toolFind" type="button" onclick="findOpen_()" title="Find an address or a property"><span class="mt-i">🔎</span><span class="mt-l">Find</span></button>
     <button class="map-tool on" id="toolNames" type="button" onclick="namesToggle_()" title="Property names and point symbols on or off"><span class="mt-i">🏷</span><span class="mt-l">Names</span></button>
+    <button class="map-tool" id="toolTract" type="button" onclick="taOpen_()" title="Draw a ring around compartments and give them a tract"><span class="mt-i">⬚</span><span class="mt-l">Tract</span></button>
     <button class="map-tool" id="toolText" type="button" onclick="mnOpen_()" title="Notes and arrows for the maps"><span class="mt-i">✎</span><span class="mt-l">Text</span></button>
     <button class="map-tool" id="toolPoints" type="button" onclick="ftOpen_()" title="Buildings, gates and special features for the maps"><span class="mt-i">📍</span><span class="mt-l">Points</span></button>
     <button class="map-tool" id="toolLines" type="button" onclick="lnOpen_()" title="Trails, roads and streams for the maps"><span class="mt-i">⤳</span><span class="mt-l">Lines</span></button>
@@ -868,6 +870,7 @@
       <button type="button" onclick="findClose_()" style="flex:none;padding:8px 10px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#cdebcf;font:inherit;font-size:13px">✕</button>
     </form>
     <select id="findProp" onchange="if(this.value){ findPickProp_(this.value); this.value=''; }" onfocus="findPropFill_()" style="margin-top:6px;width:100%;font-size:15px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"><option value="">Or pick a property…</option></select>
+    <button type="button" id="findShowAll" onclick="mapOnlyClear_();findClose_()" style="display:none;margin-top:6px;width:100%;padding:8px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">👁 Show all properties again</button>
     <div id="findResults" style="margin-top:6px;max-height:40vh;overflow-y:auto;-webkit-overflow-scrolling:touch"></div>
   </div>
   <div class="map-legend" id="mapLegend">
@@ -1226,7 +1229,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-12 · v405";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-12 · v408";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1480,7 +1483,7 @@ function apiPost_(o, ms){
    Until a readable answer has been seen, saves go the old way (no-cors), so nothing here can make a
    phone that syncs today stop syncing. */
 const POST_REFUSED={};
-const POST_LABEL={linesave:"Saving map lines", linedel:"Deleting map lines", actsave:"Saving planned activities", actdel:"Deleting planned activities", featsave:"Saving map points", featdel:"Deleting map points", shapesave:"Saving the compartment layer", shapedel:"Deleting compartment pieces",notesave:"Saving map notes", notedel:"Deleting map notes", mapverput:"Saving a map version", photo:"Photo upload", mapfile:"Saving files to Drive", layerput:"Adding a shared layer", propsave:"Saving property details", compsave:"Saving compartment details", lioput:"Keeping provincial layers in Drive", liolog:"Reporting a provincial-layer problem"};
+const POST_LABEL={linesave:"Saving map lines", linedel:"Deleting map lines", actsave:"Saving planned activities", actdel:"Deleting planned activities", featsave:"Saving map points", featdel:"Deleting map points", shapesave:"Saving the compartment layer", shapedel:"Deleting compartment pieces",notesave:"Saving map notes", notedel:"Deleting map notes", mapverput:"Saving a map version", photo:"Photo upload", mapfile:"Saving files to Drive", layerput:"Adding a shared layer", propsave:"Saving property details", compsave:"Saving compartment details", compmove:"Moving compartments to another tract", lioput:"Keeping provincial layers in Drive", liolog:"Reporting a provincial-layer problem"};
 let authLimited=false;       // an account other than the administrator's: summaries, emails, exports and AI are not open to it yet
 function isLimited_(){ return !!((authToken&&authLimited) || (!authToken&&limitedPhone_())); }
 /* v379: on an account other than the office's, mail from the app goes to the address on the user's
@@ -5333,8 +5336,10 @@ function renderCrewPlots(rows, silent){
                || onDevice.has(ptKey_(null,r.stand,r.plot,parseFloat(r.lat),parseFloat(r.lon)));
   const labelled = plotLabelField!=="none";
   const pts=[];
+  const onlyK=(typeof mapOnly!=="undefined"&&mapOnly)?propK_(mapOnly):"";     // v406: one property only (rows without a tract still show)
   (rows||[]).forEach(r=>{ const lat=parseFloat(r.lat), lon=parseFloat(r.lon);
     if(!isFinite(lat)||!isFinite(lon)||(lat===0&&lon===0)) return;
+    if(onlyK&&String(r.tract||"").trim()&&propK_(r.tract)!==onlyK) return;
     const who=((r.cruiser||"").trim()) || shortEmail_(r.email) || "Unknown";
     pts.push(Object.assign({}, r, { lat, lon, who, t:Date.parse(String(r.date||"").replace(" ","T"))||0,
                when:String(r.date||"").replace("T"," ").slice(0,16) })); });
@@ -6693,6 +6698,7 @@ function initMap(){
   fmap.on("moveend zoomend",rememberMapView_);
   fmap.on("zoomend",()=>{ try{ mapZoomDetail_(); }catch(e){} });      // v399
   fmap.on("click",e=>{ if(typeof rnTap_==="function" && rnTap_(e.latlng)) return;   // v384: placing a typed road label
+    if(typeof taTap_==="function" && taTap_(e.latlng)) return;                       // v407: ringing compartments to give them a tract
     if(typeof csTap_==="function" && csTap_(e.latlng)) return;                       // v387: the compartment layer editor
     if(typeof lnTap_==="function" && lnTap_(e.latlng)) return;                       // v389: drawing a line
     if(typeof mnTap_==="function" && mnTap_(e.latlng)) return;                       // v385: placing a note or an arrow
@@ -6910,6 +6916,7 @@ function loadBoundaries(file){
     boundFiles.push(bf);
     rebuildBound();
     try{ setTimeout(()=>{ propTracts_().forEach(t=>{ try{ propAutoOutline_(t, true); }catch(e){} }); },50); }catch(e){}      // v403: outlines for properties that have none
+    try{ setTimeout(()=>{ try{ csAutoFromFile_(bf); }catch(e){} },150); }catch(e){}      // v408: the compartments go to the Sheet as pieces
     /* v372: the crew's field choices for this file, if it is the only one loaded (the copy this phone last fetched; a fresh one is asked for below). */
     const tookShared=applySharedFields_();
     pickStandField(); cacheBoundaries(); renderBoundaries(); renderLayerList(); updateLayerStatus(); fitBoundaries(fc.features);
@@ -6920,6 +6927,35 @@ function loadBoundaries(file){
   else if(lower.endsWith(".shp")||lower.endsWith(".zip")){ file.arrayBuffer().then(buf=>shp(buf)).then(ensureWGS84).then(add).catch(e=>toast("Shapefile error: "+e.message,true)); }
   else { toast("Use a .zip, .shp, .geojson or .json file",true); }
 }
+/* v408 — the Sheet is where compartments live (Chris, 2026-10-12): a file's compartments become pieces of the compartment
+   layer for their tract as soon as the file is loaded, so every phone that syncs the property gets them. A tract that
+   already has pieces on the Sheet is asked: replace them with the file's, or keep them. A file with no tract field goes
+   to the property shown on the map (within its outline, as csFromFile_ does). The file itself stays on this phone as
+   the source; on the map its compartments give way to the pieces (renderBoundaries). */
+function csAutoFromFile_(bf){
+  if(typeof csFromFile_!=="function") return 0;
+  if(!standField){ toast("Pick the Stand name field under Layers — then the compartments can go to the Sheet (Property details → Start from the loaded file)",true); return 0; }
+  const tr={}, cnt={}; (bf&&bf.features||[]).forEach(f=>{ const t=featTract_(f); if(!t) return; tr[propK_(t)]=t; cnt[propK_(t)]=(cnt[propK_(t)]||0)+1; });
+  let list=Object.values(tr);
+  if(!list.length){ const a=propActiveTract_(); if(a){ list=[a]; cnt[propK_(a)]=(bf.features||[]).length; } }
+  if(!list.length){ toast("Set a Tract name under Layers, or pick the property shown on the map, so these compartments can go to the Sheet",true); return 0; }
+  let n=0, kept=[];
+  list.forEach(t=>{ addTract(t); const have=csOf_(t).length;
+    if(have && !confirm(t+" already has "+have+" compartment piece"+(have===1?"":"s")+" on the Sheet.\n\nRebuild them from the loaded files (this one has "+(cnt[propK_(t)]||0)+" compartment"+(cnt[propK_(t)]===1?"":"s")+" for it)? Cancel keeps the ones on the Sheet.")){ kept.push(t); return; }
+    if(csFromFile_(t,{noConfirm:true,label:"loaded from "+(bf.name||"a file")})) n++; });
+  try{ renderBoundaries(); }catch(e){}
+  if(kept.length) toast("Kept the Sheet's pieces for "+kept.join(", ")+" — the file's compartments for "+(kept.length===1?"it":"them")+" are on this phone only");
+  return n; }
+/* a drawn area becomes a piece of the shown property's compartment layer the moment it is finished */
+function csFromDrawn_(pg){
+  const t=String((pg&&pg.tract)||propActiveTract_()||"").trim(); if(!t||!pg||!pg.pts||pg.pts.length<3) return false;
+  const rings=[cgDedupe_(pg.pts.map(q=>cgLL_([+q[0],+q[1]])))]; if(rings[0].length<3) return false;
+  try{ const P=cgProj_(rings[0][0][0],rings[0][0][1]); if(!cgSound_([{rings}],null,P)){ toast("That area crosses itself — kept as a drawn area on this phone only",true); return false; } }catch(e){}
+  addTract(t); const taken=csOf_(t).map(c=>c.name), used=n=>taken.some(x=>propK_(x)===propK_(n)); let name=String(pg.name||"").trim();
+  if(!name||used(name)){ if(!name||/^P-\d+$/.test(name)){ for(let i=1;;i++){ if(!used("P-"+i)){ name="P-"+i; break; } } } else name=csNextName_(t,taken); }   // a drawn area's default name counts the pieces too
+  csCommit_(t, csOf_(t).concat([{id:null,name,rings}]), "drew "+name);
+  const i=polys.indexOf(pg); if(i>=0){ polys.splice(i,1); try{ persistPoly(); }catch(e){} }
+  toast(name+" saved as a compartment of "+t+" — it goes to the Sheet"); return true; }
 function removeBoundFile(id){
   boundFiles=boundFiles.filter(f=>f.id!==id); rebuildBound();
   cacheBoundaries(); renderBoundaries(); renderLayerList(); updateLayerStatus(); updateInStand();
@@ -6985,7 +7021,7 @@ try{ if(typeof STORE!=="undefined"&&STORE) Object.assign(labelVis, JSON.parse(ST
 function toggleLabels(k){ labelVis[k]=!(labelVis[k]!==false); try{ STORE&&STORE.setItem("fi_labelvis",JSON.stringify(labelVis)); }catch(e){}
   if(k==="bound"){ if(typeof renderLabels==="function") renderLabels(); }
   if(k==="ref"){ if(typeof renderRefLabels==="function") renderRefLabels(); }
-  if(k==="ov"){ if(typeof ovLabels_==="function") ovLabels_(); const el=$("ovLblChk"); if(el) el.checked=labelVis.ov!==false; }
+  if(k==="ov"){ if(typeof ovRender_==="function") ovRender_(); else if(typeof ovLabels_==="function") ovLabels_(); const el=$("ovLblChk"); if(el) el.checked=labelVis.ov!==false; }
   if(k==="pts"){ if(typeof ftRender_==="function") ftRender_(); }
   namesBtn_();
   renderLayerVis_(); }
@@ -7220,7 +7256,12 @@ let boundLabels=[];                        // [{lat,lng,name}] — cheap data, n
 function renderBoundaries(){
   if(!fboundLayer) return; fboundLayer.clearLayers(); flabelLayer.clearLayers(); boundLabels=[];
   if(!BOUND) return;
+  /* v406: one property only — a file's compartments by its tract field; untagged ones only when no feature carries the property */
+  const only=(typeof mapOnly!=="undefined"&&mapOnly)?propK_(mapOnly):"", tagged=only&&BOUND.features.some(f=>propK_(featTract_(f))===only);
+  const hasPieces={}, hp=t=>{ const k=propK_(t); if(!k) return false; if(hasPieces[k]===undefined){ try{ hasPieces[k]=typeof csOf_==="function"&&csOf_(t).length>0; }catch(e){ hasPieces[k]=false; } } return hasPieces[k]; };
   BOUND.features.forEach(f=>{
+    if(only){ const ft=propK_(featTract_(f)); if(ft?ft!==only:tagged) return; }
+    if(hp(featTract_(f))) return;      // v408: this tract's compartments are its pieces on the Sheet now
     const polys=f.geometry.type==="Polygon"?[f.geometry.coordinates]:f.geometry.coordinates;
     const name=standField?f.properties[standField]:"";
     polys.forEach(rings=>{
@@ -7895,7 +7936,8 @@ function renderMapPins(){
   const z = fmap ? fmap.getZoom() : 0;
   const detail = z >= LABEL_ZOOM_MIN;                      // labels and full markers only up close
   const view = (detail && fmap) ? fmap.getBounds().pad(0.25) : null;
-  saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)) return;
+  const onlyK=(typeof mapOnly!=="undefined"&&mapOnly)?propK_(mapOnly):"", onlyP=p=>!onlyK||!String(p.TRACT||"").trim()||propK_(p.TRACT)===onlyK;   // v406
+  saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)||!onlyP(p)) return;
     const hit=_findHit_(p); const needs=plotNeedsWork_(p,false);
     // a plot you have done is the thing that matters here — draw it bigger than everything else
     /* Colour by who collected it. After a restore the device holds the whole crew's work, and drawing
@@ -7914,7 +7956,7 @@ function renderMapPins(){
   });
   // Imported reference plots. Blue = not yet visited; GREEN with a ✓ = edited/completed in the field,
   // so the whole crew can see progress at a glance. Amber = possible duplicate of an existing plot.
-  auditPlots.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)) return;
+  auditPlots.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)||!onlyP(p)) return;
     const done=!!p._done;
     const col = done ? "#37c26b" : (p._dup ? "#e8b84b" : "#4aa3e0");
     const hit=_findHit_(p); const needs=plotNeedsWork_(p,true);
@@ -9700,8 +9742,10 @@ function savePoly(){ if(polyPts.length<3){ toast("Need 3+ points to save an area
   const traced=maybeTrace_();
   const sid=($("STANDID")&&$("STANDID").value && $("STANDID").value!==ADD_STAND) ? $("STANDID").value : "";
   const def= sid || ("P-"+(polys.length+1)); let name=prompt("Stand ID / name for this area:",def); if(name===null) return; name=(name||"").trim()||def;
-  polys.push({name:name, tract:_drawTract||"", pts:polyPts.slice()}); polyPts=[]; polyPtsSnap=[]; persistPoly(); drawPoly(); updatePoly(); updateLayerStatus(); toast(`Saved ${name}${_drawTract?" · "+_drawTract:""}${traced?" · closed on boundary":""}`); }
-function finishPoly(){ if(polyPts.length>=3){ const traced=maybeTrace_(); const def="P-"+(polys.length+1); polys.push({name:def, tract:_drawTract||"", pts:polyPts.slice()}); polyPts=[]; polyPtsSnap=[]; persistPoly(); toast(`Saved ${def}${_drawTract?" · "+_drawTract:""}${traced?" · closed on boundary":""}`); }
+  const pgNew={name:name, tract:_drawTract||"", pts:polyPts.slice()}; polys.push(pgNew); polyPts=[]; polyPtsSnap=[]; persistPoly(); drawPoly(); updatePoly(); updateLayerStatus(); toast(`Saved ${name}${_drawTract?" · "+_drawTract:""}${traced?" · closed on boundary":""}`);
+  try{ if(typeof csFromDrawn_==="function" && csFromDrawn_(pgNew)) drawPoly(); }catch(e){} }      // v408
+function finishPoly(){ if(polyPts.length>=3){ const traced=maybeTrace_(); const def="P-"+(polys.length+1); const pgNew={name:def, tract:_drawTract||"", pts:polyPts.slice()}; polys.push(pgNew); polyPts=[]; polyPtsSnap=[]; persistPoly(); toast(`Saved ${def}${_drawTract?" · "+_drawTract:""}${traced?" · closed on boundary":""}`);
+    try{ if(typeof csFromDrawn_==="function") csFromDrawn_(pgNew); }catch(e){} }      // v408
   polyMode=false; $("toolPoly").classList.remove("on"); fmap.getContainer().style.cursor=""; $("polyBar").style.display="none"; syncMeasuringClass_(); drawPoly(); updateLayerStatus(); }
 function clearPoly(){
   if(polyPts.length){ polyPts=[]; polyPtsSnap=[]; persistPoly(); drawPoly(); updatePoly(); updateLayerStatus(); toast("Current outline cleared"); return; }
@@ -10741,7 +10785,7 @@ const HA_AC=2.4710538146716534;
 const MFTIP_CLASSES=[["","— not set —"],["MFTIP","MFTIP eligible"],["CLTIP","CLTIP"],["INELIGIBLE","Not eligible"]];
 const PROP_CLS_LABEL={MFTIP:"MFTIP eligible",CLTIP:"CLTIP",INELIGIBLE:"Not eligible","":"Not classified"};
 let PROPS={props:{},comps:{},lio:{},notes:{},shapes:{}};          // props[tractKey], comps[tractKey][nameKey], lio[tractKey] = Drive copy info
-let propDirty={props:{},comps:{},notes:{},noteDel:[],shapes:{},shapeDel:[],feats:{},featDel:[],lines:{},lineDel:[],acts:{},actDel:[]};              // waiting for the Sheet
+let propDirty={props:{},comps:{},notes:{},noteDel:[],shapes:{},shapeDel:[],feats:{},featDel:[],lines:{},lineDel:[],acts:{},actDel:[],compMove:[]};              // waiting for the Sheet
 let propBackendOk=false, propNotesOk=false, propShapesOk=false, propFeatsOk=false, propLinesOk=false, propActsOk=false, _propPushP=null, _propSyncing=false, _propLoaded=false, _propReady=null;
 /* The same key the Sheet uses: spaces collapsed, case ignored. */
 function propK_(s){ return String(s==null?"":s).replace(/\s+/g," ").trim().toLowerCase(); }
@@ -11035,6 +11079,10 @@ function propPush1_(){
       if(j&&j.ok&&j.prop){ if(propDirty.props[k]&&propDirty.props[k].t===d.t) delete propDirty.props[k]; }
       else if(j&&j.ok===false&&j.error){ toast("The Sheet did not save the property: "+j.error,true); }
     }).catch(()=>{})); });
+  /* v407: compartments given another tract — the Sheet moves their rows (compartments, activities, pieces) */
+  (propDirty.compMove||[]).slice().forEach(mv=>{ jobs.push(sheetPost_({_action:"compmove", email:String(cruiserEmail||""), from:mv.from, to:mv.to, names:mv.names}).then(j=>{
+      if(j&&j.ok) propDirty.compMove=(propDirty.compMove||[]).filter(x=>x!==mv);
+      else if(j&&j.ok===false&&j.error) toast("The Sheet did not move the compartments: "+j.error,true); }).catch(()=>{})); });
   Object.keys(propDirty.comps).forEach(k=>{ const t=PROPS.comps[k]||{}, w=propDirty.comps[k]||{};
     const names=Object.keys(w).filter(n=>t[n]); if(!names.length){ delete propDirty.comps[k]; return; }
     const stamp=JSON.stringify(w);
@@ -11559,20 +11607,34 @@ function ovPlotExt_(t){ const k=propK_(t); let w=1/0,s_=1/0,e=-1/0,n=-1/0, any=f
   (saved||[]).concat(auditPlots||[]).forEach(q=>{ if(!q||propK_(q.TRACT)!==k) return; const la=parseFloat(q.Y), lo=parseFloat(q.X); if(!isFinite(la)||!isFinite(lo)||(la===0&&lo===0)) return; any=true; if(lo<w)w=lo; if(lo>e)e=lo; if(la<s_)s_=la; if(la>n)n=la; });
   return any?[w,s_,e,n]:null; }
 function ovExtOf_(t){ const p=propGet_(t)||{}; const key=t+"|"+(Array.isArray(p.boundary)?p.boundary.length:0); if(_ovExt[key]===undefined) _ovExt[key]=propExtent_(t)||ovPlotExt_(t); return _ovExt[key]; }
+/* v406 — one property only (Chris, 2026-10-12): a property found through the Find bar is the only one on the map —
+   no other property's outline, dot, name, compartments or plots — until "Show all". Remembered on the phone. */
+var mapOnly=""; try{ mapOnly=String((typeof STORE!=="undefined"&&STORE&&STORE.getItem("fi_maponly"))||""); }catch(e){}
+function mapOnlyIs_(t){ return !mapOnly || propK_(t)===propK_(mapOnly); }      // "" (no filter) shows everything
+function mapOnlySet_(t){ mapOnly=String(t||""); try{ STORE&&STORE.setItem("fi_maponly",mapOnly); }catch(e){} mapOnlyApply_(); }
+function mapOnlyClear_(){ if(!mapOnly) return; mapOnlySet_(""); toast("Showing every property"); }
+function mapOnlyApply_(){ try{ renderBoundaries(); }catch(e){} try{ renderMapPins(); }catch(e){} try{ if(crewShown&&crewData.length) renderCrewPlots(crewData,true); }catch(e){}
+  try{ lioRender_(); }catch(e){} mapOnlyChip_(); try{ const b=$("findShowAll"); if(b) b.style.display=mapOnly?"":"none"; }catch(e){} }
+function mapOnlyChip_(){ let c=$("mapOnlyChip"); const mv=$("mapView"); if(!c&&mv){ c=document.createElement("div"); c.id="mapOnlyChip";
+    c.style.cssText="position:absolute;left:6px;bottom:calc(26px + env(safe-area-inset-bottom));z-index:900;font:12px system-ui;color:#fff;background:rgba(15,30,13,.92);border:1px solid #33623a;padding:5px 8px;border-radius:9px;display:flex;gap:8px;align-items:center;max-width:80%";
+    mv.appendChild(c); }
+  if(!c) return; if(!mapOnly){ c.style.display="none"; return; }
+  c.style.display="flex"; c.innerHTML=`<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Only <b>${esc(mapOnly)}</b></span><button type="button" onclick="mapOnlyClear_()" style="flex:none;padding:3px 8px;border-radius:7px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:12px">Show all</button>`; }
 /* v403: one rail button for the property names and the point symbols — both on, or both off */
 function namesToggle_(){ const on=!(labelVis.ov!==false && labelVis.pts!==false); labelVis.ov=on; labelVis.pts=on; try{ STORE&&STORE.setItem("fi_labelvis",JSON.stringify(labelVis)); }catch(e){}
-  try{ ovLabels_(); }catch(e){} try{ ftRender_(); }catch(e){} const el=$("ovLblChk"); if(el) el.checked=on; namesBtn_(); toast(on?"Property names and points shown":"Property names and points hidden"); }
+  try{ ovRender_(); }catch(e){} try{ ftRender_(); }catch(e){} const el=$("ovLblChk"); if(el) el.checked=on; namesBtn_(); toast(on?"Property names and points shown":"Property names and points hidden"); }
 function namesBtn_(){ const b=$("toolNames"); if(b) b.classList.toggle("on", labelVis.ov!==false && labelVis.pts!==false); }
 function ovRender_(){
   if(typeof fmap==="undefined"||!fmap||!window.L) return;
   if(!ovLayer){ try{ ovLayer=L.layerGroup().addTo(fmap); ovLabelLayer=L.layerGroup().addTo(fmap); fmap.on("moveend zoomend",ovLabels_); }catch(e){ return; } }
   ovLayer.clearLayers(); _ovExt={};
   const active=propK_(propActiveTract_());
-  propTracts_().forEach(t=>{ const p=propGet_(t)||{}, isA=propK_(t)===active;
+  const namesOn=!(typeof labelVis!=="undefined"&&labelVis.ov===false);
+  propTracts_().forEach(t=>{ const p=propGet_(t)||{}, isA=propK_(t)===active; if(!mapOnlyIs_(t)) return;      // v406: one property only
     if(Array.isArray(p.boundary)&&p.boundary.length){ p.boundary.forEach(r=>{ if(!r||r.length<3) return;
         const pg=L.polygon(r.map(q=>[+q[0],+q[1]]),{color:isA?MAP_STYLE.propColor:"#c62828",weight:isA?MAP_STYLE.propWidth:1.5,opacity:isA?1:.7,fill:true,fillColor:"#c62828",fillOpacity:isA?0:.08,smoothFactor:1.5,bubblingMouseEvents:false});
         pg.on("click",()=>{ if(!mapDetail_()||!isA) propPickActive_(t); }); pg.addTo(ovLayer); }); }
-    else { const e=ovExtOf_(t); if(!e) return; const c=[(e[1]+e[3])/2,(e[0]+e[2])/2];
+    else { if(!namesOn) return; const e=ovExtOf_(t); if(!e) return; const c=[(e[1]+e[3])/2,(e[0]+e[2])/2];      // v406: the dot goes with the name
       const m=L.circleMarker(c,{radius:7,color:"#c62828",weight:2,fillColor:"#fff",fillOpacity:.9,bubblingMouseEvents:false}); m.on("click",()=>propPickActive_(t)); m.addTo(ovLayer); } });
   ovLabels_();
 }
@@ -11582,7 +11644,7 @@ function ovLabels_(){
   if(!ovLabelLayer||!fmap) return; ovLabelLayer.clearLayers();
   if(mapDetail_() || (typeof labelVis!=="undefined"&&labelVis.ov===false)) return;
   const b=fmap.getBounds(); let n=0;
-  propTracts_().forEach(t=>{ if(n>=OV_LABEL_MAX) return; const e=ovExtOf_(t); if(!e) return; const c=[(e[1]+e[3])/2,(e[0]+e[2])/2]; if(!b.contains(c)) return; n++;
+  propTracts_().forEach(t=>{ if(n>=OV_LABEL_MAX||!mapOnlyIs_(t)) return; const e=ovExtOf_(t); if(!e) return; const c=[(e[1]+e[3])/2,(e[0]+e[2])/2]; if(!b.contains(c)) return; n++;
     L.marker(c,{interactive:false,keyboard:false,icon:L.divIcon({className:"ov-lbl",html:`<span style="font:700 11px system-ui;color:#fff;background:rgba(198,40,40,.85);padding:2px 6px;border-radius:9px;white-space:nowrap;position:relative;left:-50%">${esc(t)}</span>`,iconSize:[0,0]})}).addTo(ovLabelLayer); });
 }
 /* crossing the detail zoom redraws the chosen property's layers (they draw nothing below it) */
@@ -11610,7 +11672,7 @@ function lioRender_(){
     at.style.cssText="position:absolute;left:6px;bottom:calc(4px + env(safe-area-inset-bottom));z-index:900;font:10px system-ui;color:#fff;background:rgba(0,0,0,.45);padding:2px 5px;border-radius:4px;pointer-events:none;max-width:70%";
     at.textContent=LIO_ATTRIB; mv.appendChild(at); } }
   if(at) at.style.display=any?"block":"none";
-  lioLabels_(); lioLayerVis_(); try{ namesBtn_(); }catch(e){}
+  lioLabels_(); lioLayerVis_(); try{ namesBtn_(); }catch(e){} try{ mapOnlyChip_(); }catch(e){}
   try{ ovRender_(); }catch(e){}
   try{ mnRender_(); }catch(e){}
   try{ csRender_(); }catch(e){}
@@ -11642,7 +11704,9 @@ function propZoomTo_(tract, quiet){ const t=tract||propActiveTract_(); if(!t) re
   if(!e){ if(!quiet) toast("No outline or compartments for "+t+" yet — nothing to zoom to",true); return false; }
   try{ if(typeof fmap!=="undefined"&&fmap&&window.L){ fmap.fitBounds(L.latLngBounds([[e[1],e[0]],[e[3],e[2]]]),{padding:[30,30],maxZoom:17}); return true; } }catch(err){}
   return false; }
-function propPickActive_(v){ propSetActive_(v); lioCache=null; lioRender_(); lioOnMapOpen_(); if(v){ closeLayersMenu(); propZoomTo_(v,true); try{ propSync_(null,{tract:v}); }catch(e){} } }      // v399: fetch its detail
+function propPickActive_(v){ propSetActive_(v);
+  if(typeof mapOnly!=="undefined"&&mapOnly&&v&&propK_(v)!==propK_(mapOnly)){ mapOnly=String(v); try{ STORE&&STORE.setItem("fi_maponly",mapOnly); }catch(e){} try{ renderBoundaries(); renderMapPins(); if(crewShown&&crewData.length) renderCrewPlots(crewData,true); }catch(e){} }   // v406: the one-property view follows the chosen property
+  lioCache=null; lioRender_(); lioOnMapOpen_(); if(v){ closeLayersMenu(); propZoomTo_(v,true); try{ propSync_(null,{tract:v}); }catch(e){} } }      // v399: fetch its detail
 function propActiveOptions_(){ const t=propActiveTract_(); return [["","— choose —"]].concat(propTracts_().map(x=>[x,x])).map(o=>`<option value="${esc(o[0])}"${o[0]===t?" selected":""}>${esc(o[1])}</option>`).join(""); }
 function propMenuOpen_(){ const s=$("propActiveSel"); if(s) s.innerHTML=propActiveOptions_(); const c=$("ovLblChk"); if(c) c.checked=labelVis.ov!==false; lioRender_(); }
 /* ============ v381 — find an address ============
@@ -11654,7 +11718,7 @@ const FIND_URL="https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeSer
 let findPin=null, _findSeq=0, _findHits=[];
 function findOpen_(){ const b=$("findBar"); if(!b) return;
   const show=b.style.display==="none"; b.style.display=show?"block":"none"; const t=$("toolFind"); if(t) t.classList.toggle("on",show);
-  if(show){ findPropFill_(); const i=$("findInput"); if(i) try{ i.focus(); }catch(e){} findRender_(); } }
+  if(show){ findPropFill_(); try{ const sa=$("findShowAll"); if(sa) sa.style.display=mapOnly?"":"none"; }catch(e){} const i=$("findInput"); if(i) try{ i.focus(); }catch(e){} findRender_(); } }
 function findClose_(){ const b=$("findBar"); if(b) b.style.display="none"; const t=$("toolFind"); if(t) t.classList.remove("on"); try{ const i=$("findInput"); if(i) i.blur(); }catch(e){} }
 function findUrl_(q){
   const p=["SingleLine="+encodeURIComponent(q),"f=json","maxLocations=6","countryCode=CAN","outFields=Match_addr,Addr_type,Type"];
@@ -11673,7 +11737,9 @@ function findProps_(q){ const k=propK_(q); if(!k) return []; const list=propTrac
 /* v402: the Find bar's drop-down of every property, so no one has to know the names — those with nothing to zoom to say so */
 function findPropFill_(){ const el=$("findProp"); if(!el) return; const cur=propActiveTract_();
   el.innerHTML=`<option value="">Or pick a property…</option>`+propTracts_().map(t=>{ const e=(typeof ovExtOf_==="function"?ovExtOf_(t):propExtent_(t)); return `<option value="${esc(t)}">${esc(t)}${propK_(t)===propK_(cur)?" (shown)":""}${e?"":" — nothing to zoom to yet"}</option>`; }).join(""); }
-function findPickProp_(t){ propSetActive_(t); try{ lioCache=null; lioRender_(); lioOnMapOpen_(); }catch(e){} const z=propZoomTo_(t); findMsg_(z?"Showing "+t:t+" has no outline or compartments to zoom to yet"); if(z) setTimeout(findClose_,600); }
+function findPickProp_(t){ propSetActive_(t); mapOnly=String(t||""); try{ STORE&&STORE.setItem("fi_maponly",mapOnly); }catch(e){}      // v406: only this one
+  try{ renderBoundaries(); renderMapPins(); if(crewShown&&crewData.length) renderCrewPlots(crewData,true); }catch(e){} try{ lioCache=null; lioRender_(); lioOnMapOpen_(); }catch(e){} try{ const b=$("findShowAll"); if(b) b.style.display=""; }catch(e){}
+  const z=propZoomTo_(t); findMsg_(z?"Showing only "+t+" — tap Show all for the rest":t+" has no outline or compartments to zoom to yet"); if(z) setTimeout(findClose_,900); }
 function findGo_(){
   const i=$("findInput"), q=String((i&&i.value)||"").trim();
   const props=findProps_(q);
@@ -13927,11 +13993,31 @@ function csUndo_(){ const t=_csEd?_csEd.tract:propActiveTract_(); let i=_csUndo.
    Corners within CS_SNAP_M of each other become one corner, and every corner is let into the neighbouring
    edges it lies on, so the copied pieces fit each other the way cut pieces do. Chris, 2026-10-09. */
 const CS_SNAP_M=0.25;
-function csFromFile_(tract){
+/* v408 — corners closer than about a metre to the line are dropped, so a digitised file fits the Sheet's rows; a corner
+   that two rings share (a common edge, a T-junction let in) is always kept, so neighbours stay fitted. Douglas–Peucker
+   between the kept corners. */
+const CS_THIN_M=1.0;
+function csThin_(pieces, P, tol){ tol=tol||CS_THIN_M; const cnt={}; pieces.forEach(pc=>pc.rings.forEach(r=>r.forEach(p=>{ const k=cgKey_(p); cnt[k]=(cnt[k]||0)+1; })));
+  let dropped=0;
+  /* a corner a metre off a long edge still sweeps a strip (1 m × 170 m is 170 m²), so each ring is thinned only as far
+     as its area holds within 0.05 % (or 1 m²): the tolerance is halved until it does, and a ring that never does
+     keeps every corner */
+  pieces.forEach(pc=>{ pc.rings=pc.rings.map(r=>{ const n=r.length; if(n<=4) return r; const X=r.map(P.xy), forced=[]; r.forEach((p,i)=>{ if(cnt[cgKey_(p)]>1) forced.push(i); });
+      const s=forced.length?forced[0]:0, idx=i=>(s+i)%n, RX=[]; for(let i=0;i<n;i++) RX.push(X[idx(i)]); RX.push(X[s]);
+      const F=[0]; forced.forEach(i=>{ const j=(i-s+n)%n; if(j>0) F.push(j); }); F.sort((a,b)=>a-b); F.push(n);
+      const A0=Math.abs(cgArea_(X)), lim=Math.max(1, A0*0.0005);
+      for(let t=tol; t>=tol/16; t/=2){ const keep={}; for(let a=0;a<F.length-1;a++){ keep[F[a]]=1; const out=[]; dp2(RX,F[a],F[a+1],out,t); out.forEach(i=>keep[i]=1); }
+        const out=[], OX=[]; for(let i=0;i<n;i++) if(keep[i]){ out.push(r[idx(i)]); OX.push(X[idx(i)]); }
+        if(out.length<3) continue; if(Math.abs(Math.abs(cgArea_(OX))-A0)<=lim){ dropped+=n-out.length; return out; } }
+      return r; }); });
+  function dp2(X,i,j,out,t){ if(j-i<2) return; let best=-1,bd=-1; for(let m=i+1;m<j;m++){ const d=cgSegD_(X[m][0],X[m][1],X[i],X[j]).d; if(d>bd){ bd=d; best=m; } }
+    if(bd>t){ dp2(X,i,best,out,t); out.push(best); dp2(X,best,j,out,t); } }
+  return dropped; }
+function csFromFile_(tract, o){ o=o||{};
   const t=tract||_ppTract||propActiveTract_(); if(!t){ toast("Choose the property first",true); return false; }
   const comps=propCompsGeo_(t,true).filter(c=>c.src==="file"||c.src==="drawn");
   if(!comps.length){ toast("No compartment polygons are loaded for this property — open the file under Layers first (and set its stand and tract fields)",true); return false; }
-  if(csOf_(t).length && !confirm("Start the compartment layer again from the loaded file? The "+csOf_(t).length+" pieces made so far are replaced (Undo can bring them back).")) return false;
+  if(csOf_(t).length && !o.noConfirm && !confirm("Start the compartment layer again from the loaded file? The "+csOf_(t).length+" pieces made so far are replaced (Undo can bring them back).")) return false;
   const pieces=[];
   comps.forEach(c=>(c.polygons||[]).forEach(pg=>{ const rings=(pg||[]).filter(r=>r&&r.length>=3).map(r=>cgDedupe_(r.map(cgLL_))).filter(r=>r.length>=3); if(rings.length) pieces.push({id:null, name:c.name, rings, src:c.src}); }));
   if(!pieces.length){ toast("The loaded polygons could not be read",true); return false; }
@@ -13961,11 +14047,13 @@ function csFromFile_(tract){
       corners.forEach(c=>{ if(keys[c.k] || c.xy[0]<x0-m || c.xy[0]>x1+m || c.xy[1]<y0-m || c.xy[1]>y1+m) return;
         for(let i=0,n=X.length;i<n;i++){ const sd=cgSegD_(c.xy[0],c.xy[1],X[i],X[(i+1)%n]); if(sd.d<=m && sd.u>1e-6 && sd.u<1-1e-6){ out.splice(i+1,0,c.p); X.splice(i+1,0,c.xy); keys[c.k]=1; break; } } });
       return cgDedupe_(out); }).filter(r=>r.length>=3); });
+  /* v408: thinned to about a metre, shared corners kept */
+  let thinned=0; try{ thinned=csThin_(pieces, P); }catch(e){}
   /* 3. a ring the file left pinched or crossing itself would stop every cut and move on the layer: left out, by name */
   const sound=[]; pieces.forEach(pc=>{ if(pc.rings.length && pc.rings[0].length>=3 && cgSound_([pc], null, P)) sound.push(pc); else dropped.push(pc.name); });
   const out=sound.map(pc=>({id:null, name:pc.name, rings:pc.rings}));
   if(!out.length){ toast("None of the loaded polygons could be used"+(dropped.length?" — their outlines cross themselves or are pinched in the file: "+dropped.join(", "):""),true); return false; }
-  csCommit_(t, out, "start from the loaded file");
+  csCommit_(t, out, o.label||"start from the loaded file");
   /* the file's own adjusted acres, where the compartment has no typed figure yet, so the area summary keeps them */
   try{ const have=(PROPS.comps||{})[propK_(t)]||{}, keep=[]; comps.forEach(c=>{ const rec=have[propK_(c.name)]; if(c.fAdj!=null && isFinite(+c.fAdj) && !(rec && rec.manual!=="" && rec.manual!=null) && out.some(pc=>propK_(pc.name)===propK_(c.name))) keep.push({name:c.name, manual:+c.fAdj, unit:"ac"}); });
     if(keep.length) propSaveLocal_({tract:t}, keep); }catch(e){}
@@ -14018,6 +14106,82 @@ function csMode_(m){ if(!_csEd) return; _csEd.mode=m; _csEd.line=[]; _csEd.pick=
        :m==="merge"?"Tap the two pieces to join"
        :m==="move"?"Drag a corner. Corners of the property outline stay put; one on the outline's edge slides along it"
        :"Tap a piece to name it and set its class"); }
+/* ---------- v407 — ring compartments on the map and give them a tract (Chris, 2026-10-12) ----------
+   ⬚ Tract on the rail: tap a ring around the compartments, Select takes every compartment whose centre is inside it
+   (boundary-file features, drawn areas, and the pieces of the compartment layer), then a tract is chosen or typed.
+   On the phone: the file feature's tract field (made "TRACT" when the file has none), the drawn area's tract, the
+   piece (moved between properties with csCommit_, so Undo knows), and the compartment record, activities of that
+   compartment (re-saved by id). On the Sheet: the record saved under the new tract and `compmove` rewriting the old
+   rows (Compartments, Compartment Activities, Compartment Shapes). Other phones get file features' tracts only when
+   the file is shared again; the Sheet records, pieces and activities reach them through the normal sync. */
+let _ta=null, _taTmp=[], _taBarEl=null;
+function taOpen_(){ if(_ta){ taCancel_(); return; } if(_csEd){ toast("Finish the compartment layer first (✓ Done)",true); return; }
+  _ta={pts:[],sel:null}; taBar_(); const b=$("toolTract"); if(b) b.classList.add("on"); toast("Tap a ring around the compartments, then Select"); }
+function taCancel_(){ _ta=null; taTmpClear_(); taBarRemove_(); const b=$("toolTract"); if(b) b.classList.remove("on"); }
+function taTap_(ll){ if(!_ta||_ta.sel) return false; _ta.pts.push([+ll.lat,+ll.lng]); taDraw_(); taBar_(); return true; }
+function taUndoPt_(){ if(!_ta||_ta.sel) return; _ta.pts.pop(); taDraw_(); taBar_(); }
+function taTmpClear_(){ try{ _taTmp.forEach(m=>fmap.removeLayer(m)); }catch(e){} _taTmp=[]; }
+function taBarRemove_(){ const bar=$("taBar")||_taBarEl; _taBarEl=null; try{ if(bar&&bar.parentNode) bar.parentNode.removeChild(bar); }catch(e){} }
+function taDraw_(){ taTmpClear_(); if(!_ta||!fmap||!window.L) return;
+  try{ const pts=_ta.pts; if(pts.length>=3) _taTmp.push(L.polygon(pts,{color:"#ffd24a",weight:2,dashArray:"6 5",fillColor:"#ffd24a",fillOpacity:.08,interactive:false}).addTo(fmap));
+    else if(pts.length===2) _taTmp.push(L.polyline(pts,{color:"#ffd24a",weight:2,dashArray:"6 5",interactive:false}).addTo(fmap));
+    pts.forEach(q=>_taTmp.push(L.circleMarker(q,{radius:5,color:"#fff",weight:2,fillColor:"#ffd24a",fillOpacity:1,interactive:false}).addTo(fmap)));
+    (_ta.sel||[]).forEach(x=>_taTmp.push(L.polygon(x.ring,{color:"#ff9f1a",weight:4,fill:true,fillColor:"#ff9f1a",fillOpacity:.25,interactive:false}).addTo(fmap))); }catch(e){} }
+/* every compartment on the map, with its centre (the mean of its outer ring's corners) */
+function taCandidates_(){ const out=[]; const mid=r=>{ let la=0,lo=0,n=0; r.forEach(q=>{ if(!isFinite(+q[0])||!isFinite(+q[1])) return; la+=+q[0]; lo+=+q[1]; n++; }); return n?[la/n,lo/n]:null; };
+  (boundFiles||[]).forEach((bf,fi)=>(bf.features||[]).forEach((f,i)=>{ const ps=featPolys_(f); if(!ps.length||!ps[0][0]||ps[0][0].length<3) return; const c=mid(ps[0][0]); if(!c) return;
+    out.push({src:"file",fi,i,f,name:(standField&&f.properties)?String(f.properties[standField]==null?"":f.properties[standField]).trim():"",tract:featTract_(f),c,ring:ps[0][0]}); }));
+  (polys||[]).forEach((pg,i)=>{ if(!pg||!pg.pts||pg.pts.length<3) return; const c=mid(pg.pts); if(c) out.push({src:"drawn",i,pg,name:String(pg.name||""),tract:String(pg.tract||manualTract||""),c,ring:pg.pts}); });
+  csAll_().forEach(pc=>{ const r=pc.rings&&pc.rings[0]; if(!r||r.length<3) return; const c=mid(r); if(c) out.push({src:"piece",pc,name:String(pc.name||""),tract:String(pc.tract||""),c,ring:r}); });
+  return out; }
+function taSelect_(){ if(!_ta) return; if(_ta.pts.length<3){ toast("Tap at least three points around the compartments",true); return; }
+  const sel=taCandidates_().filter(x=>pointInRing_(x.c[0],x.c[1],_ta.pts));
+  if(!sel.length){ toast("No compartment has its centre inside that ring",true); return; }
+  _ta.sel=sel; taDraw_(); taBar_(); }
+function taBar_(){ if(!_ta){ taBarRemove_(); return; }
+  let bar=$("taBar")||_taBarEl; if(!bar){ bar=document.createElement("div"); bar.id="taBar"; document.body.appendChild(bar); } _taBarEl=bar;
+  bar.style.cssText="position:fixed;left:8px;right:8px;bottom:10px;z-index:5450;background:rgba(16,36,15,.96);border:1px solid #ffd24a;border-radius:12px;padding:8px;color:#eafae8;font:13px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.5)";
+  const B=(fn,label,on)=>`<button type="button" class="btn ${on?"submit":"ghost"}" style="flex:1;min-width:0;padding:8px 4px;font-size:13px" onclick="${fn}">${label}</button>`;
+  let h=`<div style="margin-bottom:6px"><b>Give compartments a tract</b></div>`;
+  if(!_ta.sel){ const n=_ta.pts.length; h+=`<div style="margin-bottom:6px;color:#cfe3d2">${n?n+" point"+(n===1?"":"s")+" on the ring":"Tap around the compartments to select them"}</div><div style="display:flex;gap:6px">`+B("taSelect_()","⬚ Select",n>=3)+B("taUndoPt_()","↶ Point")+B("taCancel_()","Cancel")+`</div>`; }
+  else { const sel=_ta.sel, from={}; sel.forEach(x=>{ from[x.tract||"(no tract)"]=(from[x.tract||"(no tract)"]||0)+1; });
+    const names=sel.map(x=>x.name||"?"); const shown=names.slice(0,8).map(esc).join(", ")+(names.length>8?" …":"");
+    h+=`<div style="margin-bottom:6px;color:#cfe3d2">${sel.length} compartment${sel.length===1?"":"s"}: ${shown}<br><span style="color:#a9c9b0;font-size:12px">now in ${Object.keys(from).map(t=>esc(t)+" ("+from[t]+")").join(", ")}</span></div>`;
+    const cur=propActiveTract_(); const opts=[`<option value="">— choose the tract —</option>`].concat(propTracts_().map(t=>`<option value="${esc(t)}"${propK_(t)===propK_(cur)?" selected":""}>${esc(t)}</option>`),[`<option value="__new__">New tract…</option>`]).join("");
+    h+=`<select id="taTract" style="width:100%;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6;margin-bottom:6px">${opts}</select><div style="display:flex;gap:6px">`+B("taAssign_()","✓ Assign",true)+B("_ta.sel=null;taDraw_();taBar_()","↶ Ring")+B("taCancel_()","Cancel")+`</div>`; }
+  bar.innerHTML=h; }
+function taAssign_(name){ if(!_ta||!_ta.sel) return;
+  let t=name!=null?String(name):String(($("taTract")||{}).value||"");
+  if(t==="__new__"){ t=prompt("Tract name for these compartments:",""); if(t===null) return; }
+  t=String(t||"").trim(); if(!t){ toast("Choose or type the tract name",true); return; }
+  const r=taApply_(_ta.sel,t); taCancel_();
+  toast(`${r.n} compartment${r.n===1?"":"s"} now in ${t}${r.moved.length?" (from "+r.moved.join(", ")+")":""}`); }
+/* the assignment itself — returns {n, moved:[old tracts]} ; usable without the map (tests, batch) */
+function taApply_(sel, t){
+  const tk=propK_(t), moved={}, byOld={}; let n=0, filesTouched=false, polysTouched=false;
+  addTract(t);
+  sel.forEach(x=>{ const old=String(x.tract||"").trim(); if(propK_(old)===tk) return; n++; if(old) moved[old]=1;
+    if(x.src==="file"){ if(!tractField){ tractField="TRACT"; } x.f.properties=x.f.properties||{}; x.f.properties[tractField]=t; filesTouched=true; }
+    else if(x.src==="drawn"){ x.pg.tract=t; polysTouched=true; }
+    else if(x.src==="piece"){ (byOld[old]=byOld[old]||[]).push(x.pc); }
+    /* the Sheet's compartment record and this compartment's activities follow the name */
+    if(x.name&&old){ const ok=propK_(old), nk=propK_(x.name), rec=((PROPS.comps||{})[ok]||{})[nk];
+      if(rec){ const c={name:rec.name||x.name}; COMP_FIELDS_.forEach(f=>{ if(rec[f]!==undefined) c[f]=rec[f]; }); if(Object.keys(c).length>1) propSaveLocal_({tract:t},[c]); else propSaveLocal_({tract:t},[]);
+        delete PROPS.comps[ok][nk]; if(propDirty.comps[ok]) delete propDirty.comps[ok][nk]; }
+      else propSaveLocal_({tract:t},[]);
+      (propDirty.compMove=propDirty.compMove||[]).push({from:old,to:t,names:[x.name]});
+      Object.values(PROPS.acts||{}).forEach(a=>{ if(a&&propK_(a.tract)===ok&&propK_(a.comp)===nk){ a.tract=t; (propDirty.acts=propDirty.acts||{})[a.id]=Date.now(); } }); } });
+  /* pieces: out of their old property, into the new one, as steps Undo can take back */
+  Object.keys(byOld).forEach(old=>{ const ids={}; byOld[old].forEach(pc=>ids[pc.id]=1);
+    csCommit_(old, csOf_(old).filter(pc=>!ids[pc.id]), "moved to "+t);
+    csCommit_(t, csOf_(t).concat(byOld[old].map(pc=>({id:pc.id,name:pc.name,rings:pc.rings}))), "moved from "+old); });
+  if(filesTouched){ try{ cacheBoundaries(); }catch(e){} try{ rebuildBound(); renderBoundaries(); }catch(e){} try{ if(typeof renderLayerList==="function") renderLayerList(); }catch(e){} }
+  if(polysTouched){ try{ persistPoly(); drawPoly(); }catch(e){} }
+  if(filesTouched||polysTouched) try{ scheduleAreaPush_(); }catch(e){}
+  propPersist_(); try{ if(propBackendOk) propPush_().then(()=>{}); else propSync_(); }catch(e){}
+  try{ propAutoOutline_(t,true); Object.keys(moved).forEach(o=>propAutoOutline_(o,true)); }catch(e){}
+  try{ lioRender_(); }catch(e){} try{ findPropFill_(); }catch(e){}
+  return {n, moved:Object.keys(moved)}; }
 function csBar_(){
   if(!_csEd){ csBarRemove_(); return; }
   let bar=$("csBar")||_csBarEl; if(!bar){ bar=document.createElement("div"); bar.id="csBar"; document.body.appendChild(bar); } _csBarEl=bar;
