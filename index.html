@@ -842,7 +842,8 @@
   <div id="fmap"></div>
   <div class="map-rail">
     <!-- tap-to-place button removed: use "＋ Create inventory plot" (crosshair/GPS) instead; tapping conflicted with selecting polygons -->
-    <button class="map-tool" id="toolFind" type="button" onclick="findOpen_()" title="Find an address"><span class="mt-i">🔎</span><span class="mt-l">Find</span></button>
+    <button class="map-tool" id="toolFind" type="button" onclick="findOpen_()" title="Find an address or a property"><span class="mt-i">🔎</span><span class="mt-l">Find</span></button>
+    <button class="map-tool on" id="toolNames" type="button" onclick="namesToggle_()" title="Property names and point symbols on or off"><span class="mt-i">🏷</span><span class="mt-l">Names</span></button>
     <button class="map-tool" id="toolText" type="button" onclick="mnOpen_()" title="Notes and arrows for the maps"><span class="mt-i">✎</span><span class="mt-l">Text</span></button>
     <button class="map-tool" id="toolPoints" type="button" onclick="ftOpen_()" title="Buildings, gates and special features for the maps"><span class="mt-i">📍</span><span class="mt-l">Points</span></button>
     <button class="map-tool" id="toolLines" type="button" onclick="lnOpen_()" title="Trails, roads and streams for the maps"><span class="mt-i">⤳</span><span class="mt-l">Lines</span></button>
@@ -1224,7 +1225,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-12 · v402";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-12 · v403";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -6907,6 +6908,7 @@ function loadBoundaries(file){
     const bf={id:genId(), name:file.name||"shapefile", features:fc.features};
     boundFiles.push(bf);
     rebuildBound();
+    try{ setTimeout(()=>{ propTracts_().forEach(t=>{ try{ propAutoOutline_(t, true); }catch(e){} }); },50); }catch(e){}      // v403: outlines for properties that have none
     /* v372: the crew's field choices for this file, if it is the only one loaded (the copy this phone last fetched; a fresh one is asked for below). */
     const tookShared=applySharedFields_();
     pickStandField(); cacheBoundaries(); renderBoundaries(); renderLayerList(); updateLayerStatus(); fitBoundaries(fc.features);
@@ -6977,12 +6979,14 @@ function toggleLayerVis(k){ layerVis[k]=!(layerVis[k]!==false); try{ STORE&&STOR
   applyLayerVis_(); renderLayerVis_(); updateLayerStatus(); }
 
 // Labels on/off, per label layer (boundary stand names, imported-point labels). Persisted.
-var labelVis={ bound:true, ref:true, ov:true };
+var labelVis={ bound:true, ref:true, ov:true, pts:true };
 try{ if(typeof STORE!=="undefined"&&STORE) Object.assign(labelVis, JSON.parse(STORE.getItem("fi_labelvis"))||{}); }catch(e){}
 function toggleLabels(k){ labelVis[k]=!(labelVis[k]!==false); try{ STORE&&STORE.setItem("fi_labelvis",JSON.stringify(labelVis)); }catch(e){}
   if(k==="bound"){ if(typeof renderLabels==="function") renderLabels(); }
   if(k==="ref"){ if(typeof renderRefLabels==="function") renderRefLabels(); }
   if(k==="ov"){ if(typeof ovLabels_==="function") ovLabels_(); const el=$("ovLblChk"); if(el) el.checked=labelVis.ov!==false; }
+  if(k==="pts"){ if(typeof ftRender_==="function") ftRender_(); }
+  namesBtn_();
   renderLayerVis_(); }
 
 // Zoom/pan the map to fit a single layer.
@@ -11132,6 +11136,7 @@ function _ppEditing_(){ const a=document.activeElement; return !!(a && a.id && /
 /* keep: the outline was changed while the cruiser had typed into the form — redraw, but put back what
    they typed and keep comparing with the values first drawn, so nothing typed is lost or mis-sent. */
 function propRender_(keep){
+  try{ if(!keep && _ppTract) propAutoOutline_(_ppTract, true); }catch(e){}      // v403: a property with compartments and no outline gets one
   const box=$("ppBody"); if(!box) return;
   let held=null, heldShown=null;
   if(keep && _ppTouched){ held={}; heldShown=_ppShown;
@@ -11169,7 +11174,9 @@ function propRender_(keep){
   h+=`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">`+
      (files.length?sel("ppBndFile",[["","Use a loaded file…"]].concat(files),"",`onchange="propUseFile_(this.value)"`):"")+
      (drawn.length?sel("ppBndDrawn",[["","Use a drawn shape…"]].concat(drawn),"",`onchange="propUseDrawn_(this.value)"`):"")+
-     (b.length?`<button type="button" class="btn ghost" onclick="propClearBnd_()">Remove outline</button>`:"")+`</div>`;
+     (b.length?`<button type="button" class="btn ghost" onclick="propClearBnd_()">Remove outline</button>`:"")+
+     (propCompsGeo_(t).length?`<button type="button" class="btn ghost" onclick="propAutoOutline_(_ppTract)">⬚ Outline from the compartments</button>`:"")+`</div>`+
+     (b.length&&p.bndAuto?`<div style="font-size:11px;color:#8fae95;margin-bottom:6px">This outline was made from the compartments and follows them when they change.</div>`:"");
   if(!files.length&&!drawn.length) h+=`<div style="font-size:11px;color:#8fae95;margin-bottom:6px">Load the owner's shapefile (Layers → Load &amp; import → Stand boundaries), or draw the outline with the map's Draw tool, then pick it here.</div>`;
   // compartments
   _ppComps=propCompsGeo_(t);
@@ -11285,6 +11292,7 @@ function propBndSet_(rings, what){
     for(let i=0;i<n;i++) o.push(r[Math.floor(i*step)]); return o; }); }
   rings=rings.map(r=>r.map(q=>[+Number(q[0]).toFixed(6),+Number(q[1]).toFixed(6)]));
   propSaveLocal_({tract:t, boundary:rings}, null);
+  if(!/compartments/.test(what)){ try{ const k=propK_(t); if(PROPS.props[k]) delete PROPS.props[k].bndAuto; }catch(e){} }
   toast("Property outline set from "+what);
   propRender_(true); try{ lioEnsure_(t,false,true); }catch(e){}
 }
@@ -11294,7 +11302,7 @@ function propUseFile_(id){ if(!id) return; const f=(boundFiles||[]).find(x=>x.id
   propBndSet_(rings, f.name); }
 function propUseDrawn_(i){ if(i==="") return; const pg=(polys||[])[+i]; if(!pg||!pg.pts||pg.pts.length<3) return;
   propBndSet_([pg.pts.map(p=>[p[0],p[1]])], pg.name||"the drawn shape"); }
-function propClearBnd_(){ const t=_ppTract; if(!t) return; if(!confirm("Remove the property outline for "+t+"?")) return;
+function propClearBnd_(){ const t=_ppTract; if(!t) return; if(!confirm("Remove the property outline for "+t+"?")) return; try{ const k=propK_(t); if(PROPS.props[k]) delete PROPS.props[k].bndAuto; }catch(e){}
   propSaveLocal_({tract:t, boundary:[]}, null); propRender_(true); try{ lioRender_(); }catch(e){} }
 function propSummaryHtml_(s){
   const f2=x=>(Math.round(x*100)/100).toFixed(2), td=`style="text-align:right"`, tdl=`style="text-align:right;padding-right:4px"`;
@@ -11506,6 +11514,10 @@ function ovPlotExt_(t){ const k=propK_(t); let w=1/0,s_=1/0,e=-1/0,n=-1/0, any=f
   (saved||[]).concat(auditPlots||[]).forEach(q=>{ if(!q||propK_(q.TRACT)!==k) return; const la=parseFloat(q.Y), lo=parseFloat(q.X); if(!isFinite(la)||!isFinite(lo)||(la===0&&lo===0)) return; any=true; if(lo<w)w=lo; if(lo>e)e=lo; if(la<s_)s_=la; if(la>n)n=la; });
   return any?[w,s_,e,n]:null; }
 function ovExtOf_(t){ const p=propGet_(t)||{}; const key=t+"|"+(Array.isArray(p.boundary)?p.boundary.length:0); if(_ovExt[key]===undefined) _ovExt[key]=propExtent_(t)||ovPlotExt_(t); return _ovExt[key]; }
+/* v403: one rail button for the property names and the point symbols — both on, or both off */
+function namesToggle_(){ const on=!(labelVis.ov!==false && labelVis.pts!==false); labelVis.ov=on; labelVis.pts=on; try{ STORE&&STORE.setItem("fi_labelvis",JSON.stringify(labelVis)); }catch(e){}
+  try{ ovLabels_(); }catch(e){} try{ ftRender_(); }catch(e){} const el=$("ovLblChk"); if(el) el.checked=on; namesBtn_(); toast(on?"Property names and points shown":"Property names and points hidden"); }
+function namesBtn_(){ const b=$("toolNames"); if(b) b.classList.toggle("on", labelVis.ov!==false && labelVis.pts!==false); }
 function ovRender_(){
   if(typeof fmap==="undefined"||!fmap||!window.L) return;
   if(!ovLayer){ try{ ovLayer=L.layerGroup().addTo(fmap); ovLabelLayer=L.layerGroup().addTo(fmap); fmap.on("moveend zoomend",ovLabels_); }catch(e){ return; } }
@@ -11553,7 +11565,7 @@ function lioRender_(){
     at.style.cssText="position:absolute;left:6px;bottom:calc(4px + env(safe-area-inset-bottom));z-index:900;font:10px system-ui;color:#fff;background:rgba(0,0,0,.45);padding:2px 5px;border-radius:4px;pointer-events:none;max-width:70%";
     at.textContent=LIO_ATTRIB; mv.appendChild(at); } }
   if(at) at.style.display=any?"block":"none";
-  lioLabels_(); lioLayerVis_();
+  lioLabels_(); lioLayerVis_(); try{ namesBtn_(); }catch(e){}
   try{ ovRender_(); }catch(e){}
   try{ mnRender_(); }catch(e){}
   try{ csRender_(); }catch(e){}
@@ -12910,6 +12922,7 @@ function ftRender_(){
   if(typeof fmap==="undefined"||!fmap||!window.L) return;
   if(!ftLayer){ try{ ftLayer=L.layerGroup().addTo(fmap); }catch(e){ return; } }
   ftLayer.clearLayers(); if(!mapDetail_()) return;      // v399: detail only when zoomed in
+  if(typeof labelVis!=="undefined"&&labelVis.pts===false) return;      // v403: hidden with the Names button
   ftOf_(propActiveTract_()).forEach(f=>{ const px=MAP_STYLE.pointSize||26, lab=ftLabel_(f);
     const m=L.marker([+f.lat,+f.lon],{keyboard:false,icon:L.divIcon({className:"",iconSize:[px,px],iconAnchor:[px/2,px/2],
       html:ftSvg_(f.kind,px)+(lab?`<div style="position:absolute;left:${px+3}px;top:${px/2-8}px;font:600 12px/16px system-ui,sans-serif;color:#111;white-space:nowrap;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 2px #fff">${esc(lab)}</div>`:"")})});
@@ -13262,6 +13275,73 @@ function pkSchedulePage_(tract, acts, win){
   const past=acts.filter(a=>+a.year<win[0]); if(past.length&&y<MM_H-260){ y+=30; ctx.font="bold 28px "+PK_F; ctx.fillStyle="#111"; ctx.fillText("Past activities on record",PK_X,y); y+=40; ctx.font="22px "+PK_F; ctx.fillStyle="#333";
     past.sort((a,b)=>+a.year-+b.year).forEach(a=>{ if(y>MM_H-150) return; ctx.fillText(mmFit_(ctx,a.year+"  ·  "+a.comp+" — "+acKindName_(a.kind)+(a.acres!==""&&a.acres!=null?" · "+a.acres+" ac":"")+(a.note?" — "+a.note:""),PK_W),PK_X,y); y+=32; }); }
   return cv;
+}
+/* ============ v403 — the property outline from its compartments ============
+   Chris (2026-10-12): when compartments are drawn or imported, draw the property boundary round them and save it
+   to the Sheet. The compartments are dissolved: corners within BND_SNAP_M are made one, corners lying on a
+   neighbour's edge are let into it, then every edge two compartments share cancels and what is left is chained
+   into rings — the outline (and any hole the compartments leave). Saved with propBndSet_ → propsave → the
+   Properties tab's BOUNDARY column. Made automatically only where the property has no outline yet, and marked as
+   made that way (bndAuto, on this phone) so a later change to the compartments remakes it; an outline a person
+   set from a file or drew is never replaced. */
+const BND_SNAP_M=0.25;
+function propOutlineFromComps_(tract){
+  const comps=propCompsGeo_(tract).filter(c=>c.polygons.length); if(!comps.length) return {rings:[], why:"no compartments"};
+  const rings0=[]; comps.forEach(c=>c.polygons.forEach(pg=>{ const r=(pg[0]||[]).filter(q=>Array.isArray(q)&&isFinite(+q[0])&&isFinite(+q[1])).map(q=>[+q[0],+q[1]]); if(r.length>=3) rings0.push(r); }));
+  if(!rings0.length) return {rings:[], why:"no polygons"};
+  const P=cgProj_(rings0[0][0][0],rings0[0][0][1]);
+  /* 1. corners within the snap distance become one (grid hash, neighbours checked) */
+  const cell=Math.max(1,BND_SNAP_M*4), grid={}, corners=[];
+  const keyOf=xy=>Math.floor(xy[0]/cell)+","+Math.floor(xy[1]/cell);
+  const canon=p=>{ const xy=P.xy(p); const gx=Math.floor(xy[0]/cell), gy=Math.floor(xy[1]/cell);
+    for(let i=-1;i<=1;i++) for(let j=-1;j<=1;j++){ const l=grid[(gx+i)+","+(gy+j)]; if(!l) continue; for(const c of l){ if(Math.hypot(c.xy[0]-xy[0],c.xy[1]-xy[1])<=BND_SNAP_M) return c; } }
+    const c={xy, p:[+p[0].toFixed(7),+p[1].toFixed(7)], k:corners.length}; corners.push(c); (grid[keyOf(xy)]=grid[keyOf(xy)]||[]).push(c); return c; };
+  let rings=rings0.map(r=>{ const o=[]; r.forEach(p=>{ const c=canon(p); if(!o.length||o[o.length-1]!==c) o.push(c); }); if(o.length>1&&o[0]===o[o.length-1]) o.pop(); return o; }).filter(r=>r.length>=3);
+  /* 2. a corner lying on another ring's edge is let into that edge (a T-junction), so the shared edge cancels */
+  rings=rings.map(r=>{ let out=r.slice(); let changed=true, guard=0;
+    while(changed&&guard++<50){ changed=false; for(let i=0;i<out.length;i++){ const a=out[i], b=out[(i+1)%out.length]; let best=null, bt=-1;
+        for(const c of corners){ if(c===a||c===b||out.indexOf(c)>=0) continue; const d=cgSegD_(c.xy[0],c.xy[1],a.xy,b.xy); if(d.d<=BND_SNAP_M && d.t>0.001 && d.t<0.999 && (best===null||d.t<bt)){ best=c; bt=d.t; } }
+        if(best){ out.splice(i+1,0,best); changed=true; break; } } }
+    return out; });
+  /* 3. shared edges cancel; the rest chain into rings */
+  const cnt={}, ek=(a,b)=>a.k<b.k?a.k+"-"+b.k:b.k+"-"+a.k;
+  rings.forEach(r=>{ for(let i=0;i<r.length;i++){ const a=r[i], b=r[(i+1)%r.length]; if(a===b) continue; cnt[ek(a,b)]=(cnt[ek(a,b)]||0)+1; } });
+  const edges=[]; rings.forEach(r=>{ for(let i=0;i<r.length;i++){ const a=r[i], b=r[(i+1)%r.length]; if(a===b) continue; if(cnt[ek(a,b)]===1) edges.push([a,b]); } });
+  if(!edges.length) return {rings:[], why:"the compartments leave no outer edge"};
+  const over=Object.values(cnt).filter(n=>n>2).length; if(over) return {rings:[], why:"compartments overlap along "+over+" edge"+(over===1?"":"s")};
+  const next={}; edges.forEach(e=>{ (next[e[0].k]=next[e[0].k]||[]).push(e); });
+  const used=new Set(), out=[];
+  edges.forEach(e0=>{ if(used.has(e0)) return; const ring=[e0[0]]; let e=e0; let guard=0;
+    while(e&&!used.has(e)&&guard++<20000){ used.add(e); const b=e[1]; if(b===ring[0]) break; ring.push(b); const cand=(next[b.k]||[]).filter(x=>!used.has(x)); e=cand[0]||null; }
+    if(ring.length>=3 && e && e[1]===ring[0]) out.push(ring.map(c=>c.p)); });
+  if(!out.length) return {rings:[], why:"the outer edges do not close into a ring (a gap between compartments?)"};
+  /* the outline's area should match the compartments' */
+  const ha=r=>Math.abs(cgArea_(r.map(p=>P.xy(p))))/10000;
+  const outer=out.map(r=>({r, ha:ha(r)})).sort((a,b)=>b.ha-a.ha);
+  const tot=rings0.reduce((t,r)=>t+ha(r),0); let sum=0; outer.forEach(x=>{ sum+= (propRingIn_(x.r,outer[0].r)&&x!==outer[0]) ? -x.ha : x.ha; });
+  const off=tot>0?Math.abs(sum-tot)/tot:1;
+  /* rings that cross each other are overlapping compartments, not an outline */
+  let cross=false; for(let i=0;i<outer.length&&!cross;i++) for(let j=i+1;j<outer.length&&!cross;j++){ const A=outer[i].r.map(p=>P.xy(p)), B=outer[j].r.map(p=>P.xy(p));
+    for(let a=0;a<A.length&&!cross;a++) for(let b=0;b<B.length;b++){ const h=cgHit_(A[a],A[(a+1)%A.length],B[b],B[(b+1)%B.length]); if(h&&h.t>1e-6&&h.t<1-1e-6&&h.u>1e-6&&h.u<1-1e-6){ cross=true; break; } } }
+  if(cross) return {rings:[], why:"compartments overlap each other"};
+  /* a corner or edge-middle of one compartment well inside another: they overlap (a hole inside a compartment is not this — a hole is a separate ring here) */
+  const XY=rings0.map(r=>r.map(p=>P.xy(p)));
+  for(let i=0;i<XY.length;i++) for(let j=0;j<XY.length;j++){ if(i===j) continue; const A=XY[i], B=XY[j]; const samples=[]; for(let k=0;k<A.length;k++){ const a=A[k], b=A[(k+1)%A.length]; samples.push(a,[(a[0]+b[0])/2,(a[1]+b[1])/2]); }
+    for(const q of samples){ if(!cgInRing_(q[0],q[1],B)) continue; let d=1/0; for(let k=0;k<B.length;k++) d=Math.min(d,cgSegD_(q[0],q[1],B[k],B[(k+1)%B.length]).d); if(d>BND_SNAP_M*4) return {rings:[], why:"compartments overlap each other"}; } }
+  return {rings:outer.map(x=>x.r), ha:sum, compsHa:tot, off, why:off>0.02?"the outline's area is "+(off*100).toFixed(1)+"% off the compartments' — a gap or overlap":""};
+}
+/* make the outline where there is none (or where it was made this way before); never over a person's outline */
+function propAutoOutline_(tract, quiet){
+  const t=tract||_ppTract||propActiveTract_(); if(!t) return false;
+  const p=propGet_(t)||{}; const has=Array.isArray(p.boundary)&&p.boundary.length;
+  if(has && !p.bndAuto) return false;
+  const r=propOutlineFromComps_(t); if(!r.rings.length){ if(!quiet) toast("No outline could be made from the compartments: "+r.why,true); return false; }
+  if(has && JSON.stringify(p.boundary)===JSON.stringify(r.rings.map(rg=>rg.map(q=>[+Number(q[0]).toFixed(6),+Number(q[1]).toFixed(6)])))) return false;      // unchanged
+  const keep=_ppTract; _ppTract=t;
+  try{ propBndSet_(r.rings, "the compartments"+(r.why?" ("+r.why+" — check it)":"")); const k=propK_(t); if(PROPS.props[k]) PROPS.props[k].bndAuto=true; propPersist_(); }
+  finally{ _ppTract=keep; }
+  try{ lioRender_(); }catch(e){}
+  return true;
 }
 /* ============ v392 — export all: every layer of the chosen properties in one zip ============
    Chris (by voice, 2026-10-09): one export rather than a button per layer; a checklist of the account's properties
@@ -13788,6 +13868,7 @@ function csCommit_(tract, list, label, noUndo){
   Object.values(now).forEach(c=>{ const was=PROPS.shapes[c.id]; if(was && JSON.stringify([was.name,was.rings])===JSON.stringify([c.name,c.rings])) return;
     PROPS.shapes[c.id]=c; propDirty.shapes[c.id]=stamp; propDirty.shapeDel=propDirty.shapeDel.filter(x=>x!==c.id); });
   void k; propPersist_(); csRender_();
+  try{ propAutoOutline_(tract, true); }catch(e){}      // v403: the outline follows the compartments
   if(_csPushT) clearTimeout(_csPushT); _csPushT=setTimeout(()=>{ _csPushT=null; if(propBackendOk) propPush_().then(()=>{}); else propSync_(); },1500);
 }
 function csUndo_(){ const t=_csEd?_csEd.tract:propActiveTract_(); let i=_csUndo.length-1; while(i>=0 && propK_(_csUndo[i].tract)!==propK_(t)) i--;
