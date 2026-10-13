@@ -916,6 +916,7 @@
       <button type="submit" style="flex:none;padding:8px 10px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">Go</button>
       <button type="button" onclick="findClose_()" style="flex:none;padding:8px 10px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#cdebcf;font:inherit;font-size:13px">✕</button>
     </form>
+    <div style="display:flex;gap:6px;margin-top:6px"><button type="button" onclick="findClearAll_()" style="flex:1;padding:8px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">👁 Show all properties &amp; clear the search</button></div>
     <select id="findProp" onchange="if(this.value){ findPickProp_(this.value); this.value=''; }" onfocus="findPropFill_()" style="margin-top:6px;width:100%;font-size:15px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"><option value="">Or pick a property…</option></select>
     <button type="button" id="findShowAll" onclick="mapOnlyClear_();findClose_()" style="display:none;margin-top:6px;width:100%;padding:8px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">👁 Show all properties again</button>
     <div id="findResults" style="margin-top:6px;max-height:40vh;overflow-y:auto;-webkit-overflow-scrolling:touch"></div>
@@ -1282,7 +1283,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-13 · v416";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-13 · v417";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1536,7 +1537,7 @@ function apiPost_(o, ms){
    Until a readable answer has been seen, saves go the old way (no-cors), so nothing here can make a
    phone that syncs today stop syncing. */
 const POST_REFUSED={};
-const POST_LABEL={linesave:"Saving map lines", linedel:"Deleting map lines", actsave:"Saving planned activities", actdel:"Deleting planned activities", featsave:"Saving map points", featdel:"Deleting map points", shapesave:"Saving the compartment layer", shapedel:"Deleting compartment pieces",notesave:"Saving map notes", notedel:"Deleting map notes", mapverput:"Saving a map version", photo:"Photo upload", mapfile:"Saving files to Drive", layerput:"Adding a shared layer", propsave:"Saving property details", compsave:"Saving compartment details", compmove:"Moving compartments to another tract", lioput:"Keeping provincial layers in Drive", liolog:"Reporting a provincial-layer problem"};
+const POST_LABEL={linesave:"Saving map lines", linedel:"Deleting map lines", actsave:"Saving planned activities", actdel:"Deleting planned activities", featsave:"Saving map points", featdel:"Deleting map points", shapesave:"Saving the compartment layer", shapedel:"Deleting compartment pieces",notesave:"Saving map notes", notedel:"Deleting map notes", mapverput:"Saving a map version", photo:"Photo upload", mapfile:"Saving files to Drive", layerput:"Adding a shared layer", propsave:"Saving property details", compsave:"Saving compartment details", compmove:"Moving compartments to another tract", propdel:"Deleting a property", lioput:"Keeping provincial layers in Drive", liolog:"Reporting a provincial-layer problem"};
 let authLimited=false;       // an account other than the administrator's: summaries, emails, exports and AI are not open to it yet
 function isLimited_(){ return !!((authToken&&authLimited) || (!authToken&&limitedPhone_())); }
 /* v379: on an account other than the office's, mail from the app goes to the address on the user's
@@ -6751,16 +6752,28 @@ function initMap(){
   applyLayerVis_();
   fmap.on("moveend zoomend",rememberMapView_);
   fmap.on("zoomend",()=>{ try{ mapZoomDetail_(); }catch(e){} });      // v399
-  fmap.on("click",e=>{ if(typeof rnTap_==="function" && rnTap_(e.latlng)) return;   // v384: placing a typed road label
-    if(typeof taTap_==="function" && taTap_(e.latlng)) return;                       // v407: ringing compartments to give them a tract
-    if(typeof csTap_==="function" && csTap_(e.latlng)) return;                       // v387: the compartment layer editor
-    if(typeof lnTap_==="function" && lnTap_(e.latlng)) return;                       // v389: drawing a line
-    if(typeof mnTap_==="function" && mnTap_(e.latlng)) return;                       // v385: placing a note or an arrow
-    if(typeof ftTap_==="function" && ftTap_(e.latlng)) return;                       // v388: placing a point
-    if(selectMode){ addSelPoint(e.latlng); return; } if(polyMode){ addPolyPoint(e.latlng); return; } if(routeMode){ addRoutePoint(e.latlng); return; } if(measureMode){ addMeasurePoint(e.latlng); return; } if(moveMode_) return;   // the crosshair is the target; taps must not open popups mid-move
-    if(placeMode){ placeAt(e.latlng.lat,e.latlng.lng); return; }
-    if(nearbyPlotPopup_(e.latlng)) return;                    // a plot pin near the tap wins over the boundary
-    { const bf=boundaryFeatureAt(e.latlng.lat,e.latlng.lng); if(bf) showBoundPopup(e.latlng,bf); } });
+  /* v417: one handler for a tap on the map. Leaflet turns a touch into a click on most phones; some Android browsers
+     (Samsung Internet, WebViews) do not when a canvas renderer is under the finger, so a short, still touch that is not
+     followed by a click within 450 ms is handled the same way (Chris, 2026-10-13: no popup on Android). */
+  window.mapTapHandle_=function(ll){ try{
+    if(typeof rnTap_==="function" && rnTap_(ll)) return;                       // v384: placing a typed road label
+    if(typeof taTap_==="function" && taTap_(ll)) return;                       // v407: ringing compartments to give them a tract
+    if(typeof csTap_==="function" && csTap_(ll)) return;                       // v387: the compartment layer editor
+    if(typeof lnTap_==="function" && lnTap_(ll)) return;                       // v389: drawing a line
+    if(typeof mnTap_==="function" && mnTap_(ll)) return;                       // v385: placing a note or an arrow
+    if(typeof ftTap_==="function" && ftTap_(ll)) return;                       // v388: placing a point
+    if(selectMode){ addSelPoint(ll); return; } if(polyMode){ addPolyPoint(ll); return; } if(routeMode){ addRoutePoint(ll); return; } if(measureMode){ addMeasurePoint(ll); return; } if(moveMode_) return;   // the crosshair is the target;
+    if(placeMode){ placeAt(ll.lat,ll.lng); return; }
+    if(nearbyPlotPopup_(ll)) return;                    // a plot pin near the tap wins over the boundary
+    { const bf=boundaryFeatureAt(ll.lat,ll.lng); if(bf) showBoundPopup(ll,bf); }
+  }catch(err){ toast("Couldn't open that: "+String(err&&err.message||err).slice(0,80),true); } };
+  let _mapClickAt=0; fmap.on("click",e=>{ _mapClickAt=Date.now(); mapTapHandle_(e.latlng); });
+  try{ const c=fmap.getContainer(); let t0=0, p0=null, moved=false;
+    c.addEventListener("touchstart",e=>{ if(e.touches.length!==1){ p0=null; return; } t0=Date.now(); p0=[e.touches[0].clientX,e.touches[0].clientY]; moved=false; },{passive:true});
+    c.addEventListener("touchmove",e=>{ if(!p0||e.touches.length!==1) return; if(Math.hypot(e.touches[0].clientX-p0[0],e.touches[0].clientY-p0[1])>12) moved=true; },{passive:true});
+    c.addEventListener("touchend",e=>{ if(!p0||moved||Date.now()-t0>500||e.changedTouches.length!==1) { p0=null; return; } const x=e.changedTouches[0].clientX, y=e.changedTouches[0].clientY, started=t0; p0=null;
+      const hit=document.elementFromPoint(x,y); if(hit&&hit.closest&&hit.closest(".leaflet-marker-icon,.leaflet-popup,.map-rail,.map-chips,.map-legend,.layers-menu,#findBar,#propBar,#mapDrop")) return;   // a marker or a control handles itself
+      setTimeout(()=>{ if(_mapClickAt>=started) return; try{ const r=c.getBoundingClientRect(); mapTapHandle_(fmap.containerPointToLatLng([x-r.left,y-r.top])); }catch(err){} },450); },{passive:true}); }catch(e){}
   // Keep taps on the on-map controls from also being treated as map clicks (which in draw modes would drop a stray point).
   try{ ["measureBar","routeBar","polyBar","mapDrop","layersMenu","findBar","propBar"].forEach(id=>{ const el=$(id); if(el){ L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); } });
     const sc=document.querySelector(".layers-scroll"); if(sc){ L.DomEvent.disableClickPropagation(sc); L.DomEvent.disableScrollPropagation(sc); }
@@ -6977,9 +6990,10 @@ function loadBoundaries(file){
     document.querySelector(".map-load").classList.add("has"); toast(`Added ${fc.features.length} polygons from ${file.name}`+(tookShared?" — using your crew's field settings":"")); scheduleAreaPush_();
     if(tookShared && tookShared.standWas && tookShared.standWas!==tookShared.standNow) setTimeout(()=>sharedFieldsTell_(tookShared,true), 900);
     try{ sharedFieldsFetch_(); }catch(e){} };
-  if(lower.endsWith(".geojson")||lower.endsWith(".json")){ file.text().then(t=>ensureWGS84(JSON.parse(t))).then(add).catch(()=>toast("Bad GeoJSON",true)); }
-  else if(lower.endsWith(".shp")||lower.endsWith(".zip")){ file.arrayBuffer().then(buf=>shp(buf)).then(ensureWGS84).then(add).catch(e=>toast("Shapefile error: "+e.message,true)); }
-  else { toast("Use a .zip, .shp, .geojson or .json file",true); }
+  fileKind_(file).then(kind=>{      // v417: by the bytes, so a file an Android picker renamed still loads
+    if(kind==="json"){ file.text().then(t=>ensureWGS84(JSON.parse(t))).then(add).catch(()=>toast("Bad GeoJSON",true)); }
+    else if(kind==="shp"||kind==="zip"){ file.arrayBuffer().then(buf=>shp(buf)).then(ensureWGS84).then(add).catch(e=>toast("Shapefile error: "+e.message,true)); }
+    else { toast("Use a .zip, .shp, .geojson or .json file",true); } });
 }
 /* v408 — the Sheet is where compartments live (Chris, 2026-10-12): a file's compartments become pieces of the compartment
    layer for their tract as soon as the file is loaded, so every phone that syncs the property gets them. A tract that
@@ -7439,7 +7453,7 @@ function renderLabels(){
     if(standLabelMode==="analysis"){
       const a=standAn[String(L0.name).trim().toLowerCase()];
       const v=standAnVal_(a,standAnField);
-      txt = v==="" ? L0.name+" ·—" : L0.name+" · "+v;   // no plots analysed there yet
+      txt = v==="" ? L0.name : L0.name+" · "+v;   // v417: no plots analysed there yet → just the name (the dash came out as "?" on Android)
     }
     L.marker([L0.lat,L0.lng],{interactive:false,icon:L.divIcon({className:"",html:`<div class="standlabel" style="font-size:${MAP_STYLE.labelSize||11}px">${esc(txt)}</div>`,iconSize:[90,16],iconAnchor:[45,8]})}).addTo(flabelLayer);
     n++;
@@ -10853,7 +10867,7 @@ const HA_AC=2.4710538146716534;
 const MFTIP_CLASSES=[["","— not set —"],["MFTIP","MFTIP eligible"],["CLTIP","CLTIP"],["INELIGIBLE","Not eligible"]];
 const PROP_CLS_LABEL={MFTIP:"MFTIP eligible",CLTIP:"CLTIP",INELIGIBLE:"Not eligible","":"Not classified"};
 let PROPS={props:{},comps:{},lio:{},notes:{},shapes:{}};          // props[tractKey], comps[tractKey][nameKey], lio[tractKey] = Drive copy info
-let propDirty={props:{},comps:{},notes:{},noteDel:[],shapes:{},shapeDel:[],feats:{},featDel:[],lines:{},lineDel:[],acts:{},actDel:[],compMove:[]};              // waiting for the Sheet
+let propDirty={props:{},comps:{},notes:{},noteDel:[],shapes:{},shapeDel:[],feats:{},featDel:[],lines:{},lineDel:[],acts:{},actDel:[],compMove:[],propDel:[]};              // waiting for the Sheet
 let propBackendOk=false, propNotesOk=false, propShapesOk=false, propFeatsOk=false, propLinesOk=false, propActsOk=false, _propPushP=null, _propSyncing=false, _propLoaded=false, _propReady=null;
 /* The same key the Sheet uses: spaces collapsed, case ignored. */
 function propK_(s){ return String(s==null?"":s).replace(/\s+/g," ").trim().toLowerCase(); }
@@ -11170,6 +11184,10 @@ function propPush1_(){
       if(j&&j.ok&&j.prop){ if(propDirty.props[k]&&propDirty.props[k].t===d.t) delete propDirty.props[k]; }
       else if(j&&j.ok===false&&j.error){ toast("The Sheet did not save the property: "+j.error,true); }
     }).catch(()=>{})); });
+  /* v417: deleted properties — the Sheet drops every row of the tract */
+  (propDirty.propDel||[]).slice().forEach(t=>{ jobs.push(sheetPost_({_action:"propdel", email:String(cruiserEmail||""), tract:t}).then(j=>{
+      if(j&&j.ok) propDirty.propDel=(propDirty.propDel||[]).filter(x=>x!==t);
+      else if(j&&j.ok===false&&j.error) toast("The Sheet did not delete the property: "+j.error,true); }).catch(()=>{})); });
   /* v407: compartments given another tract — the Sheet moves their rows (compartments, activities, pieces) */
   (propDirty.compMove||[]).slice().forEach(mv=>{ jobs.push(sheetPost_({_action:"compmove", email:String(cruiserEmail||""), from:mv.from, to:mv.to, names:mv.names}).then(j=>{
       if(j&&j.ok) propDirty.compMove=(propDirty.compMove||[]).filter(x=>x!==mv);
@@ -11372,7 +11390,8 @@ function propRender_(keep){
      `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="closeDataSheet_();openMap();setTimeout(function(){ propZoomTo_(_ppTract); },80)">🔍 Show this property on the map</button>`+
      `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="mvOpen_()">💾 Saved map versions</button>`+
      `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="exOpen_()">⤓ Export all layers (one zip, shapefiles + GeoJSON)</button>`;
-  h+=`<div style="display:flex;gap:8px;margin:12px 0 6px"><button type="button" class="btn submit" style="flex:1" onclick="propSaveForm_()">Save</button>`+
+  h+=`<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px;border-color:#7a3a3a;color:#e9c9c9" onclick="propDelete_(_ppTract)">🗑 Delete this property…</button>`+
+  `<div style="display:flex;gap:8px;margin:12px 0 6px"><button type="button" class="btn submit" style="flex:1" onclick="propSaveForm_()">Save</button>`+
      `<button type="button" class="btn ghost" style="flex:1" onclick="propSaveForm_(true)">Area summary</button></div>`;
   const waiting=!!propDirty.props[propK_(t)]||!!propDirty.comps[propK_(t)];
   h+=`<div style="font-size:11px;color:#8fae95">${waiting?"Saved on this phone — waiting to go to the Sheet.":(p.at?"In step with the Sheet"+(p.by?" · last saved by "+esc(p.by):"")+".":"")}</div>`;
@@ -11443,6 +11462,28 @@ function propUseFile_(id){ if(!id) return; const f=(boundFiles||[]).find(x=>x.id
   propBndSet_(rings, f.name); }
 function propUseDrawn_(i){ if(i==="") return; const pg=(polys||[])[+i]; if(!pg||!pg.pts||pg.pts.length<3) return;
   propBndSet_([pg.pts.map(p=>[p[0],p[1]])], pg.name||"the drawn shape"); }
+/* v417 — delete a property: its record, outline, compartment records, pieces, points, lines, notes and planned
+   activities — on this phone now, and on the Sheet (`propdel`, queued until it is sent). Plots are not touched: they
+   are the crew's data and keep their TRACT. A loaded boundary file is left on the phone (its compartments for the
+   tract are ignored once the records are gone only if the file is removed too — the toast says so). */
+function propDelete_(tract){ const t=String(tract||_ppTract||propActiveTract_()||"").trim(); if(!t) return; const k=propK_(t);
+  const n={comps:Object.keys((PROPS.comps||{})[k]||{}).length, shapes:csOf_(t).length, feats:Object.values(PROPS.feats||{}).filter(f=>f&&propK_(f.tract)===k).length, lines:Object.values(PROPS.lines||{}).filter(f=>f&&propK_(f.tract)===k).length, notes:Object.values(PROPS.notes||{}).filter(f=>f&&propK_(f.tract)===k).length, acts:Object.values(PROPS.acts||{}).filter(f=>f&&propK_(f.tract)===k).length};
+  const plots=(saved||[]).filter(p=>propK_(p.TRACT)===k).length;
+  if(!confirm("Delete the property "+t+"?\n\nGone from this phone and the Sheet: its record and outline, "+n.comps+" compartment record"+(n.comps===1?"":"s")+", "+n.shapes+" piece"+(n.shapes===1?"":"s")+", "+n.feats+" point"+(n.feats===1?"":"s")+", "+n.lines+" line"+(n.lines===1?"":"s")+", "+n.notes+" note"+(n.notes===1?"":"s")+", "+n.acts+" planned activit"+(n.acts===1?"y":"ies")+".\n"+(plots?plots+" plot"+(plots===1?"":"s")+" keep the tract name and stay.":"No plots are affected.")+"\n\nThis cannot be undone.")) return;
+  if(!confirm("Really delete "+t+"? Tap OK to go ahead.")) return;
+  const dropIds=(map,delList)=>{ Object.keys(map||{}).forEach(id=>{ const f=map[id]; if(f&&propK_(f.tract)===k){ delete map[id]; if(delList&&delList.indexOf(id)<0) delList.push(id); } }); };
+  propDirty.shapeDel=propDirty.shapeDel||[]; propDirty.featDel=propDirty.featDel||[]; propDirty.lineDel=propDirty.lineDel||[]; propDirty.noteDel=propDirty.noteDel||[]; propDirty.actDel=propDirty.actDel||[];
+  dropIds(PROPS.shapes,propDirty.shapeDel); dropIds(PROPS.feats,propDirty.featDel); dropIds(PROPS.lines,propDirty.lineDel); dropIds(PROPS.notes,propDirty.noteDel); dropIds(PROPS.acts,propDirty.actDel);
+  [propDirty.shapes,propDirty.feats,propDirty.lines,propDirty.notes,propDirty.acts].forEach(d=>{ if(d) Object.keys(d).forEach(id=>{ if(!(PROPS.shapes||{})[id]&&!(PROPS.feats||{})[id]&&!(PROPS.lines||{})[id]&&!(PROPS.notes||{})[id]&&!(PROPS.acts||{})[id]) delete d[id]; }); });
+  delete PROPS.props[k]; delete PROPS.comps[k]; delete propDirty.props[k]; delete propDirty.comps[k]; delete (PROPS.lio||{})[k];
+  (propDirty.propDel=propDirty.propDel||[]).push(t);
+  try{ if(!plots) tracts=(tracts||[]).filter(x=>propK_(x)!==k); }catch(e){}
+  try{ ldbDelete_(lioKey_(t)); }catch(e){}
+  if(propK_(propActiveTract_())===k) propSetActive_(""); if(typeof mapOnly!=="undefined"&&propK_(mapOnly)===k) mapOnlyClear_();
+  propPersist_(); try{ if(propBackendOk) propPush_().then(()=>{}); else propSync_(); }catch(e){}
+  try{ closeDataSheet_(); }catch(e){} try{ lioRender_(); renderBoundaries(); findPropFill_(); }catch(e){}
+  const fileHas=(boundFiles||[]).some(bf=>(bf.features||[]).some(f=>propK_(featTract_(f))===k));
+  toast("Deleted "+t+(fileHas?" — the loaded boundary file still carries its compartments; remove the file under Layers → Files if they should go too":""),true); }
 function propClearBnd_(){ const t=_ppTract; if(!t) return; if(!confirm("Remove the property outline for "+t+"?")) return; try{ const k=propK_(t); if(PROPS.props[k]) delete PROPS.props[k].bndAuto; }catch(e){}
   propSaveLocal_({tract:t, boundary:[]}, null); propRender_(true); try{ lioRender_(); }catch(e){} }
 /* ---------- v405 — the provincial CLTIP viewer as a way to get the property outline ----------
@@ -11481,13 +11522,19 @@ function cltipLoad_(file, tract){
     const bad=rings.some(r=>r.some(q=>!(q[0]>41&&q[0]<57&&q[1]>-96&&q[1]<-74)));
     if(bad){ toast("The export landed outside Ontario — its projection was not read. Export it again with the projection.",true); return; }
     closeInfoSheet_(); propBndSet_(rings, "the CLTIP viewer export", t);
-    try{ if(_ppTract===t) propRender_(true); }catch(e){} };
+    try{ if(_ppTract===t) propRender_(true); }catch(e){}
+    /* v417: the outline is in — the next step is to cut it into compartments */
+    setTimeout(()=>{ try{ if(!csOf_(t).length && confirm("Outline saved for "+t+". Cut it into compartments on the map now? (Property details → compartment layer does the same later.)")){ try{ closeDataSheet_(); }catch(e){} openMap(); setTimeout(()=>{ propSetActive_(t); csEdit_(t); },400); } }catch(e){} },300); };
   const fail=e=>toast("Couldn't read the export: "+(e&&e.message||e),true);
-  loadMapLibs().then(()=>{
-    if(/\.(geojson|json)$/.test(lower)) file.text().then(x=>ensureWGS84(JSON.parse(x))).then(done).catch(fail);
-    else if(/\.(zip|shp)$/.test(lower)) file.arrayBuffer().then(b=>shp(b)).then(done).catch(fail);
-    else toast("Load the viewer's shapefile export (.zip) or a GeoJSON",true); }).catch(fail);
+  loadMapLibs().then(()=>fileKind_(file)).then(kind=>{      // v417: by the bytes — an Android picker may hand over "document" with no extension
+    if(kind==="json") file.text().then(x=>ensureWGS84(JSON.parse(x))).then(done).catch(fail);
+    else if(kind==="zip"||kind==="shp") file.arrayBuffer().then(b=>shp(b)).then(done).catch(fail);
+    else toast("Load the viewer's shapefile export (.zip) or a GeoJSON — this file is "+(lower.split(".").pop()||"of an unknown kind"),true); }).catch(fail);
 }
+/* v417: what a file is, from its first bytes: "PK" = zip, 0x0000270A = shapefile, "{" or "[" = JSON; else by its name */
+async function fileKind_(file){ try{ const b=new Uint8Array(await file.slice(0,64).arrayBuffer()); if(b[0]===0x50&&b[1]===0x4B) return "zip"; if(b[0]===0&&b[1]===0&&b[2]===0x27&&b[3]===0x0A) return "shp";
+    let i=0; while(i<b.length&&(b[i]===0xEF||b[i]===0xBB||b[i]===0xBF||b[i]===0x20||b[i]===0x0A||b[i]===0x0D||b[i]===0x09)) i++; if(b[i]===0x7B||b[i]===0x5B) return "json"; }catch(e){}
+  const n=String(file&&file.name||"").toLowerCase(); if(/\.(geojson|json)$/.test(n)) return "json"; if(/\.zip$/.test(n)) return "zip"; if(/\.shp$/.test(n)) return "shp"; if(/\.kml$/.test(n)) return "kml"; return ""; }
 function propSummaryHtml_(s){
   const f2=x=>(Math.round(x*100)/100).toFixed(2), td=`style="text-align:right"`, tdl=`style="text-align:right;padding-right:4px"`;
   const tag=r=>r.adjSrc==="typed"?' <small style="color:#e8c35a">typed</small>':r.adjSrc==="layer"?' <small style="color:#e8c35a">layer</small>':"";
@@ -11820,7 +11867,11 @@ function lioLabels_(){
     n++; L.marker(c,{interactive:false,keyboard:false,icon:L.divIcon({className:"lio-lbl",html:`<span style="font:600 10px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000;white-space:nowrap">${esc(txt)}</span>`,iconSize:[0,0]})}).addTo(lioLabelLayer); });
 }
 /* When the map opens: the chosen property's layers, fetched if this phone has none yet. */
+let _propAutoAll=false;
 function lioOnMapOpen_(){
+  /* v417: every property's records, outlines and compartments come down once per session when the map opens (Chris,
+     2026-10-13); the chosen property's detail is still fetched on its own as before */
+  if(!_propAutoAll && !_propSyncedAll && connected && !isOffline()){ _propAutoAll=true; setTimeout(()=>{ try{ propSync_(ok=>{ if(ok){ try{ lioRender_(); findPropFill_(); }catch(e){} } },{all:true}); }catch(e){} },800); }
   const t=propActiveTract_();
   const go=()=>{ if(t) lioEnsure_(t,false,true); else lioRender_(); };
   if(!t){ lioRender_(); return; }
@@ -11859,6 +11910,7 @@ function propBarFill_(){ const sel=$("propBarSel"), box=$("propBarBtns"); if(!se
   box.innerHTML=B("propBarClose_();openPropSheet_(propActiveTract_())","🏠 Details & areas",!has)+B("propZoomTo_()","🔍 Zoom to it",!has)+
     B("propBarClose_();_ppTract=propActiveTract_();mmOpen_(4)","🗺 Map 4",!has)+B("propBarClose_();_ppTract=propActiveTract_();mmOpen_(6)","🗺 Map 6",!has)+
     B("propBarClose_();_ppTract=propActiveTract_();pkOpen_()","📦 Map package",!has)+
+    B("propBarClose_();_ppTract=propActiveTract_();csEdit_(propActiveTract_())","✂ Cut compartments",!has)+
     ((typeof mapOnly!=="undefined"&&mapOnly)?B("mapOnlyClear_();propBarFill_()","👁 Show all properties"):B("propBarClose_();if($('layersMenu').style.display==='none') toggleLayersMenu(); layersTab_('prop');","☰ Provincial layers & more"));
 }
 function propBarPick_(v){ if(!v) return; propPickActive_(v); propBarFill_(); setTimeout(propBarClose_,500); }
@@ -11883,6 +11935,8 @@ function findProps_(q){ const k=propK_(q); if(!k) return []; const list=propTrac
 /* v402: the Find bar's drop-down of every property, so no one has to know the names — those with nothing to zoom to say so */
 function findPropFill_(){ const el=$("findProp"); if(!el) return; const cur=propActiveTract_();
   el.innerHTML=`<option value="">Or pick a property…</option>`+propTracts_().map(t=>{ const e=(typeof ovExtOf_==="function"?ovExtOf_(t):propExtent_(t)); return `<option value="${esc(t)}">${esc(t)}${propK_(t)===propK_(cur)?" (shown)":""}${e?"":" — nothing to zoom to yet"}</option>`; }).join(""); }
+/* v417: one button that shows every property again, drops the search pin and empties the box */
+function findClearAll_(){ try{ mapOnlyClear_(); }catch(e){} try{ if(typeof findPinClear_==="function") findPinClear_(); else if(findPin&&fmap){ fmap.removeLayer(findPin); findPin=null; } }catch(e){} const i=$("findInput"); if(i) i.value=""; try{ findRender_([]); }catch(e){} findClose_(); }
 function findPickProp_(t){ propSetActive_(t); mapOnly=String(t||""); try{ STORE&&STORE.setItem("fi_maponly",mapOnly); }catch(e){}      // v406: only this one
   try{ renderBoundaries(); renderMapPins(); if(crewShown&&crewData.length) renderCrewPlots(crewData,true); }catch(e){} try{ lioCache=null; lioRender_(); lioOnMapOpen_(); }catch(e){} try{ const b=$("findShowAll"); if(b) b.style.display=""; }catch(e){}
   const z=propZoomTo_(t); findMsg_(z?"Showing only "+t+" — tap Show all for the rest":t+" has no outline or compartments to zoom to yet"); if(z) setTimeout(findClose_,900); }
