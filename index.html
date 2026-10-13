@@ -86,6 +86,13 @@
   .layers-menu{ position:fixed; top:calc(54px + env(safe-area-inset-top)); bottom:calc(10px + env(safe-area-inset-bottom)); right:10px; z-index:5300; background:#0f1e0d; border:1px solid var(--line2,#33623a);
     border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,.6); width:min(82vw,300px); display:flex; flex-direction:column; gap:6px; padding:8px; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; touch-action:pan-y; }
   .layers-scroll{ display:contents; }
+  /* v414: the menu in four tabs — Layers · Property · Style · Files — instead of one long list of switches and eight folded groups */
+  .ltabs{ position:sticky; top:-8px; z-index:2; display:grid; grid-template-columns:repeat(4,1fr); gap:4px; background:#0f1e0d; padding:8px 0 6px; margin:-8px 0 0; }
+  .ltabs button{ padding:9px 2px; border-radius:8px; border:1px solid #284a2c; background:#0e1b0c; color:#a9c9b0; font:inherit; font-size:12px; cursor:pointer; }
+  .ltabs button.on{ background:#1c2e14; border-color:#c8952a; color:#e8b84b; font-weight:700; }
+  .ltab{ display:none; flex-direction:column; gap:6px; }
+  .ltab.on{ display:flex; }
+  .ltab .lgroup>summary{ font-family:system-ui,-apple-system,sans-serif; letter-spacing:0; font-size:13px; }
   .layers-scroll > *{ flex:0 0 auto; }
   .layers-menu>button, .lgroup-body>button{ text-align:left; padding:11px 12px; border-radius:8px; border:1px solid var(--line2,#33623a); background:#16271a; color:#e8f0e6; font:inherit; font-size:13px; cursor:pointer; width:100%; }
   .lgroup{ border:1px solid #284a2c; border-radius:9px; background:#0e1b0c; overflow:hidden; }
@@ -101,11 +108,11 @@
   .layer-row span{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .layer-row small{ color:#7a9a76; }
   .layer-row button{ background:#2a1414; border:1px solid #5b2b2b; color:#e8b4b4; border-radius:6px; width:28px; height:28px; font-size:13px; cursor:pointer; flex:none; }
-  #layerVisList .visrow{ display:flex; align-items:center; gap:8px; padding:10px 12px; margin-top:6px; border-radius:8px; border:1px solid var(--line2,#33623a); background:#16271a; color:#e8f0e6; font-size:13px; cursor:pointer; }
-  #layerVisList .visrow span:first-child{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  #layerVisList .visrow small{ color:#7a9a76; }
-  #layerVisList .visdot{ flex:none; min-width:38px; text-align:center; padding:3px 8px; border-radius:20px; font:700 11px/1 system-ui; letter-spacing:.05em; background:#2a1414; color:#e8b4b4; border:1px solid #5b2b2b; }
-  #layerVisList .visdot.on{ background:#123a1c; color:#8fe6a0; border-color:#2f7a44; }
+  #layerVisList .visrow, #lioToggles .visrow{ display:flex; align-items:center; gap:8px; padding:10px 12px; margin-top:6px; border-radius:8px; border:1px solid var(--line2,#33623a); background:#16271a; color:#e8f0e6; font-size:13px; cursor:pointer; }
+  #layerVisList .visrow span:first-child, #lioToggles .visrow span:first-child{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #layerVisList .visrow small, #lioToggles .visrow small{ color:#7a9a76; }
+  #layerVisList .visdot, #lioToggles .visdot{ flex:none; min-width:38px; text-align:center; padding:3px 8px; border-radius:20px; font:700 11px/1 system-ui; letter-spacing:.05em; background:#2a1414; color:#e8b4b4; border:1px solid #5b2b2b; }
+  #layerVisList .visdot.on, #lioToggles .visdot.on{ background:#123a1c; color:#8fe6a0; border-color:#2f7a44; }
   #layerVisList .visbtn{ flex:none; width:32px; height:30px; border-radius:7px; background:#16271a; color:#cdebcf; border:1px solid #33623a; font-size:14px; cursor:pointer; }
   #layerVisList .visbtn.on{ background:#123a1c; color:#8fe6a0; border-color:#2f7a44; }
   #sppPickerList .pick{ display:block; width:100%; text-align:left; padding:11px 12px; margin:4px 0; border-radius:8px; border:1px solid #d7e2d5; background:#fff; color:#16271a; font:inherit; font-size:14px; cursor:pointer; }
@@ -140,8 +147,19 @@
     color:#bfe6cb; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.5);
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; padding:4px 2px; }
   .map-tool .mt-i{ font-size:17px; line-height:1 }
-  .map-tool .mt-l{ font-size:9px; letter-spacing:.02em; font-family:var(--mono); opacity:.85 }
+  .map-tool .mt-l{ font-size:10px; letter-spacing:0; font-family:system-ui,-apple-system,sans-serif; opacity:.9 }
   .map-tool.on{ border-color:#c8952a; color:#e8b84b; background:#1c2e14; }
+  /* v413: the rail in three groups — find & show, make & edit (behind one ✎ Edit button, as a row to its left), field work.
+     Fourteen stacked buttons overran a phone screen and put "Tract" next to "Names". */
+  .map-rail{ gap:6px; max-height:calc(100vh - 150px - env(safe-area-inset-top)); }
+  .rail-gap{ height:6px; flex:none; }
+  .rail-item{ position:relative; }
+  .rail-sub{ display:none; position:absolute; right:58px; top:0; grid-template-columns:repeat(3,52px); gap:6px; padding:5px; border-radius:12px; background:rgba(15,30,13,.72); }
+  .map-rail.edit-open .rail-sub{ display:grid; }
+  body.bar-open .toast{ bottom:150px; }   /* above an editing bar, not on it */
+  .map-rail.edit-open #toolEdit{ border-color:#c8952a; color:#e8b84b; background:#1c2e14; }
+  body.bar-open .map-drop, body.bar-open .map-chips, body.bar-open .map-legend{ display:none !important; }   /* an editing bar has the bottom of the screen */
+  #dataSheet label:has(input[type=checkbox]), #infoSheet label:has(input[type=checkbox]){ text-transform:none; letter-spacing:0; }
   .pdf-opacity-bar{ position:absolute; left:10px; bottom:180px; z-index:5200; display:flex; align-items:center; gap:8px;
     background:rgba(15,30,13,.92); border:1px solid var(--line2,#33623a); border-radius:8px; padding:6px 11px; font-family:var(--mono); }
   .pdf-opacity-bar label{ font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:#7a9a76; }
@@ -708,22 +726,34 @@
   </div>
   <div class="layers-menu" id="layersMenu" style="display:none">
     <div class="layers-scroll">
+    <div class="ltabs" id="ltabs">
+      <button type="button" data-tab="layers" class="on" onclick="layersTab_('layers')">Layers</button>
+      <button type="button" data-tab="prop" onclick="layersTab_('prop')">Property</button>
+      <button type="button" data-tab="style" onclick="layersTab_('style')">Style</button>
+      <button type="button" data-tab="files" onclick="layersTab_('files')">Files</button>
+    </div>
+    <div class="ltab on" id="ltab_layers">
     <div id="layerStatus" class="layer-status"></div>
     <div id="layerVisList"></div>
 
     <details class="lgroup" id="lgroupImg"><summary>🛰 Aerial photo — <span id="imgName">Esri world imagery</span></summary>
       <div class="lgroup-body" id="imgList"></div>
-      <div class="lgroup-body" style="padding-top:0">
+    </details>
+    </div>
+    <div class="ltab" id="ltab_style">
+    <details class="lgroup" open data-open><summary>◐ Photo &amp; fill transparency</summary>
+      <div class="lgroup-body">
         <div class="map-field"><label>Photo opacity <span id="alpha_photo_v">100%</span></label><input type="range" min="20" max="100" step="5" id="alpha_photo" oninput="mapAlphaSet_('photo',this.value)" style="min-height:0;padding:0"></div>
         <div class="map-field"><label>Compartment fill <span id="alpha_fill_v">10%</span></label><input type="range" min="0" max="60" step="5" id="alpha_fill" oninput="mapAlphaSet_('fill',this.value)" style="min-height:0;padding:0"></div>
       </div>
     </details>
 
-    <details class="lgroup" ontoggle="if(this.open) mapStyleForm_()"><summary>🎨 Map style — colours, widths, sizes</summary>
+    <details class="lgroup" open data-open ontoggle="if(this.open&&typeof mapStyleForm_==='function') mapStyleForm_()"><summary>🎨 Map style — colours, widths, sizes</summary>
       <div class="lgroup-body" id="mapStyleBody"></div>
     </details>
-
-    <details class="lgroup"><summary>📁 Load &amp; import layers</summary>
+    </div>
+    <div class="ltab" id="ltab_files">
+    <details class="lgroup" open data-open><summary>📁 Load &amp; import layers</summary>
       <div class="lgroup-body">
         <button type="button" onclick="closeLayersMenu();openImportPlots()">📥 Import plots (another device / source)</button>
         <button type="button" onclick="closeLayersMenu();restoreFromSheet()">☁ Restore plots from the Sheet</button>
@@ -787,7 +817,9 @@
       </div>
     </details>
 
-    <details class="lgroup" id="lgroupProp"><summary>🏠 Property &amp; provincial layers</summary>
+    </div>
+    <div class="ltab" id="ltab_prop">
+    <details class="lgroup" id="lgroupProp" open data-open><summary>🏠 Property &amp; provincial layers</summary>
       <div class="lgroup-body">
         <div class="map-field"><label>Property shown on the map (picking one zooms to it)</label><select id="propActiveSel" onchange="propPickActive_(this.value)"></select></div>
         <label style="display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:13px;color:#e8f0e6"><input type="checkbox" id="ovLblChk" checked onchange="toggleLabels('ov')" style="width:18px;height:18px"> Property names on the zoomed-out map</label>
@@ -803,6 +835,8 @@
       </div>
     </details>
 
+    </div>
+    <div class="ltab" id="ltab_layers2" data-pane="layers">
     <details class="lgroup"><summary>👥 Crew &amp; live location</summary>
       <div class="lgroup-body">
         <button type="button" id="crewBtn" onclick="closeLayersMenu();fetchCrew(false)">👥 Crew plots — tap to refresh</button>
@@ -825,6 +859,8 @@
       </div>
     </details>
 
+    </div>
+    <div class="ltab" id="ltab_files2" data-pane="files">
     <details class="lgroup"><summary>〰 Track, route &amp; area exports</summary>
       <div class="lgroup-body">
         <button type="button" id="trackShowBtn" onclick="closeLayersMenu();toggleTrackShown()">〰 Hide track log</button>
@@ -840,20 +876,29 @@
       </div>
     </details>
     </div>
+    </div>
   </div>
   <div id="fmap"></div>
   <div class="map-rail">
     <!-- tap-to-place button removed: use "＋ Create inventory plot" (crosshair/GPS) instead; tapping conflicted with selecting polygons -->
     <button class="map-tool" id="toolFind" type="button" onclick="findOpen_()" title="Find an address or a property"><span class="mt-i">🔎</span><span class="mt-l">Find</span></button>
+    <button class="map-tool" id="toolProp" type="button" onclick="propBarOpen_()" title="The property shown on the map: pick it, its details, its maps"><span class="mt-i">🏠</span><span class="mt-l">Property</span></button>
     <button class="map-tool on" id="toolNames" type="button" onclick="namesToggle_()" title="Property names and point symbols on or off"><span class="mt-i">🏷</span><span class="mt-l">Names</span></button>
-    <button class="map-tool" id="toolTract" type="button" onclick="taOpen_()" title="Draw a ring around compartments and give them a tract"><span class="mt-i">⬚</span><span class="mt-l">Tract</span></button>
-    <button class="map-tool" id="toolText" type="button" onclick="mnOpen_()" title="Notes and arrows for the maps"><span class="mt-i">✎</span><span class="mt-l">Text</span></button>
-    <button class="map-tool" id="toolPoints" type="button" onclick="ftOpen_()" title="Buildings, gates and special features for the maps"><span class="mt-i">📍</span><span class="mt-l">Points</span></button>
-    <button class="map-tool" id="toolLines" type="button" onclick="lnOpen_()" title="Trails, roads and streams for the maps"><span class="mt-i">⤳</span><span class="mt-l">Lines</span></button>
+    <div class="rail-gap"></div>
+    <div class="rail-item">
+      <button class="map-tool" id="toolEdit" type="button" onclick="railEditToggle_()" title="Drawing and editing tools for the maps"><span class="mt-i">✎</span><span class="mt-l">Edit</span></button>
+      <div class="rail-sub" id="railEdit" onclick="railEditToggle_(true)">
+        <button class="map-tool" id="toolText" type="button" onclick="mnOpen_()" title="Notes and arrows for the maps"><span class="mt-i">✎</span><span class="mt-l">Text</span></button>
+        <button class="map-tool" id="toolPoints" type="button" onclick="ftOpen_()" title="Buildings, gates and special features for the maps"><span class="mt-i">📍</span><span class="mt-l">Points</span></button>
+        <button class="map-tool" id="toolLines" type="button" onclick="lnOpen_()" title="Trails, roads and streams for the maps"><span class="mt-i">⤳</span><span class="mt-l">Lines</span></button>
+        <button class="map-tool" id="toolPoly" type="button" onclick="togglePoly()" title="Draw a compartment"><span class="mt-i">⬠</span><span class="mt-l">Draw</span></button>
+        <button class="map-tool" id="toolTract" type="button" onclick="taOpen_()" title="Ring compartments and give them a tract"><span class="mt-i">⬚</span><span class="mt-l">Tract</span></button>
+        <button class="map-tool" id="toolMeasure" type="button" onclick="toggleMeasure()" title="Measure a distance or an area"><span class="mt-i">📐</span><span class="mt-l">Measure</span></button>
+      </div>
+    </div>
+    <div class="rail-gap"></div>
     <button class="map-tool" id="toolTrack" type="button" onclick="toggleTrack()" title="Record where you walk"><span class="mt-i">⏺</span><span class="mt-l">Track</span></button>
-    <button class="map-tool" id="toolMeasure" type="button" onclick="toggleMeasure()" title="Measure a distance or an area"><span class="mt-i">📐</span><span class="mt-l">Measure</span></button>
     <button class="map-tool" id="toolRoute" type="button" onclick="toggleRoute()" title="Lay out a cruise line to follow"><span class="mt-i">〰️</span><span class="mt-l">Route</span></button>
-    <button class="map-tool" id="toolPoly" type="button" onclick="togglePoly()" title="Outline a compartment"><span class="mt-i">⬠</span><span class="mt-l">Draw</span></button>
     <button class="map-tool" id="toolCount" type="button" onclick="openCount_()" title="Count plots and reference points"><span class="mt-i">#️⃣</span><span class="mt-l">Count</span></button>
     <button class="map-tool" id="toolSelect" type="button" onclick="toggleSelect()" title="Pick out plots to delete, export or email"><span class="mt-i">☒</span><span class="mt-l">Select</span></button>
     <button class="map-tool" id="toolPdf" type="button" onclick="togglePDF()" title="Show or hide the PDF map" style="display:none"><span class="mt-i">🗺</span><span class="mt-l">PDF</span></button>
@@ -872,6 +917,12 @@
     <select id="findProp" onchange="if(this.value){ findPickProp_(this.value); this.value=''; }" onfocus="findPropFill_()" style="margin-top:6px;width:100%;font-size:15px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"><option value="">Or pick a property…</option></select>
     <button type="button" id="findShowAll" onclick="mapOnlyClear_();findClose_()" style="display:none;margin-top:6px;width:100%;padding:8px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">👁 Show all properties again</button>
     <div id="findResults" style="margin-top:6px;max-height:40vh;overflow-y:auto;-webkit-overflow-scrolling:touch"></div>
+  </div>
+  <!-- v413: the property, one tap from the map -->
+  <div id="propBar" style="display:none;position:absolute;left:10px;right:72px;top:calc(64px + env(safe-area-inset-top));z-index:5450;background:rgba(15,30,13,.96);border:1px solid #33623a;border-radius:10px;padding:8px;box-shadow:0 2px 12px rgba(0,0,0,.5)">
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><div style="flex:1;font-weight:700;color:#eafae8;font-size:14px">Property</div><button type="button" onclick="propBarClose_()" style="flex:none;padding:6px 10px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#cdebcf;font:inherit;font-size:13px">✕</button></div>
+    <select id="propBarSel" onchange="propBarPick_(this.value)" style="width:100%;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></select>
+    <div id="propBarBtns" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px"></div>
   </div>
   <div class="map-legend" id="mapLegend">
     <!-- The legend grows with the crew, so it can cover a good part of a phone screen. Tapping the
@@ -911,7 +962,7 @@
   <div class="map-chips" id="mapChips">
     <button type="button" onclick="zoomToMe_()" title="Center on my GPS">◎ Me</button>
     <button type="button" onclick="fitAllLayers_()" title="Zoom to fit everything">⤢ Fit all</button>
-    <button type="button" onclick="openSearch()" title="Search stands / compartments, or filter plots by attribute">🔎 Search</button>
+    <button type="button" onclick="openSearch()" title="Search stands or filter the plots by an attribute">⊙ Plots</button>
     <button type="button" onclick="openMyLabel()" title="Label plot dots by analysis">🏷 Label</button>
     <button type="button" onclick="openMapExport()" title="Export plots / compartments + analysis to shapefile">📤 Export</button>
     <button type="button" id="crewWhereBtn" onclick="toggleCrewWhere()" title="Show or hide where the crew are, and where they were last seen">👤 Crew</button>
@@ -1229,7 +1280,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-12 · v408";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-13 · v414";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -6636,6 +6687,7 @@ async function openMap(){
   try{ await loadMapLibs(); }catch(e){ toast("Map needs a connection the first time",true); }
   if(!window.L){ return; }
   if(!fmap) initMap();
+  try{ railEditInit_(); }catch(e){}
   setTimeout(()=>fmap.invalidateSize(),60);
   setTimeout(()=>{ try{ fmap.invalidateSize(); }catch(e){} },350);   // iOS: recalc after the dynamic viewport / toolbar settles
   setTimeout(()=>{ try{ fmap.invalidateSize(); }catch(e){} },800);
@@ -6708,7 +6760,7 @@ function initMap(){
     if(nearbyPlotPopup_(e.latlng)) return;                    // a plot pin near the tap wins over the boundary
     { const bf=boundaryFeatureAt(e.latlng.lat,e.latlng.lng); if(bf) showBoundPopup(e.latlng,bf); } });
   // Keep taps on the on-map controls from also being treated as map clicks (which in draw modes would drop a stray point).
-  try{ ["measureBar","routeBar","polyBar","mapDrop","layersMenu","findBar"].forEach(id=>{ const el=$(id); if(el){ L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); } });
+  try{ ["measureBar","routeBar","polyBar","mapDrop","layersMenu","findBar","propBar"].forEach(id=>{ const el=$(id); if(el){ L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); } });
     const sc=document.querySelector(".layers-scroll"); if(sc){ L.DomEvent.disableClickPropagation(sc); L.DomEvent.disableScrollPropagation(sc); }
     const rail=document.querySelector(".map-rail"); if(rail) L.DomEvent.disableClickPropagation(rail); }catch(e){}
   fmap.on("moveend zoomend",()=>{ try{ renderLabels(); renderRefLabels(); }catch(e){}
@@ -6953,9 +7005,11 @@ function csFromDrawn_(pg){
   try{ const P=cgProj_(rings[0][0][0],rings[0][0][1]); if(!cgSound_([{rings}],null,P)){ toast("That area crosses itself — kept as a drawn area on this phone only",true); return false; } }catch(e){}
   addTract(t); const taken=csOf_(t).map(c=>c.name), used=n=>taken.some(x=>propK_(x)===propK_(n)); let name=String(pg.name||"").trim();
   if(!name||used(name)){ if(!name||/^P-\d+$/.test(name)){ for(let i=1;;i++){ if(!used("P-"+i)){ name="P-"+i; break; } } } else name=csNextName_(t,taken); }   // a drawn area's default name counts the pieces too
-  csCommit_(t, csOf_(t).concat([{id:null,name,rings}]), "drew "+name);
+  const list=csOf_(t).map(c=>Object.assign({},c,{rings:c.rings.map(r=>r.slice())})).concat([{id:null,name,rings}]);
+  let holed=0; try{ holed=islandHoles_(list.map(c=>c.rings)); }catch(e){}      // v411: drawn inside a piece → an island of it
+  csCommit_(t, list, "drew "+name);
   const i=polys.indexOf(pg); if(i>=0){ polys.splice(i,1); try{ persistPoly(); }catch(e){} }
-  toast(name+" saved as a compartment of "+t+" — it goes to the Sheet"); return true; }
+  toast(name+" saved as a compartment of "+t+(holed?" (an island — cut out of the piece around it)":"")+" — it goes to the Sheet"); return true; }
 function removeBoundFile(id){
   boundFiles=boundFiles.filter(f=>f.id!==id); rebuildBound();
   cacheBoundaries(); renderBoundaries(); renderLayerList(); updateLayerStatus(); updateInStand();
@@ -7891,7 +7945,7 @@ function toggleLegend_(){
 function applyLegendPref_(){
   try{
     if(!STORE) return;
-    if(STORE.getItem("fi_legendmini")==="1"){
+    if(STORE.getItem("fi_legendmini")!=="0"){      // v413: the key starts folded; a tap opens it and that is remembered
       const el=$("mapLegend"); if(el) el.classList.add("mini");
       const t=$("lgToggle"); if(t) t.textContent="KEY ▸";
     }
@@ -8737,8 +8791,15 @@ function exportTrackShp(){
   toast(`Track shapefile (UTM 17N) exported — ${trackLog.length} pts`);
 }
 
-function toggleLayersMenu(){ const m=$("layersMenu"); const show=m.style.display==="none"; if(show){ renderLayerList(); updateLayerStatus(); setTrackBtn(); try{ propMenuOpen_(); }catch(e){} try{ imgRender_(); }catch(e){} m.querySelectorAll("details.lgroup").forEach(d=>d.open=false); const fg=$("lgroupFields"); if(fg && typeof boundFiles!=="undefined" && boundFiles.length) fg.open=true; } m.style.display = show?"flex":"none"; document.body.classList.toggle("layers-open", show); }
+function toggleLayersMenu(){ const m=$("layersMenu"); const show=m.style.display==="none"; if(show){ renderLayerList(); updateLayerStatus(); setTrackBtn(); try{ propMenuOpen_(); }catch(e){} try{ layersTabInit_(); }catch(e){} try{ imgRender_(); }catch(e){} m.querySelectorAll("details.lgroup").forEach(d=>{ d.open=d.hasAttribute("data-open"); }); const fg=$("lgroupFields"); if(fg && typeof boundFiles!=="undefined" && boundFiles.length) fg.open=true; } /* v414: a tab's main group stays open */ m.style.display = show?"flex":"none"; document.body.classList.toggle("layers-open", show); }
 function closeLayersMenu(){ $("layersMenu").style.display="none"; document.body.classList.remove("layers-open"); }
+/* v414 — the menu's tabs; the last one used is remembered. Panes are the .ltab divs whose id or data-pane names the tab. */
+function layersTab_(name){ name=name||"layers"; document.querySelectorAll("#layersMenu .ltab").forEach(d=>{ const t=d.getAttribute("data-pane")||String(d.id||"").replace(/^ltab_/,""); d.classList.toggle("on",t===name); });
+  document.querySelectorAll("#ltabs button").forEach(b=>b.classList.toggle("on",b.getAttribute("data-tab")===name));
+  try{ STORE&&STORE.setItem("fi_layerstab",name); }catch(e){}
+  if(name==="prop"){ try{ propMenuOpen_(); }catch(e){} } if(name==="style"){ try{ mapStyleForm_(); }catch(e){} }
+  try{ const m=$("layersMenu"); if(m) m.scrollTop=0; }catch(e){} }
+function layersTabInit_(){ let t="layers"; try{ t=(STORE&&STORE.getItem("fi_layerstab"))||"layers"; }catch(e){} layersTab_(t); }
 function storageBytes_(){ let t=0; try{ for(let i=0;i<STORE.length;i++){ const k=STORE.key(i); t+=(k||"").length+(STORE.getItem(k)||"").length; } }catch(e){} return t; }
 function updateLayerStatus(){
   const el=$("layerStatus"); if(!el) return;
@@ -9115,13 +9176,16 @@ function featureAreaHa_(f){
 // used; otherwise the area is calculated from the shape. Multiple polygons sharing a compartment ID are summed.
 function compartmentAreas_(){
   const map={}, tally={}; if(!BOUND||!BOUND.features||!standField) return {areas:map,srcs:{}};
-  BOUND.features.forEach(f=>{ const pr=f.properties||{};
+  /* v410: calculated areas are net of islands — each feature's polygons with the holes cut, per tract */
+  const netHa={}; try{ const byT={}; BOUND.features.forEach((f,i)=>{ const t=propK_(featTract_(f)); (byT[t]=byT[t]||[]).push({i, polys:featPolys_(f)}); });
+    Object.values(byT).forEach(fs=>{ islandHoles_([].concat(...fs.map(x=>x.polys))); fs.forEach(x=>{ netHa[x.i]=geoPolysHa_(x.polys); }); }); }catch(e){}
+  BOUND.features.forEach((f,fi)=>{ const pr=f.properties||{};
     const stand=String((pr[standField]!=null?pr[standField]:"")).trim(); if(!stand) return;
     const tract=(tractField?String((pr[tractField]!=null?pr[tractField]:"")).trim():"") || manualTract || "";
     const nm = tract ? (tract+" · "+stand) : stand;    // match the summary's "Tract · Stand" key so different properties' same stand names don't collide
     let ha=NaN, official=false;
     if(areaField){ const raw=pr[areaField]; const v=parseFloat(raw); if(isFinite(v)&&v>0){ ha=v; official=true; } }
-    if(!isFinite(ha)) ha=featureAreaHa_(f);        // fall back to calculated area for this polygon
+    if(!isFinite(ha)) ha=isFinite(netHa[fi])?netHa[fi]:featureAreaHa_(f);        // fall back to calculated area for this polygon (net of islands)
     if(isFinite(ha)&&ha>0){ map[nm]=(map[nm]||0)+ha; const t=tally[nm]||(tally[nm]={off:0,calc:0}); official?t.off++:t.calc++; }
   });
   const srcs={};
@@ -9593,6 +9657,8 @@ function mapToolHelp_(){
     `<div><div style="color:#eafae8;font-size:13px">${n}</div>`+
     `<div style="color:#8fae95;font-size:11px;line-height:1.4;margin-top:1px">${d}</div></div></div>`;
   showInfoSheet_("The map tools",
+    row("🏠","Property","The property shown on the map: pick it (the map zooms to it), open its details and MFTIP areas, print its maps, or show every property again after a Find.")+
+    row("✎","Edit","Opens the drawing tools in a row: Text, Points, Lines, Draw, Tract and Measure. Tap again to tuck them away.")+
     row("✎","Text","Notes and arrows for the MFTIP maps: one tap for a note, two for an arrow (tail, then head). Size in inches as printed, bold, colour, and which map it goes on.")+
     row("⤳","Lines","Trails, private roads, skid trails and streams — and ponds, wetlands and other areas — for the MFTIP maps: made from the track log you recorded, traced over it, or tapped along the map. Each line has a name, a kind with its own line style, and a note. Shared through the Sheet.")+
     row("📍","Points","Buildings, gates, species at risk, stick nests, dens and other features for the MFTIP maps: pick the kind, then tap the map (or use your position). Each point can carry a name, a note and photos; a sensitive point is left off a printed map unless asked for. Shared through the Sheet.")+
@@ -10828,13 +10894,35 @@ function featTract_(f){ const pr=(f&&f.properties)||{}; return (tractField?Strin
    · The same compartment in two loaded files (an old and a revised boundary) is taken once, from the
      file loaded last. Several polygons of one compartment in ONE file are its parts, and add up.
    · A drawn shape counts only for a compartment no file has. */
+/* v410 — islands become holes (Chris, 2026-10-12: "the total area must equal the polygons added together; any polygon
+   within a larger one is excluded from the larger one's area"). A polygon lying wholly inside another (every corner
+   and edge-middle inside it, or within a metre of its edge) has its outer ring cut out of its nearest host as a hole,
+   so the host's area, label, summary row and Sheet figure are net of it. A host that already carries the hole (a
+   file that cuts them) is left alone. `polys` is a list of polygons, each [outer, ...holes] in [lat,lon]; the arrays
+   are changed in place (callers pass copies). Returns the number of holes cut. */
+function islandHoles_(polys){
+  const list=(polys||[]).filter(pg=>pg&&pg[0]&&pg[0].length>=3); if(list.length<2) return 0;
+  const P=cgProj_(list[0][0][0][0], list[0][0][0][1]), tol=1.0;
+  const XY=list.map(pg=>pg.map(r=>r.map(q=>P.xy(q)))), A=XY.map(x=>Math.abs(cgArea_(x[0])));
+  const nearRing=(q,r)=>{ let d=1/0; for(let m=0;m<r.length&&d>tol;m++) d=Math.min(d,cgSegD_(q[0],q[1],r[m],r[(m+1)%r.length]).d); return d<=tol; };
+  const samples=R=>{ const o=[]; for(let k=0;k<R.length;k++){ const a=R[k], b=R[(k+1)%R.length]; o.push(a,[(a[0]+b[0])/2,(a[1]+b[1])/2]); } return o; };
+  const within=(S,host)=>S.every(q=>cgInRing_(q[0],q[1],host[0])||nearRing(q,host[0]));
+  const alreadyHole=(S,host)=>host.slice(1).some(h=>S.every(q=>cgInRing_(q[0],q[1],h)||nearRing(q,h)));      // v412: within an existing hole (a cut island, say), not only the hole itself
+  let cut=0;
+  list.forEach((pg,i)=>{ const S=samples(XY[i][0]); let best=-1;
+    for(let j=0;j<list.length;j++){ if(j===i||A[j]<=A[i]) continue; if(best>=0&&A[j]>=A[best]) continue; if(within(S,XY[j])) best=j; }
+    if(best<0||alreadyHole(S,XY[best])) return;
+    list[best].push(pg[0].map(q=>[q[0],q[1]])); XY[best].push(XY[i][0]); cut++; });
+  return cut; }
 function propCompsGeo_(tract, ignoreMade){
   /* v387: a property with a compartment layer made from its outline: those pieces are its compartments.
      v391: `ignoreMade` reads the loaded files and drawn areas even when a layer exists (to copy them into it). */
   const made=(!ignoreMade && typeof csOf_==="function")?csOf_(tract):[];
   if(made.length){ const g={};
-    made.forEach(c=>{ const n=propK_(c.name); (g[n]||(g[n]={name:c.name, polygons:[], src:"made", unassigned:false})).polygons.push(c.rings); });
-    return Object.keys(g).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).map(n=>{ const c=g[n]; c.calcHa=+geoPolysHa_(c.polygons).toFixed(4); return c; }); }
+    made.forEach(c=>{ const n=propK_(c.name); (g[n]||(g[n]={name:c.name, polygons:[], src:"made", unassigned:false})).polygons.push(c.rings.slice()); });
+    const outM=Object.keys(g).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).map(n=>g[n]);
+    try{ islandHoles_([].concat(...outM.map(c=>c.polygons))); }catch(e){}      // v410
+    outM.forEach(c=>{ c.calcHa=+geoPolysHa_(c.polygons).toFixed(4); }); return outM; }
   const k=propK_(tract), files=(typeof boundFiles!=="undefined"&&boundFiles)||[];
   const hits=[], blanks=[];
   files.forEach(bf=>{ const hit={}, blank={};
@@ -10857,8 +10945,9 @@ function propCompsGeo_(tract, ignoreMade){
   const recs=PROPS.comps[k]||{};
   Object.keys(recs).forEach(n=>{ if(out[n]) return; const r=recs[n]||{}; const v=(r.calcHa===""||r.calcHa==null)?NaN:Number(r.calcHa);
     out[n]={name:r.name||n, polygons:[], src:"sheet", calcHa:v}; });
-  return Object.keys(out).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).map(n=>{ const c=out[n];
-    if(c.polygons.length) c.calcHa=+geoPolysHa_(c.polygons).toFixed(4); return c; });
+  const outL=Object.keys(out).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).map(n=>out[n]);
+  try{ islandHoles_([].concat(...outL.map(c=>c.polygons))); }catch(e){}      // v410: islands are holes in their host
+  outL.forEach(c=>{ if(c.polygons.length) c.calcHa=+geoPolysHa_(c.polygons).toFixed(4); }); return outL;
 }
 /* An outline's area: rings inside an odd number of others are holes (even-odd), so a parcel with a
    hole is not overstated. Rings are [[lat,lon],…]. */
@@ -11716,7 +11805,25 @@ function propMenuOpen_(){ const s=$("propActiveSel"); if(s) s.innerHTML=propActi
    Results near the map's centre are preferred. A chosen result is marked with a pin until cleared. */
 const FIND_URL="https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates";
 let findPin=null, _findSeq=0, _findHits=[];
-function findOpen_(){ const b=$("findBar"); if(!b) return;
+/* v413 — the rail's ✎ Edit group (Text, Points, Lines, Draw, Tract, Measure) opens as a row beside the button; it stays
+   open while one of those tools is on, and the choice is remembered */
+function railEditToggle_(force){ const r=document.querySelector(".map-rail"); if(!r) return; const on=force!=null?!!force:!r.classList.contains("edit-open"); r.classList.toggle("edit-open",on); try{ STORE&&STORE.setItem("fi_railedit",on?"1":"0"); }catch(e){} }
+function railEditInit_(){ try{ if(STORE&&STORE.getItem("fi_railedit")==="1") railEditToggle_(true); }catch(e){} }
+/* v413 — 🏠 Property on the rail: the property shown on the map, one tap away — pick it (zooms), its details, its maps */
+function propBarOpen_(){ const b=$("propBar"); if(!b) return; try{ findClose_(); }catch(e){}
+  const show=b.style.display!=="block"; b.style.display=show?"block":"none"; const t=$("toolProp"); if(t) t.classList.toggle("on",show); if(show) propBarFill_(); }
+function propBarClose_(){ const b=$("propBar"); if(b) b.style.display="none"; const t=$("toolProp"); if(t) t.classList.remove("on"); }
+function propBarFill_(){ const sel=$("propBarSel"), box=$("propBarBtns"); if(!sel||!box) return; const cur=propActiveTract_(), list=propTracts_();
+  sel.innerHTML=`<option value="">${list.length?"— choose the property to show —":"— no properties yet: load a file or draw an outline —"}</option>`+list.map(t=>`<option value="${esc(t)}"${propK_(t)===propK_(cur)?" selected":""}>${esc(t)}</option>`).join("");
+  const B=(fn,label,dis)=>`<button type="button" ${dis?"disabled":""} onclick="${fn}" style="padding:9px 6px;border-radius:8px;border:1px solid ${dis?"#2a4030":"#2f7a44"};background:${dis?"#14201a":"#123a1c"};color:${dis?"#6f8a76":"#e8f0e6"};font:inherit;font-size:13px">${label}</button>`;
+  const has=!!cur;
+  box.innerHTML=B("propBarClose_();openPropSheet_(propActiveTract_())","🏠 Details & areas",!has)+B("propZoomTo_()","🔍 Zoom to it",!has)+
+    B("propBarClose_();_ppTract=propActiveTract_();mmOpen_(4)","🗺 Map 4",!has)+B("propBarClose_();_ppTract=propActiveTract_();mmOpen_(6)","🗺 Map 6",!has)+
+    B("propBarClose_();_ppTract=propActiveTract_();pkOpen_()","📦 Map package",!has)+
+    ((typeof mapOnly!=="undefined"&&mapOnly)?B("mapOnlyClear_();propBarFill_()","👁 Show all properties"):B("propBarClose_();if($('layersMenu').style.display==='none') toggleLayersMenu(); layersTab_('prop');","☰ Provincial layers & more"));
+}
+function propBarPick_(v){ if(!v) return; propPickActive_(v); propBarFill_(); setTimeout(propBarClose_,500); }
+function findOpen_(){ const b=$("findBar"); if(!b) return; try{ propBarClose_(); }catch(e){}
   const show=b.style.display==="none"; b.style.display=show?"block":"none"; const t=$("toolFind"); if(t) t.classList.toggle("on",show);
   if(show){ findPropFill_(); try{ const sa=$("findShowAll"); if(sa) sa.style.display=mapOnly?"":"none"; }catch(e){} const i=$("findInput"); if(i) try{ i.focus(); }catch(e){} findRender_(); } }
 function findClose_(){ const b=$("findBar"); if(b) b.style.display="none"; const t=$("toolFind"); if(t) t.classList.remove("on"); try{ const i=$("findInput"); if(i) i.blur(); }catch(e){} }
@@ -12111,7 +12218,10 @@ function mmData_(tract){
   const label=c=>{ const r=byName[propK_(c.name)]||{ha:c.calcHa||0,ac:(c.calcHa||0)*HA_AC,adj:(c.calcHa||0)*HA_AC};
     const v=show==="ha"?r.ha:show==="ac"?r.ac:r.adj, u=show==="ha"?"ha":"ac"; return (v>=100?v.toFixed(1):v.toFixed(2))+" "+u; };
   /* v385: each compartment carries its class and label as plain values, so the data can be frozen in a version. */
-  comps.forEach(c=>{ c.cls=cls(c.name); c.label=label(c); });
+  comps.forEach(c=>{ c.cls=cls(c.name); c.label=label(c);
+    /* v409: a compartment in several parts — each part carries its share of the figure, by its own area, so every part is labelled with acres (Chris, 2026-10-12) */
+    try{ if(c.polygons.length>1){ const has=c.polygons.map(pg=>{ try{ return Math.max(0,geoPolysHa_([pg])||0); }catch(e){ return 0; } }), tot=has.reduce((a,b)=>a+b,0);
+        const m=/^([\d.]+) (ac|ha)$/.exec(c.label||""); if(m&&tot>0){ const v=+m[1]; c.partLabels=has.map(h=>{ const x=v*h/tot; return (x>=100?x.toFixed(1):x.toFixed(2))+" "+m[2]; }); } } }catch(e){} });
   return {p, comps, sum, outline, cls, label};
 }
 /* Which class is hatched: the smaller of MFTIP-eligible and not eligible, by area. CLTIP has its own pattern (v386). */
@@ -12251,7 +12361,7 @@ async function mmGather_(tract, o, V, notes){
       c.stand={comp:v("comp"), figs:bits.join(" · "), ft:v("ft")}; }); }
   if(inset){ inset.outline=d.outline||null; inset.comps=d.comps.map(c=>c.polygons.map(pg=>pg[0]).filter(Boolean)).flat(); }      // v401: every compartment, not the first
   return {prop:d.p, sum:d.sum, outline:d.outline, ext:propExtent_(tract),
-    comps:d.comps.map(c=>({name:c.name, polygons:c.polygons, cls:c.cls, label:c.label, stand:c.stand||null})),
+    comps:d.comps.map(c=>({name:c.name, polygons:c.polygons, cls:c.cls, label:c.label, partLabels:c.partLabels||null, stand:c.stand||null})),
     layers, roads, plots, notes:mnFor_(tract, o.kind), feats, lines, inset, acts:o.acts?acOf_(tract).map(acOut_):[]};
 }
 /* Draw one map. Returns {canvas, notes, scale, hatch, view, data}. `frozen` = a saved version to draw again. */
@@ -12353,11 +12463,11 @@ async function mmRender_(tract, o, onPct, frozen){
   const anchors=D.comps.map(c=>c.polygons.map(r=>{ const px=r.map(ring=>ring.map(q=>V.toPx(q[0],q[1]))); return mmInside_(px, MM_FRAME); })).flat().filter(Boolean);
   anchors.forEach(a=>boxes.push({x:a.x-7,y:a.y-7,w:14,h:14}));
   D.comps.forEach(c=>{
-    const parts=c.polygons.map(r=>{ const px=r.map(ring=>ring.map(q=>V.toPx(q[0],q[1]))); let x0=1/0,x1=-1/0,y0=1/0,y1=-1/0; (px[0]||[]).forEach(p=>{ x0=Math.min(x0,p[0]); x1=Math.max(x1,p[0]); y0=Math.min(y0,p[1]); y1=Math.max(y1,p[1]); }); return {px, area:(x1-x0)*(y1-y0)}; })
+    const parts=c.polygons.map((r,i)=>{ const px=r.map(ring=>ring.map(q=>V.toPx(q[0],q[1]))); let x0=1/0,x1=-1/0,y0=1/0,y1=-1/0; (px[0]||[]).forEach(p=>{ x0=Math.min(x0,p[0]); x1=Math.max(x1,p[0]); y0=Math.min(y0,p[1]); y1=Math.max(y1,p[1]); }); return {px, i, area:(x1-x0)*(y1-y0)}; })
       .filter(p=>p.px[0]&&p.px[0].length>=3).sort((a,b)=>b.area-a.area);
     parts.forEach((part,pi)=>{ const big=part.px, at=mmInside_(big, MM_FRAME); if(!at) return;
       const acL=(pi===0&&o.acts&&c.act&&c.act.length)?c.act.slice(0,2).map(a=>acKindName_(a.kind).split(" /")[0]+" "+a.year).join(" · "):"";
-      const l1=c.name, l2=pi===0?(c.label||""):"", l3=pi===0?(acL||(c.stand&&c.stand.comp?c.stand.comp:"")):"", l4=(pi===0&&!acL&&c.stand&&c.stand.figs)?c.stand.figs:"";
+      const l1=c.name, l2=(c.partLabels&&c.partLabels[part.i])?c.partLabels[part.i]:(pi===0?(c.label||""):""), l3=pi===0?(acL||(c.stand&&c.stand.comp?c.stand.comp:"")):"", l4=(pi===0&&!acL&&c.stand&&c.stand.figs)?c.stand.figs:"";
       const box=(fs,x,y)=>{ ctx.font="bold "+fs+"px "+F; let w=Math.max(ctx.measureText(l1).width, l2?ctx.measureText(l2).width:0); const sf=Math.round(fs*0.68); ctx.font=sf+"px "+F; if(l3) w=Math.max(w,ctx.measureText(l3).width); if(l4) w=Math.max(w,ctx.measureText(l4).width);
         w+=12; const h=Math.round(fs*(l2?2.5:1.3))+(l3?sf+4:0)+(l4?sf+4:0); return {x:x-w/2,y:y-h/2,w,h,fs,sf}; };
       let b=null;
@@ -13401,9 +13511,16 @@ function pkSchedulePage_(tract, acts, win){
 const BND_SNAP_M=0.25;
 function propOutlineFromComps_(tract){
   const comps=propCompsGeo_(tract).filter(c=>c.polygons.length); if(!comps.length) return {rings:[], why:"no compartments"};
-  const rings0=[]; comps.forEach(c=>c.polygons.forEach(pg=>{ const r=(pg[0]||[]).filter(q=>Array.isArray(q)&&isFinite(+q[0])&&isFinite(+q[1])).map(q=>[+q[0],+q[1]]); if(r.length>=3) rings0.push(r); }));
+  let rings0=[]; comps.forEach(c=>c.polygons.forEach(pg=>{ const r=(pg[0]||[]).filter(q=>Array.isArray(q)&&isFinite(+q[0])&&isFinite(+q[1])).map(q=>[+q[0],+q[1]]); if(r.length>=3) rings0.push(r); }));
   if(!rings0.length) return {rings:[], why:"no polygons"};
   const P=cgProj_(rings0[0][0][0],rings0[0][0][1]);
+  /* v409: a compartment lying wholly inside another (an island — a stand file that does not cut holes for the small
+     stands within a big one) adds nothing to the outline: left out here, so it is not "an overlap" (Chris, 2026-10-12) */
+  let islands=0;
+  { const XY0=rings0.map(r=>r.map(q=>P.xy(q))), A0=XY0.map(x=>Math.abs(cgArea_(x))), tolI=BND_SNAP_M*4;
+    const within=(A,B)=>{ for(let k=0;k<A.length;k++){ const a=A[k], b=A[(k+1)%A.length]; for(const q of [a,[(a[0]+b[0])/2,(a[1]+b[1])/2]]){ if(cgInRing_(q[0],q[1],B)) continue; let d=1/0; for(let m=0;m<B.length&&d>tolI;m++) d=Math.min(d,cgSegD_(q[0],q[1],B[m],B[(m+1)%B.length]).d); if(d>tolI) return false; } } return true; };
+    const keep=rings0.map((r,i)=>{ for(let j=0;j<rings0.length;j++){ if(j===i||A0[j]<=A0[i]) continue; if(within(XY0[i],XY0[j])) return false; } return true; });
+    islands=keep.filter(k=>!k).length; if(islands) rings0=rings0.filter((r,i)=>keep[i]); }
   /* 1. corners within the snap distance become one (grid hash, neighbours checked) */
   const cell=Math.max(1,BND_SNAP_M*4), grid={}, corners=[];
   const keyOf=xy=>Math.floor(xy[0]/cell)+","+Math.floor(xy[1]/cell);
@@ -13442,7 +13559,7 @@ function propOutlineFromComps_(tract){
   const XY=rings0.map(r=>r.map(p=>P.xy(p)));
   for(let i=0;i<XY.length;i++) for(let j=0;j<XY.length;j++){ if(i===j) continue; const A=XY[i], B=XY[j]; const samples=[]; for(let k=0;k<A.length;k++){ const a=A[k], b=A[(k+1)%A.length]; samples.push(a,[(a[0]+b[0])/2,(a[1]+b[1])/2]); }
     for(const q of samples){ if(!cgInRing_(q[0],q[1],B)) continue; let d=1/0; for(let k=0;k<B.length;k++) d=Math.min(d,cgSegD_(q[0],q[1],B[k],B[(k+1)%B.length]).d); if(d>BND_SNAP_M*4) return {rings:[], why:"compartments overlap each other"}; } }
-  return {rings:outer.map(x=>x.r), ha:sum, compsHa:tot, off, why:off>0.02?"the outline's area is "+(off*100).toFixed(1)+"% off the compartments' — a gap or overlap":""};
+  return {rings:outer.map(x=>x.r), ha:sum, compsHa:tot, off, islands, why:off>0.02?"the outline's area is "+(off*100).toFixed(1)+"% off the compartments' — a gap or overlap":""};
 }
 /* make the outline where there is none (or where it was made this way before); never over a person's outline */
 function propAutoOutline_(tract, quiet){
@@ -13913,6 +14030,12 @@ function cgCut_(pieces, line){
 /* Join two pieces that share an edge. */
 function cgMerge_(a, b){
   const P=cgProj_(a.rings[0][0][0],a.rings[0][0][1]);
+  /* v412: an island joined back into the piece around it — the island's outer ring is one of the host's holes
+     (the same corners, whatever the direction): the hole closes, and any island the island itself carried becomes
+     the host's. Either piece may be tapped first; the joined piece keeps the first one's name (csMergeIds_). */
+  { const setKey=r=>r.map(cgKey_).sort().join("|"), fill=(host,isl)=>{ const k=setKey(isl.rings[0]); const hi=host.rings.findIndex((r,i)=>i>0&&setKey(r)===k);
+      return hi>0 ? {rings:[host.rings[0]].concat(host.rings.filter((r,i)=>i>0&&i!==hi), isl.rings.slice(1))} : null; };
+    const r=fill(a,b)||fill(b,a); if(r) return r; }
   let ra=cgInsert_(a.rings, [].concat(...b.rings), P), rb=cgInsert_(b.rings, [].concat(...a.rings), P);
   const ccw=r=>cgArea_(r.map(P.xy))>0?r:r.slice().reverse();
   const A=ccw(ra[0]), B=ccw(rb[0]), ll={};
@@ -13977,6 +14100,9 @@ function csCommit_(tract, list, label, noUndo){
   const now={}, taken=[]; list.forEach(c=>{ if(c.name) taken.push(c.name); });
   list.forEach(c=>{ const id=c.id||csNewId_(), name=c.name||csNextName_(tract,taken); if(!c.name) taken.push(name);
     now[id]={id, tract:String(tract).trim(), name, rings:c.rings.map(r=>r.map(cgLL_))}; });
+  /* v411: a piece that leaves takes its hole with it — the host that carried it as an island is whole again */
+  { const goneKeys=before.filter(c=>!now[c.id]).map(c=>JSON.stringify(cgDedupe_(c.rings[0].map(cgLL_))));
+    if(goneKeys.length) Object.values(now).forEach(c=>{ if(c.rings.length>1) c.rings=[c.rings[0]].concat(c.rings.slice(1).filter(h=>goneKeys.indexOf(JSON.stringify(cgDedupe_(h.map(cgLL_))))<0)); }); }
   before.forEach(c=>{ if(!now[c.id]){ delete PROPS.shapes[c.id]; delete propDirty.shapes[c.id]; if(propDirty.shapeDel.indexOf(c.id)<0) propDirty.shapeDel.push(c.id); } });
   const stamp=Date.now();
   Object.values(now).forEach(c=>{ const was=PROPS.shapes[c.id]; if(was && JSON.stringify([was.name,was.rings])===JSON.stringify([c.name,c.rings])) return;
@@ -14052,6 +14178,7 @@ function csFromFile_(tract, o){ o=o||{};
   /* 3. a ring the file left pinched or crossing itself would stop every cut and move on the layer: left out, by name */
   const sound=[]; pieces.forEach(pc=>{ if(pc.rings.length && pc.rings[0].length>=3 && cgSound_([pc], null, P)) sound.push(pc); else dropped.push(pc.name); });
   const out=sound.map(pc=>({id:null, name:pc.name, rings:pc.rings}));
+  try{ islandHoles_(out.map(pc=>pc.rings)); }catch(e){}      // v410: an island piece is a hole in its host piece, so the pieces add up to the outline
   if(!out.length){ toast("None of the loaded polygons could be used"+(dropped.length?" — their outlines cross themselves or are pinched in the file: "+dropped.join(", "):""),true); return false; }
   csCommit_(t, out, o.label||"start from the loaded file");
   /* the file's own adjusted acres, where the compartment has no typed figure yet, so the area summary keeps them */
@@ -14099,7 +14226,7 @@ function csEdit_(tract){
 function csZoom_(){ try{ const b=[]; csOf_(_csEd.tract).forEach(c=>c.rings[0].forEach(p=>b.push(p))); if(b.length&&fmap) fmap.fitBounds(b,{padding:[30,30]}); }catch(e){} }
 function csDone_(){ _csEd=null; csTmpClear_(); csBarRemove_(); csRender_(); openPropSheet_(propActiveTract_()); }
 let _csBarEl=null;
-function csBarRemove_(){ const bar=$("csBar")||_csBarEl; _csBarEl=null; try{ if(bar&&bar.parentNode) bar.parentNode.removeChild(bar); else if(bar&&bar.remove) bar.remove(); }catch(e){} }
+function csBarRemove_(){ try{ document.body.classList.remove("bar-open"); }catch(e){} const bar=$("csBar")||_csBarEl; _csBarEl=null; try{ if(bar&&bar.parentNode) bar.parentNode.removeChild(bar); else if(bar&&bar.remove) bar.remove(); }catch(e){} }
 function csTmpClear_(){ try{ _csTmp.forEach(m=>fmap.removeLayer(m)); }catch(e){} _csTmp=[]; }
 function csMode_(m){ if(!_csEd) return; _csEd.mode=m; _csEd.line=[]; _csEd.pick=null; csTmpClear_(); csRender_(); csBar_();
   toast(m==="cut"?"Tap points across the piece, starting and ending outside it (or on its edge) — then Apply cut"
@@ -14121,7 +14248,7 @@ function taCancel_(){ _ta=null; taTmpClear_(); taBarRemove_(); const b=$("toolTr
 function taTap_(ll){ if(!_ta||_ta.sel) return false; _ta.pts.push([+ll.lat,+ll.lng]); taDraw_(); taBar_(); return true; }
 function taUndoPt_(){ if(!_ta||_ta.sel) return; _ta.pts.pop(); taDraw_(); taBar_(); }
 function taTmpClear_(){ try{ _taTmp.forEach(m=>fmap.removeLayer(m)); }catch(e){} _taTmp=[]; }
-function taBarRemove_(){ const bar=$("taBar")||_taBarEl; _taBarEl=null; try{ if(bar&&bar.parentNode) bar.parentNode.removeChild(bar); }catch(e){} }
+function taBarRemove_(){ try{ document.body.classList.remove("bar-open"); }catch(e){} const bar=$("taBar")||_taBarEl; _taBarEl=null; try{ if(bar&&bar.parentNode) bar.parentNode.removeChild(bar); }catch(e){} }
 function taDraw_(){ taTmpClear_(); if(!_ta||!fmap||!window.L) return;
   try{ const pts=_ta.pts; if(pts.length>=3) _taTmp.push(L.polygon(pts,{color:"#ffd24a",weight:2,dashArray:"6 5",fillColor:"#ffd24a",fillOpacity:.08,interactive:false}).addTo(fmap));
     else if(pts.length===2) _taTmp.push(L.polyline(pts,{color:"#ffd24a",weight:2,dashArray:"6 5",interactive:false}).addTo(fmap));
@@ -14139,7 +14266,7 @@ function taSelect_(){ if(!_ta) return; if(_ta.pts.length<3){ toast("Tap at least
   if(!sel.length){ toast("No compartment has its centre inside that ring",true); return; }
   _ta.sel=sel; taDraw_(); taBar_(); }
 function taBar_(){ if(!_ta){ taBarRemove_(); return; }
-  let bar=$("taBar")||_taBarEl; if(!bar){ bar=document.createElement("div"); bar.id="taBar"; document.body.appendChild(bar); } _taBarEl=bar;
+  let bar=$("taBar")||_taBarEl; if(!bar){ bar=document.createElement("div"); bar.id="taBar"; document.body.appendChild(bar); } _taBarEl=bar; try{ document.body.classList.add("bar-open"); }catch(e){}
   bar.style.cssText="position:fixed;left:8px;right:8px;bottom:10px;z-index:5450;background:rgba(16,36,15,.96);border:1px solid #ffd24a;border-radius:12px;padding:8px;color:#eafae8;font:13px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.5)";
   const B=(fn,label,on)=>`<button type="button" class="btn ${on?"submit":"ghost"}" style="flex:1;min-width:0;padding:8px 4px;font-size:13px" onclick="${fn}">${label}</button>`;
   let h=`<div style="margin-bottom:6px"><b>Give compartments a tract</b></div>`;
@@ -14184,13 +14311,13 @@ function taApply_(sel, t){
   return {n, moved:Object.keys(moved)}; }
 function csBar_(){
   if(!_csEd){ csBarRemove_(); return; }
-  let bar=$("csBar")||_csBarEl; if(!bar){ bar=document.createElement("div"); bar.id="csBar"; document.body.appendChild(bar); } _csBarEl=bar;
+  let bar=$("csBar")||_csBarEl; if(!bar){ bar=document.createElement("div"); bar.id="csBar"; document.body.appendChild(bar); } _csBarEl=bar; try{ document.body.classList.add("bar-open"); }catch(e){}
   bar.style.cssText=("position:fixed;left:8px;right:8px;bottom:10px;z-index:5450;background:rgba(16,36,15,.96);border:1px solid #4caf50;border-radius:12px;padding:8px;color:#eafae8;font:13px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.5)");
   const m=_csEd.mode, n=csOf_(_csEd.tract).length, B=(fn,label,on)=>`<button type="button" class="btn ${on?"submit":"ghost"}" style="flex:1;min-width:0;padding:8px 4px;font-size:13px" onclick="${fn}">${label}</button>`;
   let h=`<div style="margin-bottom:6px"><b>Compartment layer</b> · ${esc(_csEd.tract)} · ${n} piece${n===1?"":"s"}</div>`;
   const chk=csCheck_(_csEd.tract); if(!chk.ok) h+=`<div style="color:#ffd24a;font-size:12px;margin-bottom:6px">${chk.over?"Some pieces overlap — two phones may have cut it at the same time. Join or undo until they fit, or start again from the outline.":"The pieces add up to "+chk.layHa.toFixed(2)+" ha but the outline is "+chk.propHa.toFixed(2)+" ha — the outline may have changed since. Start again from the outline to match it."}</div>`;
-  if(m==="cut") h+=`<div style="margin-bottom:6px;color:#cfe3d2">${_csEd.line.length} point${_csEd.line.length===1?"":"s"} on the cut line</div><div style="display:flex;gap:6px">`+
-     B("csApplyCut_()","✂ Apply cut",true)+B("csLineUndo_()","↶ Point")+B("csMode_('idle')","Cancel")+`</div>`;
+  if(m==="cut") h+=`<div style="margin-bottom:6px;color:#cfe3d2">${_csEd.line.length} point${_csEd.line.length===1?"":"s"} on the cut line${_csEd.line.length>=3?" · or close it into an island inside a piece":""}</div><div style="display:flex;gap:6px">`+
+     B("csApplyCut_()","✂ Apply cut",true)+B("csApplyIsland_()","◌ Island",_csEd.line.length>=3)+B("csLineUndo_()","↶ Point")+B("csMode_('idle')","Cancel")+`</div>`;
   else h+=`<div style="display:flex;gap:6px;flex-wrap:wrap">`+B("csMode_('cut')","✂ Cut",m==="cut")+B("csMode_('merge')","⊕ Merge",m==="merge")+B("csMode_('move')","✥ Corners",m==="move")+
      B("csUndo_()","↶ Undo")+B("csDone_()","✓ Done")+`</div>`+(m==="idle"?`<div style="margin-top:6px;color:#a9c9b0;font-size:12px">Tap a piece to name it and set its class.</div>`:"");
   bar.innerHTML=h;
@@ -14230,6 +14357,30 @@ function csApplyCut_(){
   csCommit_(t, r.pieces, "cut");
   _csEd.line=[]; csTmpClear_(); csBar_();
   toast((r.cut===1?"Cut — tap the new piece to name it":"Cut through "+r.cut+" pieces")+(r.partly?". Part of the line did not cross a piece cleanly and was not used":""));
+}
+/* v411 — an island: the tapped points close into a ring that lies wholly inside one piece; the ring becomes a new piece
+   and a hole in that piece, so the host's area is net of it and the layer still adds up (Chris, 2026-10-12). */
+function csApplyIsland_(){
+  if(!_csEd) return; const t=_csEd.tract, ring=cgDedupe_(_csEd.line.map(cgLL_));
+  if(ring.length<3){ toast("Tap at least three points inside the piece",true); return; }
+  const r=cgIsland_(csOf_(t), ring);
+  if(r.err){ toast(r.err,true); return; }
+  csCommit_(t, r.pieces, "island in "+r.host);
+  _csEd.line=[]; csTmpClear_(); csBar_();
+  toast("Island cut out of "+r.host+" — tap it to name it");
+}
+function cgIsland_(pieces, ring){
+  if(!pieces.length) return {err:"No pieces yet"};
+  const P=cgProj_(ring[0][0], ring[0][1]), R=ring.map(P.xy);
+  if(cgSelfCross_(ring,P) || Math.abs(cgArea_(R))<1) return {err:"The ring crosses itself or has no area"};
+  const samples=[]; for(let k=0;k<R.length;k++){ const a=R[k], b=R[(k+1)%R.length]; samples.push(a,[(a[0]+b[0])/2,(a[1]+b[1])/2]); }
+  const hosts=pieces.filter(pc=>{ const XY=pc.rings.map(rr=>rr.map(P.xy));
+    return samples.every(q=>{ if(!cgInRings_(q[0],q[1],XY)) return false; let d=1/0; XY.forEach(rr=>{ for(let j=0;j<rr.length&&d>CG_EDGE_M;j++) d=Math.min(d,cgSegD_(q[0],q[1],rr[j],rr[(j+1)%rr.length]).d); }); return d>CG_EDGE_M; }); });
+  if(hosts.length!==1) return {err:hosts.length?"The ring lies in more than one piece":"The ring must lie wholly inside one piece, clear of its edges (and of any island already in it)"};
+  const host=hosts[0], taken=pieces.map(c=>c.name);
+  const out=pieces.map(pc=>pc===host?Object.assign({},pc,{rings:pc.rings.concat([ring.map(q=>[q[0],q[1]])])}):pc);
+  out.push({id:null, name:csNextName_(host.tract, taken), rings:[ring.map(q=>[q[0],q[1]])]});
+  return {pieces:out, host:host.name};
 }
 function csMergeIds_(ida, idb){
   const a=PROPS.shapes[ida], b=PROPS.shapes[idb]; if(!a||!b) return false;
