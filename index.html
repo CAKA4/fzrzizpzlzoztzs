@@ -92,6 +92,8 @@
   .ltabs button.on{ background:#1c2e14; border-color:#c8952a; color:#e8b84b; font-weight:700; }
   .ltab{ display:none; flex-direction:column; gap:6px; }
   .ltab.on{ display:flex; }
+  .town-tip{ background:rgba(255,255,255,.9); border:1px solid #111; color:#111; font:700 11px system-ui; padding:1px 5px; border-radius:4px; box-shadow:none; }
+  .town-tip::before{ display:none; }
   .ltab .lgroup>summary{ font-family:system-ui,-apple-system,sans-serif; letter-spacing:0; font-size:13px; }
   .layers-scroll > *{ flex:0 0 auto; }
   .layers-menu>button, .lgroup-body>button{ text-align:left; padding:11px 12px; border-radius:8px; border:1px solid var(--line2,#33623a); background:#16271a; color:#e8f0e6; font:inherit; font-size:13px; cursor:pointer; width:100%; }
@@ -1280,7 +1282,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-13 · v414";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-13 · v416";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -11524,6 +11526,9 @@ const LIO_MARGIN_M=500;
 const LIO_LAYERS=[
   {k:"lots",      label:"Lots & concessions", svc:"LIO_Open06", id:2,  name:"Lot Fabric Improved",       fields:"OGF_ID,LOT_IDENT,CONCESSION_IDENT,GEOGRAPHIC_TOWNSHIP_NAME", on:true},
   {k:"roads",     label:"Roads",              svc:"LIO_Open09", id:0,  name:"ORN Road Net Element",      fields:"OGF_ID,ROAD_ELEMENT_TYPE", on:true},
+  /* v416: towns and places (Statistics Canada population centres and designated places, as points at their centres),
+     fetched for 40 km around the property whatever box is asked for, so the nearest town is always in hand */
+  {k:"towns",     label:"Towns & places",     src:"pc", on:true, opt:true},
   {k:"water",     label:"Watercourses",       svc:"LIO_Open01", id:26, name:"OHN Watercourse",           fields:"OGF_ID,WATERCOURSE_TYPE,OFFICIAL_NAME_LABEL,PERMANENCY", on:true},
   {k:"waterbody", label:"Water bodies",       svc:"LIO_Open01", id:25, name:"OHN Waterbody",             fields:"OGF_ID,WATERBODY_TYPE,OFFICIAL_NAME_LABEL,PERMANENCY", on:true},
   {k:"wetland",   label:"Wetlands",           svc:"LIO_Open01", id:15, name:"Wetland With Significance", fields:"OGF_ID,WETLAND_TYPE,WETLAND_SIGNIFICANCE,EVALUATED_WETLAND_NAME", on:true},
@@ -11579,6 +11584,7 @@ function lioFetchJson_(url){
 /* One layer for a box. Pages until a page comes back EMPTY (short pages happen mid-set) and drops
    duplicates on OGF_ID — both seen in the live tests of 2026-10-06. */
 async function lioFetchLayer_(L_, bbox){
+  if(L_.src==="pc") return twFetch_(bbox);      // v416
   const ids=await lioResolve_(L_.svc); const want=String(L_.name).toLowerCase();
   const id=(ids&&ids[want]!=null)?ids[want]:L_.id;
   const seen={}, feats=[]; let ended=false;
@@ -11630,10 +11636,10 @@ async function lioEnsure_(tract, force, quiet){
       if(d&&d.ok&&d.data&&d.data.layers&&lioCovers_(d.data.bbox,need)&&complete(d.data)){ try{ await ldbPut(lioKey_(tract),d.data); }catch(e){} lioUse_(tract,d.data); return; }
     }
     lioStatus_(`Fetching the provincial layers for <b>${esc(tract)}</b>…`);
-    const out={v:1, tract:tract, bbox:want, at:new Date().toISOString(), layers:{}}, failed=[];
+    const out={v:1, tract:tract, bbox:want, at:new Date().toISOString(), layers:{}}, failed=[], failedOpt=[];
     for(const L_ of LIO_LAYERS){
       try{ const fc=await lioFetchLayer_(L_, want); out.layers[L_.k]={fc:{type:"FeatureCollection",features:fc.features}, n:fc.features.length, at:out.at, cut:!!fc.cut}; }
-      catch(e){ failed.push(L_.label+": "+String(e&&e.message||e).slice(0,60));
+      catch(e){ (L_.opt?failedOpt:failed).push(L_.label+": "+String(e&&e.message||e).slice(0,60));      // v416: an optional layer (woodland, towns) failing does not make the set partial
         const old=cache&&cache.layers&&cache.layers[L_.k]; if(old) out.layers[L_.k]=Object.assign({},old,{stale:true}); }
     }
     const got=LIO_LAYERS.filter(L_=>out.layers[L_.k]&&!out.layers[L_.k].stale).length;
@@ -11648,6 +11654,7 @@ async function lioEnsure_(tract, force, quiet){
     try{ await ldbPut(lioKey_(tract),out); }catch(e){}
     lioUse_(tract,out);
     if(failed.length){ toast("Some provincial layers did not load: "+failed.map(x=>x.split(":")[0]).join(", ")+(cache?" — kept the saved copy of those":""),true); lioLogFail_(tract,failed); }
+    else if(failedOpt.length && !quiet) toast("Not fetched this time: "+failedOpt.map(x=>x.split(":")[0]).join(", ")+" — Refresh later",true);
     else if(!quiet || force) toast("Provincial layers saved for "+tract);
     if(propBackendOk && !failed.length){
       const text=JSON.stringify(out);
@@ -11675,8 +11682,35 @@ const LIO_STYLE={
   wetland:  {color:"#26a69a", weight:1, opacity:0.9, fillColor:"#4db6ac", fillOpacity:0.25, dashArray:"3 3"},
   contour:  {color:"#d7b377", weight:1, opacity:0.7, fill:false},
   building: {color:"#212121", weight:1, opacity:0.9, fillColor:"#eeeeee", fillOpacity:0.6},
-  woodland: {color:"#7cbf72", weight:1, opacity:0.6, fillColor:"#9ed39a", fillOpacity:0.3}
+  woodland: {color:"#7cbf72", weight:1, opacity:0.6, fillColor:"#9ed39a", fillOpacity:0.3},
+  towns:    {color:"#111", weight:2, opacity:1, fillColor:"#fff", fillOpacity:1}
 };
+/* ---- v416: towns & places — Statistics Canada 2021 population centres (PC) and designated places (DPL), the
+   polygon centres as points {NAME, KIND:"town"|"place"}. Fetched for a box of at least 0.5° × 0.35° (about 40 × 39 km)
+   round the one asked for; direct from the phone, else through the Sheet (`towns` GET). Cached with the other
+   provincial layers. Statistics Canada Open Licence. */
+const TW_SERVICE="https://geo.statcan.gc.ca/geo_wa/rest/services/2021/Cartographic_boundary_files/MapServer", TW_LAYERS=[{id:7,name:"PCNAME",kind:"town"},{id:8,name:"DPLNAME",kind:"place"}];
+const TW_ATTRIB="Towns and places: Statistics Canada, 2021 Census boundary files, licensed under the Statistics Canada Open Licence.";
+function twBox_(bbox){ const cx=(bbox[0]+bbox[2])/2, cy=(bbox[1]+bbox[3])/2, w=Math.max(0.5,bbox[2]-bbox[0]), h=Math.max(0.35,bbox[3]-bbox[1]); return [+(cx-w/2).toFixed(4),+(cy-h/2).toFixed(4),+(cx+w/2).toFixed(4),+(cy+h/2).toFixed(4)]; }
+async function twLayer_(L, box){
+  const q="/"+L.id+"/query?geometry="+box.join(",")+"&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields="+L.name+"&returnGeometry=true&outSR=4326&geometryPrecision=4&maxAllowableOffset=0.002&f=geojson";
+  try{ const j=await rnFetchJson_(TW_SERVICE+q); if(j&&Array.isArray(j.features)) return j.features; }catch(e){}
+  if(connected && propBackendOk){ const r=await new Promise(res=>jsonp_("action=towns&bbox="+box.join(",")+"&layer="+L.id, x=>res(x), 30000)); if(r&&r.ok&&Array.isArray(r.features)) return r.features; throw new Error((r&&r.error)||"the towns service did not answer"); }
+  throw new Error("the towns service did not answer");
+}
+async function twFetch_(bbox){
+  const box=twBox_(bbox), by={}; let failed=0;
+  await Promise.all(TW_LAYERS.map(async L=>{ try{ (await twLayer_(L,box)).forEach(f=>{ const nm=String((f.properties||{})[L.name]||"").trim(); if(!nm) return; const g=mmGeomParts_(f.geometry); let a=0,b=0,n=0;
+      g.polys.forEach(pg=>(pg[0]||[]).forEach(q=>{ a+=q[0]; b+=q[1]; n++; })); if(!n) return; const k=propK_(nm.replace(/\s*-\s*.*$/,"")); if(by[k]&&by[k].kind==="town") return;
+      by[k]={name:nm.replace(/\s*-\s*.*$/,""), kind:L.kind, lat:+(a/n).toFixed(5), lon:+(b/n).toFixed(5)}; }); }catch(e){ failed++; } }));
+  if(failed===TW_LAYERS.length) throw new Error("towns could not be fetched");
+  const feats=Object.values(by).map(t=>({type:"Feature",properties:{NAME:t.name,KIND:t.kind},geometry:{type:"Point",coordinates:[t.lon,t.lat]}}));
+  return {type:"FeatureCollection",features:feats,n:feats.length,bbox:box};
+}
+/* the nearest town (population centre first, else a place) to a point, with its distance in km and bearing */
+function twNearest_(fc, lat, lon){ let best=null; ((fc&&fc.features)||[]).forEach(f=>{ if(!f.geometry||f.geometry.type!=="Point") return; const q=f.geometry.coordinates, dx=(q[0]-lon)*111.32*Math.cos(lat*Math.PI/180), dy=(q[1]-lat)*111.132, d=Math.hypot(dx,dy);
+    const town=(f.properties||{}).KIND==="town"; const score=d+(town?0:15);      // a real town up to 15 km further still wins over a hamlet
+    if(!best||score<best.score) best={name:(f.properties||{}).NAME, kind:(f.properties||{}).KIND, lat:q[1], lon:q[0], km:d, bearing:Math.atan2(dx,dy), score}; }); return best; }
 function lioToggle_(k){ lioVis[k]=!lioVis[k]; try{ STORE&&STORE.setItem("fi_liovis",JSON.stringify(lioVis)); }catch(e){} lioRender_(); }
 function lioTogglesHtml_(){
   return `<div class="layer-hd" style="margin-top:2px">Provincial layers</div>`+LIO_LAYERS.map(L_=>{ const n=(lioCache&&lioCache.layers&&lioCache.layers[L_.k]&&lioCache.layers[L_.k].n)||0, on=!!lioVis[L_.k];
@@ -11731,9 +11765,14 @@ function ovRender_(){
 /* v400: property names only on the zoomed-out overview, and only while the Layers switch is on */
 function ovLabels_(){
   if(!ovLabelLayer||!fmap) return; ovLabelLayer.clearLayers();
-  if(mapDetail_() || (typeof labelVis!=="undefined"&&labelVis.ov===false)) return;
+  if(typeof labelVis!=="undefined"&&labelVis.ov===false) return;
+  /* v416: zoomed in, a property drawn as a dot keeps its name (the dot alone said nothing — Chris, 2026-10-13); only the
+     property shown in detail, whose compartments carry their own labels, drops its name */
+  const detail=mapDetail_(), active=propK_(propActiveTract_());
   const b=fmap.getBounds(); let n=0;
-  propTracts_().forEach(t=>{ if(n>=OV_LABEL_MAX||!mapOnlyIs_(t)) return; const e=ovExtOf_(t); if(!e) return; const c=[(e[1]+e[3])/2,(e[0]+e[2])/2]; if(!b.contains(c)) return; n++;
+  propTracts_().forEach(t=>{ if(n>=OV_LABEL_MAX||!mapOnlyIs_(t)) return; const p=propGet_(t)||{}, hasOutline=Array.isArray(p.boundary)&&p.boundary.length>0;
+    if(detail && hasOutline && propK_(t)===active) return;
+    const e=ovExtOf_(t); if(!e) return; const c=[(e[1]+e[3])/2,(e[0]+e[2])/2]; if(!b.contains(c)) return; n++;
     L.marker(c,{interactive:false,keyboard:false,icon:L.divIcon({className:"ov-lbl",html:`<span style="font:700 11px system-ui;color:#fff;background:rgba(198,40,40,.85);padding:2px 6px;border-radius:9px;white-space:nowrap;position:relative;left:-50%">${esc(t)}</span>`,iconSize:[0,0]})}).addTo(ovLabelLayer); });
 }
 /* crossing the detail zoom redraws the chosen property's layers (they draw nothing below it) */
@@ -11753,7 +11792,7 @@ function lioRender_(){
   if(sameTract) LIO_LAYERS.forEach(L_=>{ const d=lioCache.layers[L_.k]; if(!lioVis[L_.k]||!d||!d.fc||!d.fc.features.length) return; any=true;
     const st=Object.assign({pane:"lioPane",renderer:lioRenderer,interactive:false}, LIO_STYLE[L_.k]);
     L.geoJSON(d.fc,{renderer:lioRenderer, style:f=>{ if(L_.k==="water"&&/intermit/i.test(String(f.properties&&f.properties.PERMANENCY||""))) return Object.assign({},st,{dashArray:"5 4"}); return st; },
-      pointToLayer:(f,ll)=>L.circleMarker(ll,Object.assign({radius:3},st)), interactive:false, pane:"lioPane"}).addTo(lioLayer); });
+      pointToLayer:(f,ll)=>{ if(L_.k==="towns"){ const m=L.circleMarker(ll,Object.assign({radius:6},st)); try{ m.bindTooltip(String((f.properties||{}).NAME||""),{permanent:true,direction:"right",offset:[6,0],className:"town-tip"}); }catch(e){} return m; } return L.circleMarker(ll,Object.assign({radius:3},st)); }, interactive:false, pane:"lioPane"}).addTo(lioLayer); });
   const p=propGet_(t);
   if(p&&Array.isArray(p.boundary)&&p.boundary.length) p.boundary.forEach(r=>L.polygon(r,{color:MAP_STYLE.propColor,weight:MAP_STYLE.propWidth,fill:false,interactive:false}).addTo(propLineLayer));
   let at=$("lioAttrib");
@@ -12084,8 +12123,8 @@ function mmSetPage_(k){ MM_PAGE=MM_PAGES[k]?k:"letter"; const p=MM_PAGES[MM_PAGE
   MM_TB={x:110, y:MM_H-630, w:MM_W-220, h:520}; MM_FRAME={x:110, y:110, w:MM_W-220, h:MM_TB.y-20-110}; }
 const MM_SCALES=[500,750,1000,1500,2000,2500,3000,4000,5000,6000,7500,10000,12500,15000,20000,25000,30000,40000,50000,75000,100000];
 const MM_DEF={
-  4:{title:"Map 4  Property Map and Surrounding Area", pad:2.4, aerial:false, layers:{woodland:1,lots:1,roads:1,roadnames:1,water:1,waterbody:1,wetland:1,building:1,contour:0}, hatch:"auto", plots:false},
-  6:{title:"Map 6  Detailed Property Map",              pad:1.25, aerial:true,  layers:{woodland:0,lots:1,roads:1,roadnames:1,water:1,waterbody:1,wetland:1,building:1,contour:1}, hatch:"none", plots:false},
+  4:{title:"Map 4  Property Map and Surrounding Area", pad:2.4, aerial:false, layers:{woodland:1,lots:1,roads:1,roadnames:1,water:1,waterbody:1,wetland:1,building:1,contour:0,towns:1}, hatch:"auto", plots:false},
+  6:{title:"Map 6  Detailed Property Map",              pad:1.25, aerial:true,  layers:{woodland:0,lots:1,roads:1,roadnames:1,water:1,waterbody:1,wetland:1,building:1,contour:1,towns:1}, hatch:"none", plots:false},
   /* v396: the plan's schedule on the map — plain ground, compartments coloured by what is planned first in the window */
   7:{title:"Map 7  Planned Activities",                 pad:1.25, aerial:false, layers:{woodland:0,lots:1,roads:1,roadnames:1,water:1,waterbody:1,wetland:0,building:1,contour:0}, hatch:"none", plots:false, acts:true}
 };
@@ -12099,14 +12138,16 @@ function mmOpts_(kind){ const d=MM_DEF[kind], saved=(function(){ try{ return JSO
     proj:saved.proj==="merc"?"merc":"utm",      /* v396: UTM (NAD83), as the plan's other maps and shapefiles; Web Mercator kept as a choice */
     acts:!!d.acts, actFrom:saved.actFrom||"", actTo:saved.actTo||"",
     fillAlpha:(saved.fillAlpha!=null&&isFinite(+saved.fillAlpha))?Math.max(20,Math.min(100,+saved.fillAlpha)):100,
-    labelScale:(saved.labelScale!=null&&isFinite(+saved.labelScale))?Math.max(50,Math.min(160,+saved.labelScale)):100,      /* v404: compartment label size, % of automatic */      /* v401: how solid the fills print (woodland, water, hatching, Map 7 colours) */      /* v396: Map 7's plan window (blank = this year and the nine after) */
+    labelScale:(saved.labelScale!=null&&isFinite(+saved.labelScale))?Math.max(50,Math.min(160,+saved.labelScale)):100,
+    insetNames:(["auto","more","fewer","none"].indexOf(saved.insetNames)>=0)?saved.insetNames:"auto",      /* v415: key-map road names */
+    townArrow:saved.townArrow!=null?!!saved.townArrow:(kind===4||kind===6),      /* v416: an arrow to the nearest town */      /* v404: compartment label size, % of automatic */      /* v401: how solid the fills print (woodland, water, hatching, Map 7 colours) */      /* v396: Map 7's plan window (blank = this year and the nine after) */
     photoYear:mmPhotoYear_(saved),
     firm:(function(){ try{ return (STORE&&STORE.getItem("fi_mmfirm"))||""; }catch(e){ return ""; } })()}; }
 /* v394: the photo year to print — what was typed for this source on this phone, else the year in the source's name ("York Region 2025"), else blank. */
 function mmPhotoYear_(saved){ let src=null; try{ src=imgSource_(); }catch(e){} const id=src?src.id:"", typed=(saved&&saved.photoYears&&saved.photoYears[id])||""; if(typed) return String(typed);
   const m=String(src?src.name:"").match(/\b(19|20)\d\d\b/); return m?m[0]:""; }
 function mmSaveOpts_(o){ try{ const old=JSON.parse((STORE&&STORE.getItem("fi_mmopts"+o.kind))||"null")||{}, py=Object.assign({},old.photoYears||{}); try{ py[imgSource_().id]=String(o.photoYear||""); }catch(e){}
-  STORE&&STORE.setItem("fi_mmopts"+o.kind,JSON.stringify({layers:o.layers,hatch:o.hatch,plots:o.plots,feats:o.feats,lines:o.lines,names:o.names,inset:o.inset,standLabels:o.standLabels,proj:o.proj,actFrom:o.actFrom,actTo:o.actTo,fillAlpha:o.fillAlpha,labelScale:o.labelScale,photoYears:py,scale:o.scale,page:o.page,extent:o.extent})); STORE&&STORE.setItem("fi_mmfirm",o.firm||""); }catch(e){} }
+  STORE&&STORE.setItem("fi_mmopts"+o.kind,JSON.stringify({layers:o.layers,hatch:o.hatch,plots:o.plots,feats:o.feats,lines:o.lines,names:o.names,inset:o.inset,standLabels:o.standLabels,proj:o.proj,actFrom:o.actFrom,actTo:o.actTo,fillAlpha:o.fillAlpha,labelScale:o.labelScale,insetNames:o.insetNames,townArrow:o.townArrow,photoYears:py,scale:o.scale,page:o.page,extent:o.extent})); STORE&&STORE.setItem("fi_mmfirm",o.firm||""); }catch(e){} }
 /* ---- projection ---- */
 /* v396: UTM, zone from the longitude (17 for most of southern Ontario, 18 east of 78°W), forward and inverse.
    The GPS positions are WGS 84; NAD83 (CSRS) differs by under a metre here, so the map is labelled NAD83 / UTM. */
@@ -12291,7 +12332,7 @@ function mmInsetBbox_(ext){ const lat=(ext[1]+ext[3])/2, lon=(ext[0]+ext[2])/2, 
 async function mmInsetGather_(tract, ext, notes){
   if(!ext) return null; const bbox=mmInsetBbox_(ext), out={bbox, layers:{}, names:[]};
   if(isOffline()){ notes.push("Locator inset: roads and water for the area need signal — only the property is shown"); return out; }
-  const want=LIO_LAYERS.filter(L_=>L_.k==="roads"||L_.k==="waterbody");
+  const want=LIO_LAYERS.filter(L_=>L_.k==="roads"||L_.k==="waterbody"||L_.k==="towns");      // v416: towns on the key map too
   await Promise.all(want.map(async L_=>{ try{ const f=await lioFetchLayer_(L_,bbox); out.layers[L_.k]={type:"FeatureCollection",features:(f.features||[]).map(x=>({type:"Feature",properties:{},geometry:x.geometry}))}; }
     catch(e){ notes.push("Locator inset: "+L_.label.toLowerCase()+" could not be fetched"); } }));
   try{ const r=await rnRoads_(tract,bbox,[]); out.names=r.map(x=>({name:x.name,lines:x.lines})); }catch(e){}
@@ -12306,7 +12347,49 @@ function mmInsetPlace_(V, ext){
   const ov=c=>Math.max(0,Math.min(c.x+c.w,P.x+P.w)-Math.max(c.x,P.x))*Math.max(0,Math.min(c.y+c.h,P.y+P.h)-Math.max(c.y,P.y));
   return corners.slice().sort((p,q)=>ov(p)-ov(q))[0];
 }
-function mmInsetDraw_(ctx, I, B, V, aerial){
+/* v415 — key-map road names: short forms ("Smith Blvd"), the roads nearest the property first, as many as fit without
+   touching each other or the property; the text steps down a size when a name will not fit its road. The map
+   options page can ask for more (smaller) or fewer (larger) names, or none. (Chris, 2026-10-13: a key map with one
+   name on it is no key map.) */
+/* ---- v416: the arrow to the nearest town (Chris, 2026-10-13: "typically in a corner of the map") ----
+   The nearest population centre (a real town wins over a hamlet up to 15 km further) to the property's centre. When
+   it lies on the map it is simply drawn and named; otherwise a bold arrow sits where the line from the property to the
+   town leaves the map, 70 px in from the edge, with "Keswick 6.3 km" beside it. Its room is reserved before any
+   label is placed; if a note, the key map or a typed label is already there it slides along the edge. */
+function mmTownArrow_(ctx, V, D, towns, boxes){
+  const ext=D.ext; if(!ext) return null; const lat=(ext[1]+ext[3])/2, lon=(ext[0]+ext[2])/2;
+  const T=twNearest_(towns, lat, lon); if(!T) return null;
+  const F_=MM_FRAME, M=70, tp=V.toPx(T.lat,T.lon);
+  if(tp[0]>F_.x+30&&tp[0]<F_.x+F_.w-30&&tp[1]>F_.y+30&&tp[1]<F_.y+F_.h-30) return null;      // on the map: the point says it
+  const pc=V.toPx(lat,lon); let dx=tp[0]-pc[0], dy=tp[1]-pc[1]; const dn=Math.hypot(dx,dy)||1; dx/=dn; dy/=dn;
+  /* where the ray leaves the inner rectangle */
+  const R={x:F_.x+M,y:F_.y+M,w:F_.w-2*M,h:F_.h-2*M}; let t=1/0;
+  if(dx>0) t=Math.min(t,(R.x+R.w-pc[0])/dx); if(dx<0) t=Math.min(t,(R.x-pc[0])/dx); if(dy>0) t=Math.min(t,(R.y+R.h-pc[1])/dy); if(dy<0) t=Math.min(t,(R.y-pc[1])/dy);
+  if(!isFinite(t)||t<=0) return null;
+  const exit0=[pc[0]+dx*t, pc[1]+dy*t], label=T.name+" "+(T.km>=10?Math.round(T.km):T.km.toFixed(1))+" km", F="Arial, Helvetica, sans-serif", fs=30, len=120;
+  ctx.font="bold "+fs+"px "+F; const tw=ctx.measureText(label).width+14, th=fs+8;
+  const onEdge=e=>[Math.max(R.x,Math.min(R.x+R.w,e[0])),Math.max(R.y,Math.min(R.y+R.h,e[1]))];
+  const horiz=Math.abs(dx)<Math.abs(dy);      // the ray leaves through the top/bottom: slide sideways; else slide up/down
+  const freeB=b=>b.x>F_.x+4&&b.y>F_.y+4&&b.x+b.w<F_.x+F_.w-4&&b.y+b.h<F_.y+F_.h-4&&!boxes.some(a=>b.x<a.x+a.w&&b.x+b.w>a.x&&b.y<a.y+a.h&&b.y+b.h>a.y);
+  for(const off of [0,140,-140,280,-280,420,-420]){
+    const e=onEdge(horiz?[exit0[0]+off,exit0[1]]:[exit0[0],exit0[1]+off]);
+    const head=[e[0],e[1]], tail=[e[0]-dx*len,e[1]-dy*len];
+    /* the text sits on the inward side of the arrow's middle, upright */
+    const mid=[(head[0]+tail[0])/2,(head[1]+tail[1])/2], nx=-dy, ny=dx; let tx=mid[0]-dx*20, ty=mid[1]-dy*20;
+    const inward=[(tx-dx*(tw/2+30)),(ty-dy*(th/2+30))]; tx=inward[0]; ty=inward[1];
+    const ax=Math.min(head[0],tail[0],tx-tw/2)-16, ay=Math.min(head[1],tail[1],ty-th/2)-16, bx=Math.max(head[0],tail[0],tx+tw/2)+16, by=Math.max(head[1],tail[1],ty+th/2)+16;
+    const box={x:ax,y:ay,w:bx-ax,h:by-ay}; if(!freeB(box)) continue;
+    return {box, town:T, draw:()=>{ ctx.save(); ctx.lineCap="round"; ctx.lineJoin="round";
+        const shaft=()=>{ ctx.beginPath(); ctx.moveTo(tail[0],tail[1]); ctx.lineTo(head[0],head[1]); ctx.stroke(); const hw=22, hl=34; ctx.beginPath(); ctx.moveTo(head[0],head[1]); ctx.lineTo(head[0]-dx*hl+nx*hw,head[1]-dy*hl+ny*hw); ctx.lineTo(head[0]-dx*hl-nx*hw,head[1]-dy*hl-ny*hw); ctx.closePath(); ctx.fill(); };
+        ctx.strokeStyle="#fff"; ctx.fillStyle="#fff"; ctx.lineWidth=14; shaft(); ctx.strokeStyle="#111"; ctx.fillStyle="#111"; ctx.lineWidth=7; shaft();
+        ctx.font="bold "+fs+"px "+F; ctx.textAlign="center"; ctx.textBaseline="middle"; mmHaloText_(ctx,label,tx,ty,"#111","#fff"); ctx.restore(); } };
+  }
+  return null;
+}
+const MM_INSET_NAMES={auto:{fs:13,max:12}, more:{fs:11,max:18}, fewer:{fs:15,max:5}, none:{fs:0,max:0}};
+function rnShort_(name){ const ab={ROAD:"Rd",BOULEVARD:"Blvd",AVENUE:"Ave",STREET:"St",DRIVE:"Dr",CRESCENT:"Cres",COURT:"Crt",CONCESSION:"Conc",SIDEROAD:"Sdrd","SIDE ROAD":"Sdrd",HIGHWAY:"Hwy",TRAIL:"Trl",LANE:"Lane",LINE:"Line",PARKWAY:"Pkwy",PLACE:"Pl",CIRCLE:"Cir",TERRACE:"Terr",EXPRESSWAY:"Expy",REGIONAL:"Reg.",COUNTY:"County"};
+  const words=String(name||"").trim().split(/\s+/); return words.map((w,i)=>{ const U=w.toUpperCase(); if(ab[U]&&i>0) return ab[U]; if(/^\d/.test(w)||/^(NE|NW|SE|SW|N|S|E|W)$/.test(U)) return U; if(/^(HWY|RR|CR)$/.test(U)) return U; return (U.charAt(0)+U.slice(1).toLowerCase()).replace(/(['-])([a-z])/g,(m,a,b)=>a+b.toUpperCase()).replace(/^(Mc|Mac)([a-z])/,(m,a,b)=>a+b.toUpperCase()); }).join(" "); }
+function mmInsetDraw_(ctx, I, B, V, aerial, o){
   const F="Arial, Helvetica, sans-serif", bb=I.bbox, lat=(bb[1]+bb[3])/2, cos=Math.cos(lat*Math.PI/180), inchM=0.0254/MM_DPI, EARTH=40075016.686;
   const upp=MM_INSET.scale*inchM/(EARTH*cos), c=mmMerc_(lat,(bb[0]+bb[2])/2), cx=B.x+B.w/2, cy=B.y+B.h/2;
   const toPx=(la,lo)=>{ const m=mmMerc_(la,lo); return [cx+(m[0]-c[0])/upp, cy+(m[1]-c[1])/upp]; };
@@ -12317,22 +12400,37 @@ function mmInsetDraw_(ctx, I, B, V, aerial){
   const L=I.layers||{};
   (L.waterbody&&L.waterbody.features||[]).forEach(f=>{ const g=mmGeomParts_(f.geometry); g.polys.forEach(r=>{ path(r); ctx.fillStyle=MM_COL.openwater; ctx.fill("evenodd"); }); });
   (L.roads&&L.roads.features||[]).forEach(f=>{ const g=mmGeomParts_(f.geometry); g.lines.forEach(l=>{ line(l); ctx.strokeStyle="#333"; ctx.lineWidth=1.6; ctx.stroke(); }); });
+  const insetTowns=[]; (L.towns&&L.towns.features||[]).forEach(f=>{ const g=mmGeomParts_(f.geometry); g.pts.forEach(q=>{ const p=toPx(q[0],q[1]); if(p[0]<B.x||p[0]>B.x+B.w||p[1]<B.y||p[1]>B.y+B.h) return; ctx.beginPath(); ctx.arc(p[0],p[1],5,0,Math.PI*2); ctx.fillStyle="#fff"; ctx.fill(); ctx.lineWidth=2; ctx.strokeStyle="#111"; ctx.stroke(); ctx.beginPath(); ctx.arc(p[0],p[1],2,0,Math.PI*2); ctx.fillStyle="#111"; ctx.fill(); insetTowns.push({p,name:String((f.properties||{}).NAME||"")}); }); });
   /* the main map's extent, then the property: red outline, or a red dot when it would be under 12 px */
   const fb=V.bbox(); { const a=toPx(fb[3],fb[0]), b=toPx(fb[1],fb[2]); ctx.strokeStyle="#555"; ctx.lineWidth=1.5; mmDash_(ctx,[5,4]); ctx.strokeRect(a[0],a[1],b[0]-a[0],b[1]-a[1]); mmDash_(ctx,[]); }
   { const rings=(I.outline&&I.outline.length)?I.outline:(I.comps||[]);      // v401: the outline, else every compartment
     if(rings.length){ let x0=1/0,x1=-1/0,y0=1/0,y1=-1/0; rings.forEach(r=>r.forEach(q=>{ const p=toPx(q[0],q[1]); x0=Math.min(x0,p[0]); x1=Math.max(x1,p[0]); y0=Math.min(y0,p[1]); y1=Math.max(y1,p[1]); }));
       if(Math.max(x1-x0,y1-y0)<12){ ctx.beginPath(); ctx.arc((x0+x1)/2,(y0+y1)/2,7,0,Math.PI*2); ctx.fillStyle=MM_COL.boundary; ctx.fill(); }
       else rings.forEach(r=>{ path([r]); ctx.fillStyle="rgba(232,20,28,.35)"; ctx.fill(); ctx.strokeStyle=MM_COL.boundary; ctx.lineWidth=I.outline?3:2; ctx.stroke(); }); } }
-  /* the longest-named roads, upright, where they do not collide */
+  /* v415: the road names — nearest the property first, short forms, as many as fit */
+  const NM=MM_INSET_NAMES[(o&&o.insetNames)||"auto"]||MM_INSET_NAMES.auto;
   const boxes=[], free=b=>b.x>B.x+2&&b.y>B.y+2&&b.x+b.w<B.x+B.w-2&&b.y+b.h<B.y+B.h-30&&!boxes.some(a=>b.x<a.x+a.w&&b.x+b.w>a.x&&b.y<a.y+a.h&&b.y+b.h>a.y);
-  ctx.font="bold 15px "+F; ctx.textAlign="center"; ctx.textBaseline="middle";
-  const named=(I.names||[]).map(r=>{ let best=null,bl=0; r.lines.forEach(l=>{ const px=l.map(q=>toPx(q[0],q[1])).filter(p=>p[0]>B.x&&p[0]<B.x+B.w&&p[1]>B.y&&p[1]<B.y+B.h); let Lp=0; for(let i=1;i<px.length;i++) Lp+=Math.hypot(px[i][0]-px[i-1][0],px[i][1]-px[i-1][1]); if(Lp>bl){ bl=Lp; best=px; } }); return {name:r.name,px:best,L:bl}; }).filter(r=>r.px&&r.px.length>1).sort((a,b)=>b.L-a.L).slice(0,8);
-  let n=0; named.forEach(r=>{ if(n>=6) return; const w=ctx.measureText(r.name).width+6, h=18; if(r.L<w) return;
-    /* the point half way along the visible run, and the direction there */
-    let acc=0, p=r.px[0], q=r.px[1]; for(let i=1;i<r.px.length;i++){ const sg=Math.hypot(r.px[i][0]-r.px[i-1][0],r.px[i][1]-r.px[i-1][1]); if(acc+sg>=r.L/2){ const t=sg?(r.L/2-acc)/sg:0; p=[r.px[i-1][0]+(r.px[i][0]-r.px[i-1][0])*t, r.px[i-1][1]+(r.px[i][1]-r.px[i-1][1])*t]; q=r.px[i-1]; break; } acc+=sg; }
-    let ang=Math.atan2(p[1]-q[1],p[0]-q[0]); if(ang>Math.PI/2) ang-=Math.PI; if(ang<-Math.PI/2) ang+=Math.PI;
-    const cw=Math.abs(Math.cos(ang))*w+Math.abs(Math.sin(ang))*h, ch=Math.abs(Math.sin(ang))*w+Math.abs(Math.cos(ang))*h, b={x:p[0]-cw/2,y:p[1]-ch/2,w:cw,h:ch};
-    if(!free(b)) return; boxes.push(b); ctx.save(); ctx.translate(p[0],p[1]); ctx.rotate(ang); mmHaloText_(ctx,r.name,0,0,"#111","#fff"); ctx.restore(); n++; });
+  let pc=[cx,cy];
+  { const rings=(I.outline&&I.outline.length)?I.outline:(I.comps||[]); if(rings.length){ let x0=1/0,x1=-1/0,y0=1/0,y1=-1/0; rings.forEach(r=>r.forEach(q=>{ const p=toPx(q[0],q[1]); x0=Math.min(x0,p[0]); x1=Math.max(x1,p[0]); y0=Math.min(y0,p[1]); y1=Math.max(y1,p[1]); }));
+      pc=[(x0+x1)/2,(y0+y1)/2]; boxes.push({x:Math.min(x0,pc[0]-8)-3,y:Math.min(y0,pc[1]-8)-3,w:Math.max(x1-x0,16)+6,h:Math.max(y1-y0,16)+6}); } }      // the property itself stays clear
+  insetTowns.forEach(t=>boxes.push({x:t.p[0]-7,y:t.p[1]-7,w:14,h:14}));
+  insetTowns.forEach(t=>{ if(!t.name) return; ctx.font="bold 14px "+F; ctx.textAlign="center"; ctx.textBaseline="middle"; const w=ctx.measureText(t.name).width+6, h=18;
+    for(const v of [[10+w/2,0],[-10-w/2,0],[0,-14],[0,14]]){ const b={x:t.p[0]+v[0]-w/2,y:t.p[1]+v[1]-h/2,w,h}; if(!free(b)) continue; boxes.push(b); mmHaloText_(ctx,t.name,t.p[0]+v[0],t.p[1]+v[1],"#111","#fff",4); break; } });
+  if(NM.max>0){
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    const named=(I.names||[]).map(r=>{ let best=null,bl=0; r.lines.forEach(l=>{ const px=l.map(q=>toPx(q[0],q[1])).filter(p=>p[0]>B.x&&p[0]<B.x+B.w&&p[1]>B.y&&p[1]<B.y+B.h); let Lp=0; for(let i=1;i<px.length;i++) Lp+=Math.hypot(px[i][0]-px[i-1][0],px[i][1]-px[i-1][1]); if(Lp>bl){ bl=Lp; best=px; } }); return {name:rnShort_(r.name),px:best,L:bl}; })
+      .filter(r=>r.px&&r.px.length>1&&r.L>=24);
+    /* a point a given way along the visible run, with the road's direction there */
+    const along=(r,f)=>{ let acc=0; const want=r.L*f; for(let i=1;i<r.px.length;i++){ const sg=Math.hypot(r.px[i][0]-r.px[i-1][0],r.px[i][1]-r.px[i-1][1]); if(acc+sg>=want){ const t=sg?(want-acc)/sg:0; const p=[r.px[i-1][0]+(r.px[i][0]-r.px[i-1][0])*t, r.px[i-1][1]+(r.px[i][1]-r.px[i-1][1])*t]; let ang=Math.atan2(r.px[i][1]-r.px[i-1][1],r.px[i][0]-r.px[i-1][0]); if(ang>Math.PI/2) ang-=Math.PI; if(ang<-Math.PI/2) ang+=Math.PI; return {p,ang}; } acc+=sg; } return null; };
+    named.forEach(r=>{ let d=1/0; r.px.forEach(x=>{ d=Math.min(d,Math.hypot(x[0]-pc[0],x[1]-pc[1])); }); r.d=d; r.score=r.L/(1+d/100); });
+    named.sort((a,b)=>b.score-a.score);
+    /* half way along first; when that spot is taken (by the property, or an earlier name) the name slides along its road */
+    let n=0; named.forEach(r=>{ if(n>=NM.max) return; let done=false;
+      for(const fs of [NM.fs, NM.fs-2]){ if(done||fs<9) break; ctx.font="bold "+fs+"px "+F; const w=ctx.measureText(r.name).width+6, h=fs+4; if(r.L<w*0.8) continue;
+        for(const f of [0.5,0.35,0.65,0.2,0.8,0.1,0.9]){ const at=along(r,f); if(!at) continue;
+          const cw=Math.abs(Math.cos(at.ang))*w+Math.abs(Math.sin(at.ang))*h, ch=Math.abs(Math.sin(at.ang))*w+Math.abs(Math.cos(at.ang))*h, b={x:at.p[0]-cw/2,y:at.p[1]-ch/2,w:cw,h:ch};
+          if(!free(b)) continue; boxes.push(b); ctx.save(); ctx.translate(at.p[0],at.p[1]); ctx.rotate(at.ang); mmHaloText_(ctx,r.name,0,0,"#111","#fff",4); ctx.restore(); n++; done=true; break; } } });
+  }
   /* scale line and the box */
   const km=2000/(MM_INSET.scale*inchM); ctx.fillStyle="#111"; ctx.fillRect(B.x+10,B.y+B.h-16,km,5); ctx.font="14px "+F; ctx.textAlign="left"; ctx.textBaseline="alphabetic"; ctx.fillText("0",B.x+8,B.y+B.h-20); ctx.fillText("2 km",B.x+10+km+4,B.y+B.h-20);
   ctx.textAlign="right"; ctx.fillText("1:"+MM_INSET.scale.toLocaleString("en-CA"),B.x+B.w-8,B.y+B.h-8);
@@ -12349,7 +12447,7 @@ async function mmGather_(tract, o, V, notes){
   /* Only what touches the map is kept: a saved version should not carry the whole province. */
   const bb=V.bbox(), near=f=>{ const g=mmGeomParts_(f.geometry); let w=1/0,s=1/0,e=-1/0,n=-1/0; const add=q=>{ if(q[1]<w)w=q[1]; if(q[1]>e)e=q[1]; if(q[0]<s)s=q[0]; if(q[0]>n)n=q[0]; };
     g.polys.forEach(pg=>(pg[0]||[]).forEach(add)); g.lines.forEach(l=>l.forEach(add)); g.pts.forEach(add); return e>=bb[0]&&w<=bb[2]&&n>=bb[1]&&s<=bb[3]; };
-  const layers={}; Object.keys(L).forEach(k=>{ const fc=L[k]; if(fc&&fc.features) layers[k]={type:"FeatureCollection",features:fc.features.filter(near)}; });
+  const layers={}; Object.keys(L).forEach(k=>{ const fc=L[k]; if(fc&&fc.features) layers[k]={type:"FeatureCollection",features:k==="towns"?fc.features.slice():fc.features.filter(near)}; });      // v416: the towns stay whole — the arrow needs the ones off the map
   /* v388: the points — sensitive ones only when the map asks for them, and say how many were left off. */
   let feats=[]; if(o.feats!==false){ const ff=ftFor_(tract,o); feats=ff.list; if(ff.left) notes.push(ff.left+" sensitive point"+(ff.left===1?" was":"s were")+" left off the map (choose how sensitive points print on the options page)"); if(ff.general) notes.push(ff.general+" sensitive point"+(ff.general===1?" is":"s are")+" shown generalized to a 1 km cell, without a name"); }
   const lines=o.lines===false?[]:lnFor_(tract);      // v389
@@ -12429,6 +12527,8 @@ async function mmRender_(tract, o, onPct, frozen){
   if(o.layers.roads) eachF("roads",g=>g.lines.forEach(l=>{ mmLine_(ctx,V,l); if(halo){ ctx.strokeStyle="rgba(255,255,255,.8)"; ctx.lineWidth=9; ctx.stroke(); } ctx.strokeStyle=MM_COL.road; ctx.lineWidth=5; ctx.stroke(); present.roads=1; }));
   if(o.layers.building) eachF("building",g=>{ const pts=g.pts.slice(); g.polys.forEach(r=>{ const o0=r[0]; if(!o0||!o0.length) return; let a=0,b=0; o0.forEach(q=>{ a+=q[0]; b+=q[1]; }); pts.push([a/o0.length,b/o0.length]); });
     pts.forEach(q=>{ const p=V.toPx(q[0],q[1]); ctx.beginPath(); ctx.arc(p[0],p[1],9,0,Math.PI*2); ctx.fillStyle=MM_COL.building; ctx.fill(); if(halo){ ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.stroke(); } present.building=1; }); });
+  /* v416: towns and places as a ringed dot; the names are placed with the other names below */
+  const townPts=[]; if(o.layers.towns) eachF("towns",(g,pr)=>{ g.pts.forEach(q=>{ const p=V.toPx(q[0],q[1]); ctx.beginPath(); ctx.arc(p[0],p[1],10,0,Math.PI*2); ctx.fillStyle="#fff"; ctx.fill(); ctx.lineWidth=3.5; ctx.strokeStyle="#111"; ctx.stroke(); ctx.beginPath(); ctx.arc(p[0],p[1],4,0,Math.PI*2); ctx.fillStyle="#111"; ctx.fill(); present.towns=1; townPts.push({p, name:String(pr.NAME||""), kind:pr.KIND}); }); });
   // v389: the cruiser's lines — trails, roads, skid trails, streams — under the outline, over the provincial layers
   try{ lnDrawOn_(ctx, V, D.lines||[], halo, present, "lines"); }catch(e){ notes.push("Lines: "+String(e.message||e)); }
   // the property outline, then the compartments on top of it
@@ -12446,6 +12546,9 @@ async function mmRender_(tract, o, onPct, frozen){
      first; the note itself is still drawn last, on top. */
   try{ mnBoxes_(ctx, V, D.notes||[]).forEach(b=>boxes.push(b)); }catch(e){}
   const insetBox=(o.inset&&D.inset&&D.inset.bbox)?mmInsetPlace_(V, D.ext):null; if(insetBox) boxes.push(insetBox);      // v394: the locator's corner is kept clear
+  /* v416: the arrow to the nearest town takes its room now (it is drawn near the end, over the map, under the notes) */
+  townPts.forEach(t=>boxes.push({x:t.p[0]-12,y:t.p[1]-12,w:24,h:24}));      // v416: the town dots keep their room
+  let townArrow=null; try{ if(o.townArrow && o.layers.towns!==false && L.towns){ townArrow=mmTownArrow_(ctx, V, D, L.towns, boxes); if(townArrow) boxes.push(townArrow.box); } }catch(e){ notes.push("Town arrow: "+String(e.message||e)); }
   if(o.layers.roadnames && D.roads) rnTypedBoxes_(ctx, V, tract, D.roads).forEach(b=>boxes.push(b));      // typed road labels are placed by hand too
   try{ ftDrawOn_(ctx, V, D.feats||[], boxes, o.aerial, present, false, "sym"); }catch(e){ notes.push("Points: "+String(e.message||e)); }   // the symbols cannot move either
   ctx.textAlign="center"; ctx.textBaseline="middle";
@@ -12496,6 +12599,9 @@ async function mmRender_(tract, o, onPct, frozen){
   // v393: on Map 4 (o.names false) the points keep their symbols and the lines their style, but the names stay off
   try{ ftDrawOn_(ctx, V, D.feats||[], boxes, o.aerial, present, o.names!==false, "names"); }catch(e){ notes.push("Point names: "+String(e.message||e)); }
   try{ if(o.names!==false) lnLabels_(ctx, V, D.lines||[], boxes, o.aerial); }catch(e){ notes.push("Line names: "+String(e.message||e)); }
+  /* v416: town names — to the right of the dot, else left, above, below; a town's name may step down a size */
+  townPts.forEach(t=>{ if(!t.name) return; const F2="Arial, Helvetica, sans-serif"; for(const fs of [t.kind==="town"?30:24, t.kind==="town"?24:20]){ ctx.font="bold "+fs+"px "+F2; const w=ctx.measureText(t.name).width+10, h=fs+6; let done=false;
+      for(const v of [[16+w/2,0],[-16-w/2,0],[0,-18-h/2],[0,18+h/2]]){ const b={x:t.p[0]+v[0]-w/2,y:t.p[1]+v[1]-h/2,w,h}; if(!free(b)) continue; boxes.push(b); ctx.textAlign="center"; ctx.textBaseline="middle"; mmHaloText_(ctx,t.name,t.p[0]+v[0],t.p[1]+v[1],fg,bg); done=true; break; } if(done) break; } });
   if(o.layers.roadnames && D.roads){ try{ if(rnDraw_(ctx,V,tract,D.roads,boxes,o.aerial,D.ext)) present.roadnames=1; }catch(e){ notes.push("Road names: "+String(e.message||e)); } }
   if(o.layers.lots) eachF("lots",(g,pr)=>{ const t1=String(pr.LOT_IDENT||"").trim(), t2=String(pr.CONCESSION_IDENT||"").trim(); if(!t1&&!t2) return;
     g.polys.forEach(r=>{ const at=mmInside_(r.map(ring=>ring.map(q=>V.toPx(q[0],q[1]))), MM_FRAME); if(!at) return;
@@ -12504,8 +12610,9 @@ async function mmRender_(tract, o, onPct, frozen){
   // v394: elevations on the index contours, where there is room (last of the automatic labels)
   if(ctIdx.length){ try{ mmContourLabels_(ctx, V, ctIdx, boxes, o.aerial); }catch(e){ notes.push("Contour labels: "+String(e.message||e)); } }
   // v394: the locator inset, over the map but under the notes
-  if(insetBox){ try{ mmInsetDraw_(ctx, D.inset, insetBox, V, o.aerial); }catch(e){ notes.push("Locator inset: "+String(e.message||e)); } }
+  if(insetBox){ try{ mmInsetDraw_(ctx, D.inset, insetBox, V, o.aerial, o); }catch(e){ notes.push("Locator inset: "+String(e.message||e)); } }
   // v385: the notes and arrows, on top of everything
+  if(townArrow){ try{ townArrow.draw(); present.townArrow=1; }catch(e){} }      // v416
   mnDrawOn_(ctx, V, D.notes||[]);
   ctx.restore();
   // ── frame and title block ──
@@ -12550,7 +12657,7 @@ function mmContourLabels_(ctx, V, idx, boxes, aerial){
   }
   ctx.restore(); return n;
 }
-function mmHaloText_(ctx,t,x,y,fg,bg){ ctx.lineWidth=fg==="#fff"?5:7; ctx.lineJoin="round"; ctx.strokeStyle=bg; if(ctx.strokeText) ctx.strokeText(t,x,y); ctx.fillStyle=fg; ctx.fillText(t,x,y); }
+function mmHaloText_(ctx,t,x,y,fg,bg,lw){ ctx.lineWidth=lw||(fg==="#fff"?5:7); ctx.lineJoin="round"; ctx.strokeStyle=bg; if(ctx.strokeText) ctx.strokeText(t,x,y); ctx.fillStyle=fg; ctx.fillText(t,x,y); }
 function mmNice_(m){ const s=[10,20,25,50,100,200,250,500,1000,2000,2500,5000]; return s.reduce((b,v)=>v<=m?v:b, s[0]); }
 function mmTitleBlock_(ctx, d, o, V, present, hc, photo){
   const F="Arial, Helvetica, sans-serif", T=MM_TB;
@@ -12581,6 +12688,7 @@ function mmTitleBlock_(ctx, d, o, V, present, hc, photo){
   // credits
   ctx.font="22px "+F;
   const cr=["Base mapping: Land Information Ontario, contains information licensed under the Open Government Licence – Ontario."];
+  if(present.towns||present.townArrow) cr.push("Towns and places: Statistics Canada 2021 Census boundary files, Statistics Canada Open Licence.");
   if(present.roadnames) cr.push("Road names: Statistics Canada Road Network File, Statistics Canada Open Licence.");
   const dot=t=>/[.!?]$/.test(t)?t:t+".";
   /* v394: the photo's year, as MFTIP asks — typed on the options page (pre-filled from the source's name) */
@@ -12606,6 +12714,7 @@ function mmTitleBlock_(ctx, d, o, V, present, hc, photo){
   if(present.openwater) items.push(["Open water", (x,y)=>{ ctx.fillStyle=MM_COL.openwater; ctx.fillRect(x+2,y+2,42,22); ctx.strokeStyle=MM_COL.water; ctx.lineWidth=2; ctx.strokeRect(x+2,y+2,42,22); }]);
   if(present.wetland) items.push(["Wetland", (x,y)=>{ ctx.fillStyle=mmPatterns_(ctx).wetland||"#cfe9c4"; ctx.fillRect(x+2,y+2,42,22); ctx.strokeStyle="#5fbf4a"; ctx.lineWidth=2; ctx.strokeRect(x+2,y+2,42,22); }]);
   if(present.wood) items.push(["Woodland", (x,y)=>{ ctx.fillStyle=MM_COL.wood; ctx.fillRect(x+2,y+2,42,22); }]);
+  if(present.towns) items.push(["Town / place", (x,y)=>{ ctx.beginPath(); ctx.arc(x+23,y+13,9,0,Math.PI*2); ctx.fillStyle="#fff"; ctx.fill(); ctx.lineWidth=3; ctx.strokeStyle="#111"; ctx.stroke(); ctx.beginPath(); ctx.arc(x+23,y+13,3.5,0,Math.PI*2); ctx.fillStyle="#111"; ctx.fill(); }]);
   if(present.building||present.ft_building) items.push(["Building structure", (x,y)=>{ ctx.beginPath(); ctx.arc(x+23,y+13,10,0,Math.PI*2); ctx.fillStyle=MM_COL.building; ctx.fill(); }]);
   // v388: the points' own symbols (a building point shares the entry above)
   [["gate","Gate"],["access","Access point"],["sar","Species at risk"],["nest","Stick nest"],["den","Den"],["other","Other feature"]].forEach(k=>{ if(present["ft_"+k[0]]) items.push([k[1], (x,y)=>ftSym_(ctx,k[0],x+23,y+13,11)]); });
@@ -12740,7 +12849,7 @@ function mmDownload_(k){ const m=_mmLast; if(!m) return; const b=k==="pdf"?m.pdf
 /* The options, then make it. */
 function mmOpen_(kind){
   const t=_ppTract; if(!t){ toast("Choose the property first",true); return; }
-  const o=mmOpts_(kind), names={woodland:"Woodland (provincial)",lots:"Lots & concessions",roads:"Roads",roadnames:"Road names",water:"Watercourses",waterbody:"Water bodies",wetland:"Wetlands",building:"Buildings",contour:"Contours"};
+  const o=mmOpts_(kind), names={woodland:"Woodland (provincial)",lots:"Lots & concessions",roads:"Roads",roadnames:"Road names",water:"Watercourses",waterbody:"Water bodies",wetland:"Wetlands",building:"Buildings",contour:"Contours",towns:"Towns & places (named points)"};
   const chk=(k)=>`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmL_${k}" ${o.layers[k]?"checked":""} style="width:20px;height:20px"> ${esc(names[k])}</label>`;
   const sel=(id,opts,v)=>`<select id="${id}" style="width:100%;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+opts.map(x=>`<option value="${esc(x[0])}"${String(v)===x[0]?" selected":""}>${esc(x[1])}</option>`).join("")+`</select>`;
   showDataSheet_("Map "+kind+" — "+t,
@@ -12756,13 +12865,15 @@ function mmOpen_(kind){
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Layers</div>`+Object.keys(names).map(chk).join("")+
     `<div style="font-size:11px;color:#8fae95;margin:2px 0 6px">Notes and arrows: the ✎ Text button on the map. Those set for this map are printed.</div>`+
     (kind===6?`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmPlots" ${o.plots?"checked":""} style="width:20px;height:20px"> Numbered plot locations</label>`:"")+
+    ((kind===4||kind===6)?`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmTownArrow" ${o.townArrow?"checked":""} style="width:20px;height:20px"> Arrow to the nearest town (at the map's edge, with its name and distance — not drawn when the town is on the map)</label>`:"")+
     `<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmFeats" ${o.feats?"checked":""} style="width:20px;height:20px"> Points (buildings, gates, features — the 📍 Points button)</label>`+
     `<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmLines" ${o.lines?"checked":""} style="width:20px;height:20px"> Lines and areas (trails, roads, streams, ponds, wetlands — the ⤳ Lines button)</label>`+
     `<label style="display:flex;align-items:center;gap:8px;padding:5px 0 5px 28px;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmNames" ${o.names?"checked":""} style="width:20px;height:20px"> Their names (${kind===4?"off on Map 4: at this scale the names pile up — the symbols say what is there":"on Map 6 there is room for them"})</label>`+
     (ftOf_(t).some(f=>f.sens)?`<div style="font-size:12px;color:#ffd24a;margin:8px 0 3px 28px">Sensitive points (${ftOf_(t).filter(f=>f.sens).length} species-at-risk or other sensitive location${ftOf_(t).filter(f=>f.sens).length===1?"":"s"}) — never remembered between maps</div><div style="padding-left:28px">`+sel("mmSens",[["","Leave off the map"],["general","Generalized: a 1 km cell, no name (for a map that leaves your hands)"],["exact","Exact location and name (your own copy)"]],"")+`</div>`:"")+
     (kind===6?`<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Photo year (printed in the credit — MFTIP asks for it; the Esri photo's date is on its metadata page)</div><input id="mmPhotoYear" type="text" inputmode="numeric" value="${esc(o.photoYear||"")}" placeholder="e.g. 2025" style="width:100%;box-sizing:border-box;font-size:16px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`:"")+
     (kind===6?`<label style="display:flex;align-items:center;gap:8px;padding:9px 0 5px;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmStand" ${o.standLabels?"checked":""} style="width:20px;height:20px"> Stand description under each compartment label (composition, age, BA, QMD — from the Sheet's compartment analysis; needs signal once)</label>`:"")+
-    (kind===4?`<label style="display:flex;align-items:center;gap:8px;padding:9px 0 5px;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmInset" ${o.inset?"checked":""} style="width:20px;height:20px"> Locator inset (1:150,000 in the corner — the property as a dot, roads and water for 8 km around)</label>`:"")+
+    (kind===4?`<label style="display:flex;align-items:center;gap:8px;padding:9px 0 5px;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmInset" ${o.inset?"checked":""} style="width:20px;height:20px"> Locator inset (1:150,000 in the corner — the property as a dot, roads and water for 8 km around)</label>`+
+     `<div style="font-size:12px;color:#a9c9b0;margin:6px 0 3px">Key map road names</div>`+sel("mmInsetNames",[["auto","Automatic — the roads nearest the property, as many as fit"],["more","More names, smaller text"],["fewer","Fewer names, larger text"],["none","No road names"]],o.insetNames||"auto"):"")+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Road names — untick one to leave it off, or type over it to correct it</div><div id="rnList"></div>`+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Prepared by (printed on the map)</div><input id="mmFirm" type="text" value="${esc(o.firm)}" placeholder="e.g. your company" style="width:100%;box-sizing:border-box;font-size:16px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
     `<div style="display:flex;gap:8px;margin:14px 0 6px"><button type="button" class="btn submit" style="flex:1" onclick="mmGo_(${kind})">Make Map ${kind}</button><button type="button" class="btn ghost" style="flex:1" onclick="openPropSheet_(_ppTract)">◂ Back</button></div>`);
@@ -12780,7 +12891,7 @@ function mmGo_(kind){
   const pl=v("mmPlots"); if(pl) o.plots=!!pl.checked;
   const ft=v("mmFeats"); if(ft) o.feats=!!ft.checked; const ln=v("mmLines"); if(ln) o.lines=!!ln.checked; const nm=v("mmNames"); if(nm) o.names=!!nm.checked; const se=v("mmSens"); o.sensitive=se?(se.value==="exact"?true:(se.value==="general"?"general":false)):false;
   const f=v("mmFirm"); if(f) o.firm=String(f.value||"").trim().slice(0,60);
-  const py=v("mmPhotoYear"); if(py) o.photoYear=String(py.value||"").trim().slice(0,20); const ins=v("mmInset"); if(ins) o.inset=!!ins.checked; const st=v("mmStand"); if(st) o.standLabels=!!st.checked; const pj=v("mmProj"); if(pj) o.proj=pj.value==="merc"?"merc":"utm"; const al=v("mmAlpha"); if(al) o.fillAlpha=+al.value||100; const ls=v("mmLabel"); if(ls) o.labelScale=+ls.value||100; const af=v("mmActFrom"), at=v("mmActTo"); if(af) o.actFrom=String(af.value||"").trim(); if(at) o.actTo=String(at.value||"").trim();
+  const py=v("mmPhotoYear"); if(py) o.photoYear=String(py.value||"").trim().slice(0,20); const ins=v("mmInset"); if(ins) o.inset=!!ins.checked; const inn=v("mmInsetNames"); if(inn) o.insetNames=inn.value||"auto"; const ta=v("mmTownArrow"); if(ta) o.townArrow=!!ta.checked; const st=v("mmStand"); if(st) o.standLabels=!!st.checked; const pj=v("mmProj"); if(pj) o.proj=pj.value==="merc"?"merc":"utm"; const al=v("mmAlpha"); if(al) o.fillAlpha=+al.value||100; const ls=v("mmLabel"); if(ls) o.labelScale=+ls.value||100; const af=v("mmActFrom"), at=v("mmActTo"); if(af) o.actFrom=String(af.value||"").trim(); if(at) o.actTo=String(at.value||"").trim();
   mmMake_(kind,_ppTract,o);
 }
 /* ============ v384 — road names on Map 4 and Map 6 ============
@@ -14512,7 +14623,7 @@ function mvSave_(){
   const name=prompt("A name for this version:",def); if(name===null) return;
   const v={v:1, id:"V"+Date.now().toString(36).toUpperCase()+"-"+Math.floor(Math.random()*46656).toString(36).toUpperCase().padStart(3,"0"),
     name:String(name).trim().slice(0,120)||def, tract:m.tract, kind:m.kind, at:new Date().toISOString(), by:String(cruiserEmail||""), app:APP_BUILD,
-    opts:{kind:m.o.kind, title:m.o.title, pad:m.o.pad, aerial:m.o.aerial, layers:m.o.layers, hatch:m.o.hatch, plots:m.o.plots, feats:m.o.feats, sensitive:m.o.sensitive==="general"?"general":!!m.o.sensitive, lines:m.o.lines, names:m.o.names!==false, inset:!!m.o.inset, standLabels:!!m.o.standLabels, proj:m.o.proj||"utm", acts:!!m.o.acts, actFrom:m.o.actFrom||"", actTo:m.o.actTo||"", fillAlpha:m.o.fillAlpha||100, labelScale:m.o.labelScale||100, photoYear:m.o.photoYear||"", scale:m.o.scale, page:m.page, extent:m.o.extent, firm:m.o.firm},
+    opts:{kind:m.o.kind, title:m.o.title, pad:m.o.pad, aerial:m.o.aerial, layers:m.o.layers, hatch:m.o.hatch, plots:m.o.plots, feats:m.o.feats, sensitive:m.o.sensitive==="general"?"general":!!m.o.sensitive, lines:m.o.lines, names:m.o.names!==false, inset:!!m.o.inset, standLabels:!!m.o.standLabels, proj:m.o.proj||"utm", acts:!!m.o.acts, actFrom:m.o.actFrom||"", actTo:m.o.actTo||"", fillAlpha:m.o.fillAlpha||100, labelScale:m.o.labelScale||100, insetNames:m.o.insetNames||"auto", townArrow:m.o.townArrow!==false, photoYear:m.o.photoYear||"", scale:m.o.scale, page:m.page, extent:m.o.extent, firm:m.o.firm},
     view:m.view, imagery:m.imagery, data:m.data};
   const text=JSON.stringify(v);
   toast("Saving the version…");
