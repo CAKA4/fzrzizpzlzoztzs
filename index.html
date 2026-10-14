@@ -1283,7 +1283,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-13 · v417";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-13 · v418";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -7329,9 +7329,13 @@ function renderBoundaries(){
   /* v406: one property only — a file's compartments by its tract field; untagged ones only when no feature carries the property */
   const only=(typeof mapOnly!=="undefined"&&mapOnly)?propK_(mapOnly):"", tagged=only&&BOUND.features.some(f=>propK_(featTract_(f))===only);
   const hasPieces={}, hp=t=>{ const k=propK_(t); if(!k) return false; if(hasPieces[k]===undefined){ try{ hasPieces[k]=typeof csOf_==="function"&&csOf_(t).length>0; }catch(e){ hasPieces[k]=false; } } return hasPieces[k]; };
+  /* v418: a file feature with no tract of its own is not drawn again when the property shown in detail (or alone) already has a piece
+     of that name on the Sheet — the Davis Drive map showed "105c" from the file beside "105c" from the Sheet */
+  const pieceNames={}; try{ const pt=(typeof mapOnly!=="undefined"&&mapOnly)?mapOnly:propActiveTract_(); if(pt&&typeof csOf_==="function") csOf_(pt).forEach(c=>{ pieceNames[propK_(c.name)]=1; }); }catch(e){}
   BOUND.features.forEach(f=>{
     if(only){ const ft=propK_(featTract_(f)); if(ft?ft!==only:tagged) return; }
     if(hp(featTract_(f))) return;      // v408: this tract's compartments are its pieces on the Sheet now
+    if(!featTract_(f) && standField && pieceNames[propK_(f.properties?f.properties[standField]:"")]) return;   // v418
     const polys=f.geometry.type==="Polygon"?[f.geometry.coordinates]:f.geometry.coordinates;
     const name=standField?f.properties[standField]:"";
     polys.forEach(rings=>{
@@ -11911,6 +11915,7 @@ function propBarFill_(){ const sel=$("propBarSel"), box=$("propBarBtns"); if(!se
     B("propBarClose_();_ppTract=propActiveTract_();mmOpen_(4)","🗺 Map 4",!has)+B("propBarClose_();_ppTract=propActiveTract_();mmOpen_(6)","🗺 Map 6",!has)+
     B("propBarClose_();_ppTract=propActiveTract_();pkOpen_()","📦 Map package",!has)+
     B("propBarClose_();_ppTract=propActiveTract_();csEdit_(propActiveTract_())","✂ Cut compartments",!has)+
+    B("propBarClose_();_ppTract=propActiveTract_();propDelete_(propActiveTract_())","🗑 Delete property…",!has)+
     ((typeof mapOnly!=="undefined"&&mapOnly)?B("mapOnlyClear_();propBarFill_()","👁 Show all properties"):B("propBarClose_();if($('layersMenu').style.display==='none') toggleLayersMenu(); layersTab_('prop');","☰ Provincial layers & more"));
 }
 function propBarPick_(v){ if(!v) return; propPickActive_(v); propBarFill_(); setTimeout(propBarClose_,500); }
@@ -14611,7 +14616,7 @@ function csRender_(){
     L.polygon(c.rings,{color:pick?"#ff3b30":"#fff", weight:pick?4:2, fillColor:CS_FILL[cls]||"#ffd24a", fillOpacity:_csEd?.35:Math.max(.02,(typeof MAP_ALPHA!=="undefined"?MAP_ALPHA.fill:15)/100), interactive:false}).addTo(csLayer);
     const ctr=c.rings[0].reduce((a,p)=>[a[0]+p[0]/c.rings[0].length,a[1]+p[1]/c.rings[0].length],[0,0]);
     L.marker(ctr,{interactive:false,keyboard:false,icon:L.divIcon({className:"",iconSize:[120,20],iconAnchor:[60,10],
-      html:`<div style="text-align:center;font:700 12px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000">${esc(c.name)}${cls?"":" ·?"}</div>`})}).addTo(csLayer); });
+      html:`<div style="text-align:center;font:700 12px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000">${esc(c.name)}</div>`})}).addTo(csLayer); });   // v418: no " ·?" after a piece without a class (read as an error, Chris 2026-10-13)
   if(_csEd&&_csEd.mode==="move"){
     const okeys={}; csOutline_(t).forEach(r=>r.forEach(p=>okeys[cgKey_(p)]=1)); const seen={};
     pcs.forEach(c=>c.rings.forEach(r=>r.forEach(p=>{ const k=cgKey_(p); if(seen[k]) return; seen[k]=1; const fixed=!!okeys[k];
