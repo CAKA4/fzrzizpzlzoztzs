@@ -1283,7 +1283,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-14 · v421";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-14 · v422";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -11386,6 +11386,7 @@ function propRender_(keep){
      (files.length?sel("ppBndFile",[["","Use a loaded file…"]].concat(files),"",`onchange="propUseFile_(this.value)"`):"")+
      (drawn.length?sel("ppBndDrawn",[["","Use a drawn shape…"]].concat(drawn),"",`onchange="propUseDrawn_(this.value)"`):"")+
      (b.length?`<button type="button" class="btn ghost" onclick="propClearBnd_()">Remove outline</button>`:"")+
+     (b.length>1?`<button type="button" class="btn ghost" onclick="propDissolveBnd_()">⌂ Outline → one perimeter (${b.length} rings)</button>`:"")+
      (propCompsGeo_(t).length?`<button type="button" class="btn ghost" onclick="propAutoOutline_(_ppTract)">⬚ Outline from the compartments</button>`:"")+
      `<button type="button" class="btn ghost" onclick="cltipOpen_(_ppTract)">🗺 From the CLTIP viewer…</button></div>`+
      (b.length&&p.bndAuto?`<div style="font-size:11px;color:#8fae95;margin-bottom:6px">This outline was made from the compartments and follows them when they change.</div>`:"");
@@ -11856,7 +11857,7 @@ function ovRender_(){
   const namesOn=!(typeof labelVis!=="undefined"&&labelVis.ov===false);
   propTracts_().forEach(t=>{ const p=propGet_(t)||{}, isA=propK_(t)===active; if(!mapOnlyIs_(t)) return;      // v406: one property only
     if(Array.isArray(p.boundary)&&p.boundary.length){ p.boundary.forEach(r=>{ if(!r||r.length<3) return;
-        const pg=L.polygon(r.map(q=>[+q[0],+q[1]]),{color:isA?MAP_STYLE.propColor:"#c62828",weight:isA?MAP_STYLE.propWidth:1.5,opacity:isA?1:.7,fill:true,fillColor:"#c62828",fillOpacity:isA?0:.08,smoothFactor:1.5,bubblingMouseEvents:false});
+        const pg=L.polygon(r.map(q=>[+q[0],+q[1]]),{color:MAP_STYLE.propColor,weight:MAP_STYLE.propWidth,opacity:1,fill:true,fillColor:MAP_STYLE.propColor,fillOpacity:0,smoothFactor:1.5,bubblingMouseEvents:false});      // v422: the same for every property — the chosen one is not highlighted
         pg.on("click",()=>{ if(!mapDetail_()||!isA) propPickActive_(t); }); pg.addTo(ovLayer); }); }
     else { if(!namesOn) return; const e=ovExtOf_(t); if(!e) return; const c=[(e[1]+e[3])/2,(e[0]+e[2])/2];      // v406: the dot goes with the name
       const m=L.circleMarker(c,{radius:7,color:"#c62828",weight:2,fillColor:"#fff",fillOpacity:.9,bubblingMouseEvents:false}); m.on("click",()=>propPickActive_(t)); m.addTo(ovLayer); } });
@@ -13756,9 +13757,9 @@ const BND_SNAP_M=0.25;
    thin hole (narrower than 3 m on average) is kept; failing that, the last one with its thin holes dropped. */
 function propOutlineFromComps_(tract){
   let best=null, last=null;
-  for(const snap of [BND_SNAP_M, 1, 3]){ const r=propOutlineFromComps0_(tract, snap); last=r; if(!r.rings.length) continue;
+  for(const snap of BND_DISSOLVE_SNAPS){ const r=propOutlineFromComps0_(tract, snap); last=r; if(!r.rings.length) continue;
     if(r.rings.some((rg,i)=>i>0&&propRingThin_(rg,3))) continue;
-    if(!best||r.rings.length<best.rings.length) best=Object.assign(r,{snap}); }      // the fewest rings wins; the smallest snap on a tie
+    if(!best||r.rings.length<best.rings.length) best=Object.assign(r,{snap}); if(best.rings.length===1) break; }      // the fewest rings wins; the smallest snap on a tie
   if(best) return best;
   if(last&&last.rings.length){ const keep=last.rings.filter((rg,i)=>i===0||!propRingThin_(rg,3)); return Object.assign(last,{rings:keep, snap:3, thinned:last.rings.length-keep.length}); }
   return last;
@@ -13773,13 +13774,21 @@ function propOutlineFromComps0_(tract, SNAP){
 }
 /* v421 — an outline made of several parcels (a CLTIP export of the lots that make the property) is the same job: the
    shared parcel lines cancel and the perimeter remains ("the boundary should only be around the perimeter" — Chris). */
-function bndDissolve_(rings){ try{ const all=(rings||[]).filter(r=>r&&r.length>=3).map(r=>r.map(q=>[+q[0],+q[1]])); if(all.length<2) return rings;
+const BND_DISSOLVE_SNAPS=[0.25,1,3,8,15,25], BND_THIN_M=25;      // v422: parcels sit apart by road allowances and digitising; a strip under 25 m wide is a sliver
+function bndDissolve_(rings){ return bndDissolveWhy_(rings).rings; }
+function bndDissolveWhy_(rings){ try{ const all=(rings||[]).filter(r=>r&&r.length>=3).map(r=>r.map(q=>[+q[0],+q[1]])); if(all.length<2) return {rings, why:all.length?"one ring already":"no rings"};
     /* a ring inside another is a hole of the outline (an excluded parcel), not a parcel to dissolve: set aside, put back after */
     const P=cgProj_(all[0][0][0],all[0][0][1]), XY=all.map(r=>r.map(q=>P.xy(q)));
     const isHole=i=>XY.some((o,j)=>j!==i&&Math.abs(cgArea_(o))>Math.abs(cgArea_(XY[i]))&&XY[i].every(q=>cgInRing_(q[0],q[1],o)));
-    const holes=all.filter((r,i)=>isHole(i)), rs=all.filter((r,i)=>!isHole(i)); if(rs.length<2) return rings;
-    let best=null; for(const snap of [BND_SNAP_M, 1, 3]){ const r=outlineFromRings0_(rs, snap); if(!r.rings.length||r.off>0.02) continue; if(r.rings.some((rg,i)=>i>0&&propRingThin_(rg,3))) continue; if(!best||r.rings.length<best.rings.length) best=r; }
-    return best&&best.rings.length<rs.length ? best.rings.concat(holes) : rings; }catch(e){ return rings; } }
+    const holes=all.filter((r,i)=>isHole(i)), rs=all.filter((r,i)=>!isHole(i)); if(rs.length<2) return {rings, why:"one outer ring with "+holes.length+" hole"+(holes.length===1?"":"s")};
+    let best=null, why=[]; for(const snap of BND_DISSOLVE_SNAPS){ const r=outlineFromRings0_(rs, snap); if(!r.rings.length){ why.push(snap+" m: "+r.why); continue; } if(r.off>0.08){ why.push(snap+" m: area "+(r.off*100).toFixed(1)+"% off"); continue; }
+      const keep=r.rings.filter((rg,i)=>i===0||!propRingThin_(rg,BND_THIN_M)); if(!best||keep.length<best.length){ best=keep; best.snap=snap; } if(keep.length===1) break; }
+    return best&&best.length<rs.length ? {rings:best.concat(holes), snap:best.snap} : {rings, why:why.join("; ")||"the rings share no edge within "+BND_DISSOLVE_SNAPS[BND_DISSOLVE_SNAPS.length-1]+" m"}; }catch(e){ return {rings, why:String(e&&e.message||e)}; } }
+/* v422 — the property sheet's button: dissolve the saved outline to its perimeter now, and say why if it cannot */
+function propDissolveBnd_(){ const t=_ppTract; if(!t) return; const p=propGet_(t)||{}; const b=Array.isArray(p.boundary)?p.boundary:[];
+  if(b.length<2){ toast("The outline of "+t+" is one ring already"+(b.length?"":" — it has no outline")); return; }
+  const r=bndDissolveWhy_(b); if(r.rings===b||r.rings.length>=b.length){ toast("Could not dissolve the "+b.length+" rings of "+t+": "+(r.why||"no shared edges")+". Remove the outline and make it again from the compartments, or load one polygon.",true); return; }
+  propBndSet_(r.rings, "the outline's "+b.length+" rings dissolved ("+r.snap+" m)", t); try{ propRender_(true); lioRender_(); }catch(e){} toast(t+": "+b.length+" rings → "+r.rings.length); }
 function outlineFromRings0_(rings0, SNAP){
   const P=cgProj_(rings0[0][0][0],rings0[0][0][1]);
   /* v409: a compartment lying wholly inside another (an island — a stand file that does not cut holes for the small
@@ -14778,7 +14787,9 @@ function csRender_(){
   const t=_csEd?_csEd.tract:propActiveTract_(); if(!t) return;
   const pcs=csOf_(t);
   pcs.forEach(c=>{ const cls=(propComp_(t,c.name)||{}).cls||"", pick=_csEd&&_csEd.pick===c.id;
-    L.polygon(c.rings,{color:pick?"#ff3b30":"#fff", weight:pick?4:2, fillColor:CS_FILL[cls]||"#ffd24a", fillOpacity:_csEd?.35:Math.max(.02,(typeof MAP_ALPHA!=="undefined"?MAP_ALPHA.fill:15)/100), interactive:false}).addTo(csLayer);
+    /* v422: outside the editor a piece looks like a file's compartment (green, the map style) — choosing a property no longer recolours it (Chris, 2026-10-14) */
+    L.polygon(c.rings,_csEd?{color:pick?"#ff3b30":"#fff", weight:pick?4:2, fillColor:CS_FILL[cls]||"#ffd24a", fillOpacity:.35, interactive:false}
+      :{color:MAP_STYLE.compColor, weight:MAP_STYLE.compWidth, fillColor:MAP_STYLE.compFill, fillOpacity:(typeof MAP_ALPHA!=="undefined"?MAP_ALPHA.fill:10)/100, smoothFactor:2, interactive:false}).addTo(csLayer);
     const ctr=c.rings[0].reduce((a,p)=>[a[0]+p[0]/c.rings[0].length,a[1]+p[1]/c.rings[0].length],[0,0]);
     L.marker(ctr,{interactive:false,keyboard:false,icon:L.divIcon({className:"",iconSize:[120,20],iconAnchor:[60,10],
       html:`<div style="text-align:center;font:700 12px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000">${esc(c.name)}</div>`})}).addTo(csLayer); });   // v418: no " ·?" after a piece without a class (read as an error, Chris 2026-10-13)
