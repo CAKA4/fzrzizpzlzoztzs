@@ -1283,7 +1283,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-14 · v422";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-14 · v429";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1537,7 +1537,7 @@ function apiPost_(o, ms){
    Until a readable answer has been seen, saves go the old way (no-cors), so nothing here can make a
    phone that syncs today stop syncing. */
 const POST_REFUSED={};
-const POST_LABEL={linesave:"Saving map lines", linedel:"Deleting map lines", actsave:"Saving planned activities", actdel:"Deleting planned activities", featsave:"Saving map points", featdel:"Deleting map points", shapesave:"Saving the compartment layer", shapedel:"Deleting compartment pieces",notesave:"Saving map notes", notedel:"Deleting map notes", mapverput:"Saving a map version", photo:"Photo upload", mapfile:"Saving files to Drive", layerput:"Adding a shared layer", propsave:"Saving property details", compsave:"Saving compartment details", compmove:"Moving compartments to another tract", propdel:"Deleting a property", lioput:"Keeping provincial layers in Drive", liolog:"Reporting a provincial-layer problem"};
+const POST_LABEL={compfollow:"Moving plots to their compartments", linesave:"Saving map lines", linedel:"Deleting map lines", actsave:"Saving planned activities", actdel:"Deleting planned activities", featsave:"Saving map points", featdel:"Deleting map points", shapesave:"Saving the compartment layer", shapedel:"Deleting compartment pieces",notesave:"Saving map notes", notedel:"Deleting map notes", mapverput:"Saving a map version", photo:"Photo upload", mapfile:"Saving files to Drive", layerput:"Adding a shared layer", propsave:"Saving property details", compsave:"Saving compartment details", compmove:"Moving compartments to another tract", propdel:"Deleting a property", lioput:"Keeping provincial layers in Drive", liolog:"Reporting a provincial-layer problem"};
 let authLimited=false;       // an account other than the administrator's: summaries, emails, exports and AI are not open to it yet
 function isLimited_(){ return !!((authToken&&authLimited) || (!authToken&&limitedPhone_())); }
 /* v379: on an account other than the office's, mail from the app goes to the address on the user's
@@ -6295,10 +6295,15 @@ function bpPopupOpen_(){
 function bpAreaFor_(f){
   try{
     const stand=bpStandName_(f); if(!stand) return null;      // v420
-    const tract=(tractField?String(pr[tractField]!=null?pr[tractField]:"").trim():"") || manualTract || "";
+    /* v425: v420 dropped the line defining `pr`, so this threw and every popup said "no hectares" (Chris, 2026-10-14).
+       A Sheet piece is measured from its own shape (all pieces of that name in its property, islands taken out);
+       a file's compartment by the layer's rule as before, else from its piece of the same name. */
+    const pieceHa=pc=>{ if(!pc) return 0; return csOf_(pc.tract).filter(c=>propK_(c.name)===propK_(pc.name)).reduce((t,c)=>t+cgPieceHa_(c.rings),0); };
+    if(f&&f.__piece){ const ha=pieceHa((PROPS.shapes||{})[f.__piece]); return ha>0?{ha:Math.round(ha*10000)/10000, src:"calculated from the shape"}:null; }
+    const tract=featTract_(f);
     const nm=tract?(tract+" \u00b7 "+stand):stand;
-    const ca=compartmentAreas_(), ha=ca.areas[nm];
-    if(!(ha>0)) return null;
+    const ca=compartmentAreas_(); let ha=ca.areas[nm];
+    if(!(ha>0)){ const h2=pieceHa(csPieceForFeat_(f)); return h2>0?{ha:Math.round(h2*10000)/10000, src:"calculated from the shape"}:null; }
     const src=String(ca.srcs[nm]||"");
     return {ha:ha, src:/mixed/.test(src)?"official + calculated":(/official/.test(src)?"official":"calculated from the shape")};
   }catch(e){ return null; }
@@ -7375,7 +7380,7 @@ function renderBoundaries(){
     polys.forEach(rings=>{
       const ll=rings[0].map(c=>[c[1],c[0]]);
       L.polygon(ll,{color:MAP_STYLE.compColor,weight:MAP_STYLE.compWidth,fillColor:MAP_STYLE.compFill,fillOpacity:(typeof MAP_ALPHA!=="undefined"?MAP_ALPHA.fill:10)/100,smoothFactor:2,interactive:false}).addTo(fboundLayer);
-      if(name!=null&&name!==""){ const c=centroid(rings[0]); boundLabels.push({lat:c[1],lng:c[0],name:String(name)}); }
+      if(name!=null&&name!==""){ const c=centroid(rings[0]); boundLabels.push({lat:c[1],lng:c[0],name:String(name),tract:featTract_(f)||propActiveTract_()||""}); }
     });
   });
   renderLabels();
@@ -7448,7 +7453,7 @@ function standAnFetch_(force){
   if(!force && standAnAt && Date.now()-standAnAt < 60000) return;   // a minute is plenty between rebuilds
   const cb="__sa"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
   const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
-  window[cb]=r=>{ clean(); standAn={}; ((r&&r.stands)||[]).forEach(x=>{ standAn[String(x.stand).trim().toLowerCase()]=x; });
+  window[cb]=r=>{ clean(); standAn=standAnIndex_((r&&r.stands)||[]);
     // permission comes with the stand feed too, so the map knows what it may offer without the
     // Inventory description panel having been opened first
     if(r && r.mayGenerate!==undefined){ _descMayGen=!!r.mayGenerate; _descHasKey=!!r.hasKey; }
@@ -7458,9 +7463,17 @@ function standAnFetch_(force){
   sc.src=SCRIPT_URL+sep+tokQ_()+"action=standanalysis&callback="+cb+"&email="+encodeURIComponent(cruiserEmail||"");
   document.body.appendChild(sc);
 }
+/* v423 — the analysis feed is per tract AND stand (Code.gs v423): a W-1 on two properties was one pooled analysis
+   (Chris, 2026-10-14). Keyed "tract\u0001stand"; a bare "stand" key is kept only when one property has that name,
+   so a look-up without a tract can never hand back another property's figures. An older backend (no tract in
+   the feed) still indexes by stand alone. */
+function standAnIndex_(stands){ const o={}, dup={}; (stands||[]).forEach(x=>{ const k=propK_(x.stand), tk=propK_(x.tract||""); if(!k) return; if(tk) o[tk+"\u0001"+k]=x;
+    if(o[k]&&propK_(o[k].tract||"")!==tk) dup[k]=1; else o[k]=x; }); Object.keys(dup).forEach(k=>{ delete o[k]; }); return o; }
+function standAnGet_(stand, tract){ const k=propK_(stand); if(!k) return null; const tk=propK_(tract||""); if(tk&&standAn[tk+"\u0001"+k]) return standAn[tk+"\u0001"+k]; const a=standAn[k]; return a&&(!tk||!propK_(a.tract||"")||propK_(a.tract)===tk)?a:null; }
+function standAnTract_(f){ try{ if(f&&f.__piece){ const pc=(PROPS.shapes||{})[f.__piece]; return pc?pc.tract:""; } return featTract_(f)||propActiveTract_()||""; }catch(e){ return ""; } }
 function standAnFor_(f){
-  const k=bpStandName_(f).toLowerCase();      // v420: a piece's name counts too
-  return k?(standAn[k]||null):null;
+  const k=bpStandName_(f);      // v420: a piece's name counts too
+  return k?standAnGet_(k, standAnTract_(f)):null;
 }
 function standAnVal_(a,key){
   if(!a) return "";
@@ -7488,7 +7501,7 @@ function renderLabels(){
     if(!b.contains([L0.lat,L0.lng])) continue;
     let txt=L0.name;
     if(standLabelMode==="analysis"){
-      const a=standAn[String(L0.name).trim().toLowerCase()];
+      const a=standAnGet_(L0.name, L0.tract);      // v423: this property's figures only
       const v=standAnVal_(a,standAnField);
       txt = v==="" ? L0.name : L0.name+" · "+v;   // v417: no plots analysed there yet → just the name (the dash came out as "?" on Android)
     }
@@ -7533,7 +7546,7 @@ function genNote_(stand){
   const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
   const done=r=>{ _genBusy="";
     if(r && r.ok && r.text){
-      const a=standAn[String(stand).trim().toLowerCase()];
+      const a=standAnGet_(stand, _bpFeat?standAnTract_(_bpFeat):propActiveTract_());      // v423
       if(a){ a.notes=r.text; a.notesSrc=r.src||"gemini"; }
       renderBoundPopup_(); toast("Summary written");
       standAnAt=0;   // so the next map refresh picks it up rather than serving the stale feed
@@ -7640,9 +7653,11 @@ function bpPlotsFor_(f){
     .filter(q=>q && String(q.INANALYSIS||"Y").toUpperCase()!=="N");
   /* Match the plot to the compartment the way the rest of the app does: its own STANDID, or the
      compartment it was found to sit inside. */
+  const tk=propK_(standAnTract_(f));      // v423: this property's plots only (a plot with no tract still counts)
   const plots=pool.filter(q=>{
     const a=String(q.STANDID||"").trim().toLowerCase();
     const b=String(q.POLYNAME||"").trim().toLowerCase();
+    if(tk){ const qt=propK_(q.TRACT||""); if(qt&&qt!==tk) return false; }
     return a===key || b===key;
   });
   return {name,plots};
@@ -7665,8 +7680,8 @@ function bpBasis_(f, n, fromSheet){
    the popup session; the backend hands back its own dbhClasses accumulator, whose cells are the
    same {n,ba,ef,vol,nAgs} shape dbhBandApp_ already reads, so the tables stay one implementation. */
 let bpDetail={}, bpDetailBusy={};
-function bpDetailFetch_(stand, then){
-  const key=String(stand||"").trim().toLowerCase();
+function bpDetailFetch_(stand, then, tract){
+  const key=(tract?propK_(tract)+"\u0001":"")+String(stand||"").trim().toLowerCase();      // v423: per property
   if(!key) { then(null); return; }
   if(bpDetail[key]!==undefined){ then(bpDetail[key]); return; }
   if(!connected || isOffline()){ then(null); return; }
@@ -7681,7 +7696,7 @@ function bpDetailFetch_(stand, then){
   window[cb]=r=>fin((r&&r.ok&&r.dbhClasses)?r:null);
   sc.onerror=()=>fin(null);
   setTimeout(()=>fin(null), 15000);
-  sc.src=SCRIPT_URL+sep+tokQ_()+"action=standdetail&stand="+encodeURIComponent(stand)+"&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=standdetail&stand="+encodeURIComponent(stand)+(tract?"&tract="+encodeURIComponent(tract):"")+"&callback="+cb;
   document.body.appendChild(sc);
 }
 /* Shape the Sheet's reply into what computeStand would have produced, so sizeClassHtml_ and
@@ -7763,14 +7778,14 @@ function renderBoundPopup_(){
     }
   } else if(_bpView==="species" || _bpView==="marking"){
     const pick=bpPlotsFor_(f);
-    const key=String(pick.name||"").trim().toLowerCase();
+    const bpT=standAnTract_(f), key=(bpT?propK_(bpT)+"\u0001":"")+String(pick.name||"").trim().toLowerCase();      // v423: per property
     const cached=key?bpDetail[key]:undefined;
     let s=null, fromSheet=false;
     if(cached){ s=bpStandFromSheet_(cached); fromSheet=true; }
     else if(cached===undefined && key && connected && !isOffline()){
       /* Not asked yet: show the device figures now so the tab is never blank in the bush, and
          repaint from the Sheet when it answers. */
-      bpDetailFetch_(pick.name, ()=>{ if(_bpFeat===f) renderBoundPopup_(); });
+      bpDetailFetch_(pick.name, ()=>{ if(_bpFeat===f) renderBoundPopup_(); }, standAnTract_(f));      // v423
       s=computeStand(pick.plots, summaryInclSmall);
     } else s=computeStand(pick.plots, summaryInclSmall);
     if(_bpView==="species") note=bpSpeciesHtml_(s)+bpBasis_(f,s.nplots||0,fromSheet);
@@ -11130,6 +11145,7 @@ function propSync_(then, opts){
   if(!connected||isOffline()){ if(then) then(false); return; }
   _propSyncing=true;
   const tract=opts.all?"":(opts.tract||propActiveTract_()||"");
+  const getAt=Date.now(); _propGetAt=getAt;
   jsonp_("action=propget"+(tract?"&tract="+encodeURIComponent(tract):""), r=>{
     if(!r||r.ok!==true||!Array.isArray(r.props)){ fin(false); return; }     // a backend older than v380 says nothing
     const scope=propK_(r.scope||""); if(!scope) _propSyncedAll=true;         // what the reply covers: one property, or everything
@@ -11172,21 +11188,26 @@ function propSync_(then, opts){
          and anything deleted since; "the phone's" is what was waiting before the push and anything
          placed or changed while it was going. */
       const nn={}, gone={}, mineIds=Object.assign({}, waitN, propDirty.notes||{}); delB.concat(propDirty.noteDel||[]).forEach(id=>{ gone[id]=1; });
+      Object.keys(_propSavedAt).forEach(id=>{ if(_propSavedAt[id]>=getAt) mineIds[id]=mineIds[id]||1; });      // v423
       if(propNotesOk){
         Object.values(PROPS.notes||{}).forEach(n=>{ if(n&&n.id&&other(n)&&!gone[n.id]) nn[n.id]=n; });
         r.notes.forEach(n=>{ if(n&&n.id&&!gone[n.id]) nn[n.id]=n; });
         Object.keys(mineIds).forEach(id=>{ const mine=(PROPS.notes||{})[id]; if(mine&&!gone[id]) nn[id]=mine; });
       }
       const ns={}, goneS={}, mineS=Object.assign({}, waitS, propDirty.shapes||{}); delS.concat(propDirty.shapeDel||[]).forEach(id=>{ goneS[id]=1; });
+      Object.keys(_propSavedAt).forEach(id=>{ if(_propSavedAt[id]>=getAt) mineS[id]=mineS[id]||1; });      // v423: saved while this fetch was out
       if(propShapesOk){
         Object.values(PROPS.shapes||{}).forEach(c=>{ if(c&&c.id&&other(c)&&!goneS[c.id]) ns[c.id]=c; });
         r.shapes.forEach(c=>{ if(c&&c.id&&!goneS[c.id]) ns[c.id]=c; });
         Object.keys(mineS).forEach(id=>{ const mine=(PROPS.shapes||{})[id]; if(mine&&!goneS[id]) ns[id]=mine; });
       }
       if(propShapesOk){ const sig=m=>{ const o={}; Object.values(m||{}).forEach(c=>{ const k=propK_(c.tract); (o[k]||(o[k]=[])).push(c.id+":"+JSON.stringify([c.name,c.rings])); }); Object.keys(o).forEach(k=>o[k]=o[k].sort().join("|")); return o; };
-        const a=sig(PROPS.shapes), b=sig(ns); Object.keys(Object.assign({},a,b)).forEach(k=>{ if(a[k]!==b[k]) _csUndo=_csUndo.filter(u=>propK_(u.tract)!==k); }); }   // the office or another phone changed this layer: Undo would undo their work
+        const a=sig(PROPS.shapes), b=sig(ns); Object.keys(Object.assign({},a,b)).forEach(k=>{ if(a[k]!==b[k]){ _csUndo=_csUndo.filter(u=>propK_(u.tract)!==k);
+            /* v427: another phone changed this layer — this phone's copies of the plots follow, as the Sheet's did */
+            try{ const oldL=Object.values(PROPS.shapes||{}).filter(c=>c&&propK_(c.tract)===k), newL=Object.values(ns).filter(c=>c&&propK_(c.tract)===k); const t=(newL[0]||oldL[0]||{}).tract||k; const r=csPlotsFollow_(t, oldL, newL, true); if(r&&r.changed) setTimeout(()=>toast(r.changed+" plot"+(r.changed===1?"":"s")+" of "+t+" moved with a compartment changed on another phone"),1500); }catch(e){} } }); }   // the office or another phone changed this layer: Undo would undo their work
       /* v388: the points, merged the same way; the Drive ids of their photos come with them. */
       const nf={}, goneF={}, mineF=Object.assign({}, waitF, propDirty.feats||{}); delF.concat(propDirty.featDel||[]).forEach(id=>{ goneF[id]=1; });
+      Object.keys(_propSavedAt).forEach(id=>{ if(_propSavedAt[id]>=getAt) mineF[id]=mineF[id]||1; });      // v423
       if(propFeatsOk){
         Object.values(PROPS.feats||{}).forEach(f=>{ if(f&&f.id&&other(f)&&!goneF[f.id]) nf[f.id]=f; });
         r.feats.forEach(f=>{ if(f&&f.id&&!goneF[f.id]) nf[f.id]=f; });
@@ -11194,6 +11215,7 @@ function propSync_(then, opts){
       }
       /* v389: the lines, the same way. */
       const nl={}, goneL={}, mineL=Object.assign({}, waitL, propDirty.lines||{}); delL.concat(propDirty.lineDel||[]).forEach(id=>{ goneL[id]=1; });
+      Object.keys(_propSavedAt).forEach(id=>{ if(_propSavedAt[id]>=getAt) mineL[id]=mineL[id]||1; });      // v423
       if(propLinesOk){
         Object.values(PROPS.lines||{}).forEach(l=>{ if(l&&l.id&&other(l)&&!goneL[l.id]) nl[l.id]=l; });
         r.lines.forEach(l=>{ if(l&&l.id&&!goneL[l.id]) nl[l.id]=l; });
@@ -11204,6 +11226,7 @@ function propSync_(then, opts){
       if(propLinesOk) PROPS.lines=nl;
       /* v396: the planned activities, the same way. */
       { const na={}, goneA={}, mineA=Object.assign({}, waitA, propDirty.acts||{}); delA.concat(propDirty.actDel||[]).forEach(id=>{ goneA[id]=1; });
+        Object.keys(_propSavedAt).forEach(id=>{ if(_propSavedAt[id]>=getAt) mineA[id]=mineA[id]||1; });      // v423
         if(propActsOk){ Object.values(PROPS.acts||{}).forEach(a=>{ if(a&&a.id&&other(a)&&!goneA[a.id]) na[a.id]=a; }); r.acts.forEach(a=>{ if(a&&a.id&&!goneA[a.id]) na[a.id]=a; }); Object.keys(mineA).forEach(id=>{ const mine=(PROPS.acts||{})[id]; if(mine&&!goneA[id]) na[id]=mine; }); PROPS.acts=na; } }
       /* v420: a property whose compartments came down from the Sheet without an outline gets one from them (Chris, 2026-10-13:
          Pefferlaw showed its compartments when chosen and nothing at all otherwise) */
@@ -11221,6 +11244,10 @@ function propHasWaiting_(){ return Object.keys(propDirty.props).length>0 || Obje
    has finished. A sync takes its "what was waiting" note there, so a point or note placed while the
    sync queued behind an earlier push is counted (review finding: it used to go to the Sheet and vanish
    from the phone until the next sync). */
+/* v423 — when each record was last acknowledged by the Sheet. A sync whose fetch began before that acknowledgement
+   would not see the record on the Sheet and, with its dirty mark already cleared, dropped it (Chris, 2026-10-14: the
+   piece made from the outline vanished — "0 pieces" — so the island had nothing to cut). propSync_ keeps them. */
+let _propSavedAt={}, _propGetAt=0;
 function propPush_(before){
   const go=()=>{ if(before) try{ before(); }catch(e){} return propPush1_(); };
   const p=(_propPushP||Promise.resolve()).then(go, go);
@@ -11255,7 +11282,7 @@ function propPush1_(){
   /* v385: notes and arrows — the changed ones whole, then the deletions. */
   if(propNotesOk){ const ids=Object.keys(propDirty.notes||{}).filter(id=>(PROPS.notes||{})[id]); if(ids.length){ const stamp={}; ids.forEach(id=>stamp[id]=propDirty.notes[id]);
       jobs.push(sheetPost_({_action:"notesave", email:String(cruiserEmail||""), notes:ids.map(id=>PROPS.notes[id])}).then(j=>{
-        if(j&&j.ok){ ids.forEach(id=>{ if(propDirty.notes[id]===stamp[id]) delete propDirty.notes[id]; }); }
+        if(j&&j.ok){ ids.forEach(id=>{ if(propDirty.notes[id]===stamp[id]) delete propDirty.notes[id]; _propSavedAt[id]=Date.now(); }); }
         else if(j&&j.ok===false&&j.error) toast("The Sheet did not save the notes: "+j.error,true);
       }).catch(()=>{})); }
     Object.keys(propDirty.notes||{}).forEach(id=>{ if(!(PROPS.notes||{})[id]) delete propDirty.notes[id]; }); }
@@ -11268,7 +11295,7 @@ function propPush1_(){
     batches.forEach(b=>{ const stamp={}; b.forEach(id=>stamp[id]=propDirty.shapes[id]);
       jobs.push(sheetPost_({_action:"shapesave", email:String(cruiserEmail||""), shapes:b.map(id=>{ const c=PROPS.shapes[id]; return {id:c.id, tract:c.tract, name:c.name, rings:c.rings}; })}).then(j=>{
         const done=(j&&Array.isArray(j.savedIds))?j.savedIds:((j&&j.ok)?b:[]);
-        done.forEach(id=>{ if(propDirty.shapes[id]===stamp[id]) delete propDirty.shapes[id]; });
+        done.forEach(id=>{ if(propDirty.shapes[id]===stamp[id]) delete propDirty.shapes[id]; _propSavedAt[id]=Date.now(); });
         if(j&&j.ok===false&&j.error) toast("The Sheet did not save the compartment layer: "+j.error,true);
       }).catch(()=>{})); });
     Object.keys(propDirty.shapes||{}).forEach(id=>{ if(!(PROPS.shapes||{})[id]) delete propDirty.shapes[id]; });
@@ -11278,7 +11305,7 @@ function propPush1_(){
   if(propFeatsOk){ const ids=Object.keys(propDirty.feats||{}).filter(id=>(PROPS.feats||{})[id]); if(ids.length){ const stamp={}; ids.forEach(id=>stamp[id]=propDirty.feats[id]);
       jobs.push(sheetPost_({_action:"featsave", email:String(cruiserEmail||""), feats:ids.map(id=>ftOut_(PROPS.feats[id]))}).then(j=>{
         const done=(j&&Array.isArray(j.savedIds))?j.savedIds:((j&&j.ok)?ids:[]);
-        done.forEach(id=>{ if(propDirty.feats[id]===stamp[id]) delete propDirty.feats[id]; });
+        done.forEach(id=>{ if(propDirty.feats[id]===stamp[id]) delete propDirty.feats[id]; _propSavedAt[id]=Date.now(); });
         if(j&&j.ok===false&&j.error) toast("The Sheet did not save the map points: "+j.error,true);
       }).catch(()=>{})); }
     Object.keys(propDirty.feats||{}).forEach(id=>{ if(!(PROPS.feats||{})[id]) delete propDirty.feats[id]; });
@@ -11291,7 +11318,7 @@ function propPush1_(){
     batches.forEach(b=>{ const stamp={}; b.forEach(id=>stamp[id]=propDirty.lines[id]);
       jobs.push(sheetPost_({_action:"linesave", email:String(cruiserEmail||""), lines:b.map(id=>lnOut_(PROPS.lines[id]))}).then(j=>{
         const done=(j&&Array.isArray(j.savedIds))?j.savedIds:((j&&j.ok)?b:[]);
-        done.forEach(id=>{ if(propDirty.lines[id]===stamp[id]) delete propDirty.lines[id]; });
+        done.forEach(id=>{ if(propDirty.lines[id]===stamp[id]) delete propDirty.lines[id]; _propSavedAt[id]=Date.now(); });
         if(j&&j.ok===false&&j.error) toast("The Sheet did not save the map lines: "+j.error,true);
       }).catch(()=>{})); });
     Object.keys(propDirty.lines||{}).forEach(id=>{ if(!(PROPS.lines||{})[id]) delete propDirty.lines[id]; });
@@ -11302,13 +11329,13 @@ function propPush1_(){
     if(ids.length){ const stamp={}; ids.forEach(id=>stamp[id]=propDirty.acts[id]);
       jobs.push(sheetPost_({_action:"actsave", email:String(cruiserEmail||""), acts:ids.map(id=>acOut_(PROPS.acts[id]))}).then(j=>{
         const done=(j&&Array.isArray(j.savedIds))?j.savedIds:((j&&j.ok)?ids:[]);
-        done.forEach(id=>{ if(propDirty.acts[id]===stamp[id]) delete propDirty.acts[id]; });
+        done.forEach(id=>{ if(propDirty.acts[id]===stamp[id]) delete propDirty.acts[id]; _propSavedAt[id]=Date.now(); });
         if(j&&j.ok===false&&j.error) toast("The Sheet did not save the planned activities: "+j.error,true);
       }).catch(()=>{})); }
     Object.keys(propDirty.acts||{}).forEach(id=>{ if(!(PROPS.acts||{})[id]) delete propDirty.acts[id]; });
     const del=(propDirty.actDel||[]).slice(); if(del.length) jobs.push(sheetPost_({_action:"actdel", ids:del}).then(j=>{
       if(j&&j.ok) propDirty.actDel=(propDirty.actDel||[]).filter(id=>del.indexOf(id)<0); }).catch(()=>{})); }
-  return Promise.all(jobs).then(()=>{ propPersist_(); return true; });
+  return Promise.all(jobs).then(()=>{ propPersist_(); return propFollowPush_().then(()=>true,()=>true); });
 }
 /* prop = {tract, …only the fields that changed}; comps = [{name, …only the fields that changed}]. */
 function propSaveLocal_(prop, comps){
@@ -12568,7 +12595,7 @@ async function mmGather_(tract, o, V, notes){
   const inset=o.inset?await mmInsetGather_(tract, propExtent_(tract), notes):null;      // v394
   /* v395: the stand description under the compartment label — from the Sheet's compartment analysis */
   if(o.standLabels){ const fresh=standAnAt&&(Date.now()-standAnAt)<3600000; if(!fresh){ const ok=await pkStandAn_(); if(!ok) notes.push("Stand labels: the Sheet's compartment analysis could not be fetched"+(standAnAt?" — figures from its last answer":" — no stand figures on this map")); }
-    d.comps.forEach(c=>{ const a=standAn[propK_(c.name)]; if(!a) return; const v=k=>(a[k]==null||a[k]==="")?"":String(a[k]);
+    d.comps.forEach(c=>{ const a=standAnGet_(c.name, tract); if(!a) return; const v=k=>(a[k]==null||a[k]==="")?"":String(a[k]);
       const bits=[]; if(v("age")) bits.push(v("age")+(a.ageEst?"*":"")+" yr"); if(v("ba")) bits.push("BA "+v("ba")); if(v("qmd")) bits.push("QMD "+v("qmd")); if(v("ht")) bits.push(v("ht")+" m");
       c.stand={comp:v("comp"), figs:bits.join(" · "), ft:v("ft")}; }); }
   if(inset){ inset.outline=d.outline||null; inset.comps=d.comps.map(c=>c.polygons.map(pg=>pg[0]).filter(Boolean)).flat(); }      // v401: every compartment, not the first
@@ -13553,7 +13580,7 @@ function pkAppxTitle_(letter, name, lines){
 /* ---- Appendix A: one page per compartment ---- */
 function pkPlotsFor_(tract, name){ const key=propK_(name), tk=propK_(tract);
   return (saved||[]).concat(auditPlots||[]).filter(q=>q && String(q.INANALYSIS||"Y").toUpperCase()!=="N" && (propK_(q.STANDID)===key || propK_(q.POLYNAME)===key) && (!tk || !String(q.TRACT||"").trim() || propK_(q.TRACT)===tk)); }
-function pkStandAn_(){ return new Promise(res=>{ if(!connected||isOffline()){ res(false); return; } jsonp_("action=standanalysis&email="+encodeURIComponent(cruiserEmail||""),r=>{ if(r&&r.stands){ standAn={}; r.stands.forEach(x=>{ standAn[String(x.stand).trim().toLowerCase()]=x; }); standAnAt=Date.now(); res(true); } else res(false); },20000); }); }
+function pkStandAn_(){ return new Promise(res=>{ if(!connected||isOffline()){ res(false); return; } jsonp_("action=standanalysis&email="+encodeURIComponent(cruiserEmail||""),r=>{ if(r&&r.stands){ standAn=standAnIndex_(r.stands); standAnAt=Date.now(); res(true); } else res(false); },20000); }); }
 function pkCompPage_(tract, row, an, s, sheetOk){
   const {cv,ctx}=pkPage_(); const cls={MFTIP:"MFTIP eligible",CLTIP:"CLTIP",INELIGIBLE:"Not eligible"}[row.cls]||"(no class)";
   ctx.font="bold 48px "+PK_F; ctx.fillText(mmFit_(ctx,"Compartment "+row.name,PK_W),PK_X,200);
@@ -13587,7 +13614,7 @@ async function pkCompPages_(tract, notes){
   const S=propSummary_(tract), rows=(S.rows||[]).slice().sort((a,b)=>String(a.name).localeCompare(String(b.name),undefined,{numeric:true}));
   const gotAn=await pkStandAn_(), recent=!gotAn && standAnAt && (Date.now()-standAnAt)<3600000;      // an answer from the last hour still serves
   if(!gotAn) notes.push("Compartment summaries: the Sheet's analysis and written summaries could not be fetched"+(recent?" — the figures are from its last answer, "+new Date(standAnAt).toTimeString().slice(0,5):" — species tables are from this phone's plots only"));
-  const pages=[]; rows.forEach((r,i)=>{ const an=(gotAn||recent)?(standAn[propK_(r.name)]||null):null; let s=null; try{ const pl=pkPlotsFor_(tract,r.name); s=pl.length?computeStand(pl):null; }catch(e){} pages.push(pkCompPage_(tract,r,an,s,gotAn||recent)); });
+  const pages=[]; rows.forEach((r,i)=>{ const an=(gotAn||recent)?(standAnGet_(r.name, tract)||null):null; let s=null; try{ const pl=pkPlotsFor_(tract,r.name); s=pl.length?computeStand(pl):null; }catch(e){} pages.push(pkCompPage_(tract,r,an,s,gotAn||recent)); });
   return {pages, n:rows.length};
 }
 /* ---- Appendix B: the photographs — the property's points, and its plots when asked ---- */
@@ -13777,18 +13804,23 @@ function propOutlineFromComps0_(tract, SNAP){
 const BND_DISSOLVE_SNAPS=[0.25,1,3,8,15,25], BND_THIN_M=25;      // v422: parcels sit apart by road allowances and digitising; a strip under 25 m wide is a sliver
 function bndDissolve_(rings){ return bndDissolveWhy_(rings).rings; }
 function bndDissolveWhy_(rings){ try{ const all=(rings||[]).filter(r=>r&&r.length>=3).map(r=>r.map(q=>[+q[0],+q[1]])); if(all.length<2) return {rings, why:all.length?"one ring already":"no rings"};
-    /* a ring inside another is a hole of the outline (an excluded parcel), not a parcel to dissolve: set aside, put back after */
+    /* v424: a ring lying (mostly — seven samples in ten, corners and edge middles) inside a bigger ring is not part of the
+       perimeter: a compartment or a lot line that came in with the outline (Udora Tract, Chris 2026-10-14). It is dropped —
+       the boundary is the perimeter only. (v421–423 kept such rings as holes, so they were still drawn.) */
     const P=cgProj_(all[0][0][0],all[0][0][1]), XY=all.map(r=>r.map(q=>P.xy(q)));
-    const isHole=i=>XY.some((o,j)=>j!==i&&Math.abs(cgArea_(o))>Math.abs(cgArea_(XY[i]))&&XY[i].every(q=>cgInRing_(q[0],q[1],o)));
-    const holes=all.filter((r,i)=>isHole(i)), rs=all.filter((r,i)=>!isHole(i)); if(rs.length<2) return {rings, why:"one outer ring with "+holes.length+" hole"+(holes.length===1?"":"s")};
+    const samples=r=>{ const o=[]; for(let k=0;k<r.length;k++){ const a=r[k], b=r[(k+1)%r.length]; o.push(a,[(a[0]+b[0])/2,(a[1]+b[1])/2]); } return o; };
+    const within=i=>XY.some((o,j)=>{ if(j===i||Math.abs(cgArea_(o))<=Math.abs(cgArea_(XY[i]))) return false; const S=samples(XY[i]); return S.filter(q=>cgInRing_(q[0],q[1],o)).length>=S.length*0.7; });
+    const inner=all.filter((r,i)=>within(i)), rs=all.filter((r,i)=>!within(i)); if(!rs.length) return {rings, why:"no outer ring"};
+    if(rs.length<2) return {rings:rs, snap:0, dropped:inner.length, why:inner.length?"":"one ring already"};
     let best=null, why=[]; for(const snap of BND_DISSOLVE_SNAPS){ const r=outlineFromRings0_(rs, snap); if(!r.rings.length){ why.push(snap+" m: "+r.why); continue; } if(r.off>0.08){ why.push(snap+" m: area "+(r.off*100).toFixed(1)+"% off"); continue; }
       const keep=r.rings.filter((rg,i)=>i===0||!propRingThin_(rg,BND_THIN_M)); if(!best||keep.length<best.length){ best=keep; best.snap=snap; } if(keep.length===1) break; }
-    return best&&best.length<rs.length ? {rings:best.concat(holes), snap:best.snap} : {rings, why:why.join("; ")||"the rings share no edge within "+BND_DISSOLVE_SNAPS[BND_DISSOLVE_SNAPS.length-1]+" m"}; }catch(e){ return {rings, why:String(e&&e.message||e)}; } }
+    if(best&&best.length<rs.length) return {rings:best, snap:best.snap, dropped:inner.length};
+    return inner.length ? {rings:rs, snap:0, dropped:inner.length, why:why.join("; ")} : {rings, why:why.join("; ")||"the rings share no edge within "+BND_DISSOLVE_SNAPS[BND_DISSOLVE_SNAPS.length-1]+" m"}; }catch(e){ return {rings, why:String(e&&e.message||e)}; } }
 /* v422 — the property sheet's button: dissolve the saved outline to its perimeter now, and say why if it cannot */
 function propDissolveBnd_(){ const t=_ppTract; if(!t) return; const p=propGet_(t)||{}; const b=Array.isArray(p.boundary)?p.boundary:[];
   if(b.length<2){ toast("The outline of "+t+" is one ring already"+(b.length?"":" — it has no outline")); return; }
   const r=bndDissolveWhy_(b); if(r.rings===b||r.rings.length>=b.length){ toast("Could not dissolve the "+b.length+" rings of "+t+": "+(r.why||"no shared edges")+". Remove the outline and make it again from the compartments, or load one polygon.",true); return; }
-  propBndSet_(r.rings, "the outline's "+b.length+" rings dissolved ("+r.snap+" m)", t); try{ propRender_(true); lioRender_(); }catch(e){} toast(t+": "+b.length+" rings → "+r.rings.length); }
+  propBndSet_(r.rings, "the outline's "+b.length+" rings dissolved"+(r.dropped?" ("+r.dropped+" inner ring"+(r.dropped===1?"":"s")+" dropped)":"")+(r.snap?" ("+r.snap+" m)":""), t); try{ propRender_(true); lioRender_(); }catch(e){} toast(t+": "+b.length+" rings → "+r.rings.length); }
 function outlineFromRings0_(rings0, SNAP){
   const P=cgProj_(rings0[0][0][0],rings0[0][0][1]);
   /* v409: a compartment lying wholly inside another (an island — a stand file that does not cut holes for the small
@@ -14429,8 +14461,51 @@ function csCommit_(tract, list, label, noUndo){
   Object.values(now).forEach(c=>{ const was=PROPS.shapes[c.id]; if(was && JSON.stringify([was.name,was.rings])===JSON.stringify([c.name,c.rings])) return;
     PROPS.shapes[c.id]=c; propDirty.shapes[c.id]=stamp; propDirty.shapeDel=propDirty.shapeDel.filter(x=>x!==c.id); });
   void k; propPersist_(); csRender_();
+  try{ const r=csPlotsFollow_(tract, before, Object.values(now)); if(r&&(r.changed||r.kept)) setTimeout(()=>toast(r.msg, !!r.kept&&!r.changed), 1300); }catch(e){}      // v426
+  /* v427: the layer as it was before the first change not yet on the Sheet — the Sheet moves its plots from this */
+  try{ propDirty.follow=propDirty.follow||{}; if(!propDirty.follow[k]) propDirty.follow[k]={tract:String(tract).trim(), before:before.map(c=>({id:c.id,name:c.name,rings:c.rings}))}; propPersist_(); }catch(e){}
   try{ propAutoOutline_(tract, true); }catch(e){}      // v403: the outline follows the compartments
   if(_csPushT) clearTimeout(_csPushT); _csPushT=setTimeout(()=>{ _csPushT=null; if(propBackendOk) propPush_().then(()=>{}); else propSync_(); },1500);
+}
+/* v427 — once a property's changed pieces are all on the Sheet, the Sheet moves its plots (every crew member's and the
+   imported ones) by the same rules as csPlotsFollow_, from the layer as it was before the change. */
+function propFollowPush_(){ const F=propDirty.follow||{}, keys=Object.keys(F); if(!keys.length) return Promise.resolve();
+  if((propDirty.shapeDel||[]).length) return Promise.resolve();      // deletions still to go: the Sheet's layer is not the phone's yet
+  const jobs=[]; keys.forEach(k=>{ const f=F[k]; if(!f) return;
+    if(Object.keys(propDirty.shapes||{}).some(id=>{ const c=(PROPS.shapes||{})[id]; return c&&propK_(c.tract)===k; })) return;      // pieces still unsent
+    const stamp=f; jobs.push(sheetPost_({_action:"compfollow", email:String(cruiserEmail||""), tract:f.tract, before:f.before}).then(j=>{
+      if(j&&j.ok){ if(propDirty.follow&&propDirty.follow[k]===stamp) delete propDirty.follow[k]; propPersist_();
+        if(j.moved) toast("The Sheet moved "+j.moved+" plot"+(j.moved===1?"":"s")+" of "+f.tract+" to the compartment"+(j.moved===1?"":"s")+" they lie in — every phone gets it on its next sync"); }
+      else if(j&&j.ok===false&&/unknown|not allowed|action/i.test(String(j.error||""))){ /* an older backend: drop it rather than retry forever */ delete propDirty.follow[k]; propPersist_(); } }).catch(()=>{})); });
+  return Promise.all(jobs); }
+/* v426 — plots follow their compartment (Chris, 2026-10-14: "avoid the need for users to remember to reassign the
+   compartment"). After every change to a property's compartment layer (cut, join, island, corners, draw, rename,
+   remove, undo): a plot of that property whose GPS point now lies in a different piece, and whose compartment was the
+   piece it lay in before the change, takes the new piece's name; a plot with no compartment takes the one it lies in;
+   a renamed compartment's plots with no GPS follow the rename. v429: a plot inside a compartment always takes it,
+   whatever was typed; a plot outside every compartment keeps its name. Changed plots are re-sent to the Sheet. */
+function csPlotsFollow_(tract, before, after, quiet){
+  if(typeof saved==="undefined"||!Array.isArray(saved)||!saved.length) return null;
+  if(quiet&&!(before||[]).length) return null;      // v427: a first download is not a change
+  const tk=propK_(tract), at=(list,lat,lon)=>{ const P=cgProj_(lat,lon); const h=list.find(c=>c&&c.rings&&cgInRings_(0,0,c.rings.map(r=>r.map(P.xy)))); return h?String(h.name):null; };
+  const oldIds={}; (before||[]).forEach(c=>{ (oldIds[propK_(c.name)]=oldIds[propK_(c.name)]||[]).push(c.id); });
+  const byId={}; (after||[]).forEach(c=>{ byId[c.id]=c; }); const afterNames=new Set((after||[]).map(c=>propK_(c.name)));
+  const ren={}; Object.keys(oldIds).forEach(k=>{ if(afterNames.has(k)) return; const nn=[...new Set(oldIds[k].map(id=>byId[id]&&byId[id].name).filter(Boolean))]; if(nn.length===1) ren[k]=nn[0]; });
+  const changed=[], by={}; let kept=0;
+  const setTo=(p,n)=>{ p.STANDID=String(n); if(!quiet) p._sent=false; changed.push(p); by[n]=(by[n]||0)+1; };      // v427 quiet: the Sheet already has it
+  saved.forEach(p=>{ if(!p) return; const s0=String(p.STANDID||"").trim(), pt=propK_(p.TRACT||""); if(pt&&pt!==tk) return;
+    const lat=parseFloat(p.Y), lon=parseFloat(p.X);
+    if(isFinite(lat)&&isFinite(lon)){ const o=at(before||[],lat,lon), n=at(after||[],lat,lon);
+      if(!pt&&!o&&!n) return;                                   // no tract and nowhere near this property
+      if(!n||propK_(n)===propK_(s0)) return;                   // outside every compartment: keeps its name
+      setTo(p,n); return; }                                      // v429: inside a compartment → that compartment, whatever was typed (Chris, 2026-10-14)
+    if(pt&&ren[propK_(s0)]) setTo(p,ren[propK_(s0)]); });
+  if(changed.length){ try{ persist(); }catch(e){} try{ renderSaved(); }catch(e){} try{ if(typeof fmap!=="undefined"&&fmap) renderMapPins(); }catch(e){}
+    if(!quiet) try{ if(connected&&!isOffline()) changed.forEach(p=>send(p,true)); }catch(e){} }
+  const parts=Object.keys(by).map(n=>n+(by[n]>1?" ×"+by[n]:""));
+  const msg=(changed.length?"Plots moved with their compartment: "+(parts.length>4?changed.length+" plots, "+parts.length+" compartments":parts.join(", "))+(connected&&!isOffline()?" — sent to the Sheet":" — sent when online"):"")
+    +(kept?(changed.length?" · ":"")+kept+" plot"+(kept===1?"":"s")+" typed by hand as another compartment left as typed":"");
+  return {changed:changed.length, kept, by, msg};
 }
 function csUndo_(){ const t=_csEd?_csEd.tract:propActiveTract_(); let i=_csUndo.length-1; while(i>=0 && propK_(_csUndo[i].tract)!==propK_(t)) i--;
   if(i<0){ toast("Nothing to undo"); return; }
@@ -14636,6 +14711,7 @@ function csBar_(){
   bar.style.cssText=("position:fixed;left:8px;right:8px;bottom:10px;z-index:5450;background:rgba(16,36,15,.96);border:1px solid #4caf50;border-radius:12px;padding:8px;color:#eafae8;font:13px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.5)");
   const m=_csEd.mode, n=csOf_(_csEd.tract).length, B=(fn,label,on)=>`<button type="button" class="btn ${on?"submit":"ghost"}" style="flex:1;min-width:0;padding:8px 4px;font-size:13px" onclick="${fn}">${label}</button>`;
   let h=`<div style="margin-bottom:6px"><b>Compartment layer</b> · ${esc(_csEd.tract)} · ${n} piece${n===1?"":"s"}</div>`;
+  if(!n) h+=`<div style="color:#ffd24a;font-size:12px;margin-bottom:6px">No pieces to cut — start from the property outline. <button type="button" class="btn ghost" style="padding:4px 8px;font-size:12px" onclick="if(csFromOutline_(_csEd.tract)){ csBar_(); csRender_(); }">⬚ Start from the outline</button></div>`;      // v423
   const chk=csCheck_(_csEd.tract); if(!chk.ok) h+=`<div style="color:#ffd24a;font-size:12px;margin-bottom:6px">${chk.over?"Some pieces overlap — two phones may have cut it at the same time. Join or undo until they fit, or start again from the outline.":"The pieces add up to "+chk.layHa.toFixed(2)+" ha but the outline is "+chk.propHa.toFixed(2)+" ha — the outline may have changed since. Start again from the outline to match it."}</div>`;
   if(m==="cut") h+=`<div style="margin-bottom:6px;color:#cfe3d2">${_csEd.line.length} point${_csEd.line.length===1?"":"s"} on the cut line${_csEd.line.length>=3?" · or close it into an island inside a piece":""}</div><div style="display:flex;gap:6px">`+
      B("csApplyCut_()","✂ Apply cut",true)+B("csApplyIsland_()","◌ Island",_csEd.line.length>=3)+B("csLineUndo_()","↶ Point")+B("csMode_('idle')","Cancel")+`</div>`;
@@ -14691,6 +14767,7 @@ function csApplyCut_(){
 function csApplyIsland_(){
   if(!_csEd) return; const t=_csEd.tract, ring=cgDedupe_(_csEd.line.map(cgLL_));
   if(ring.length<3){ toast("Tap at least three points inside the piece",true); return; }
+  if(!csOf_(t).length){ toast("No pieces yet — tap ⬚ Start from the outline on the bar, then draw the island inside it",true); return; }      // v423
   const r=cgIsland_(csOf_(t), ring);
   if(r.err){ toast(r.err,true); return; }
   csCommit_(t, r.pieces, "island in "+r.host);
