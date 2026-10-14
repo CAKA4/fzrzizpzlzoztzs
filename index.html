@@ -954,7 +954,7 @@
   </div>
   <div class="measure-bar" id="polyBar" style="display:none">
     <span id="polyText">Tap to outline an area</span>
-    <button type="button" id="polyTractBtn" onclick="changeDrawTract_()" title="Set the tract for the areas you draw">Tract: —</button>
+    <button type="button" id="polyTractBtn" onclick="changeDrawTract_()" title="The property the areas you draw belong to">Property: —</button>
     <button type="button" id="polySnapBtn" onclick="togglePolySnap()">Snap ✓</button>
     <button type="button" onclick="countInPolygon()" title="Count the points inside this outline (same as the ◎ tool)">Count inside</button>
     <button type="button" onclick="undoPolyPt()">Undo</button>
@@ -1283,7 +1283,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-13 · v418";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-13 · v419";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -6765,6 +6765,8 @@ function initMap(){
     if(selectMode){ addSelPoint(ll); return; } if(polyMode){ addPolyPoint(ll); return; } if(routeMode){ addRoutePoint(ll); return; } if(measureMode){ addMeasurePoint(ll); return; } if(moveMode_) return;   // the crosshair is the target;
     if(placeMode){ placeAt(ll.lat,ll.lng); return; }
     if(nearbyPlotPopup_(ll)) return;                    // a plot pin near the tap wins over the boundary
+    /* v419: a compartment of the property shown opens its sheet — name, class, property, cut, remove */
+    try{ if(typeof csPieceAt_==="function" && mapDetail_() && propActiveTract_()){ const pc=csPieceAt_(ll.lat,ll.lng); if(pc){ csAttrOpen_(pc.id); return; } } }catch(e){}
     { const bf=boundaryFeatureAt(ll.lat,ll.lng); if(bf) showBoundPopup(ll,bf); }
   }catch(err){ toast("Couldn't open that: "+String(err&&err.message||err).slice(0,80),true); } };
   let _mapClickAt=0; fmap.on("click",e=>{ _mapClickAt=Date.now(); mapTapHandle_(e.latlng); });
@@ -7021,7 +7023,18 @@ function csFromDrawn_(pg){
   try{ const P=cgProj_(rings[0][0][0],rings[0][0][1]); if(!cgSound_([{rings}],null,P)){ toast("That area crosses itself — kept as a drawn area on this phone only",true); return false; } }catch(e){}
   addTract(t); const taken=csOf_(t).map(c=>c.name), used=n=>taken.some(x=>propK_(x)===propK_(n)); let name=String(pg.name||"").trim();
   if(!name||used(name)){ if(!name||/^P-\d+$/.test(name)){ for(let i=1;;i++){ if(!used("P-"+i)){ name="P-"+i; break; } } } else name=csNextName_(t,taken); }   // a drawn area's default name counts the pieces too
-  const list=csOf_(t).map(c=>Object.assign({},c,{rings:c.rings.map(r=>r.slice())})).concat([{id:null,name,rings}]);
+  const have=csOf_(t).map(c=>Object.assign({},c,{rings:c.rings.map(r=>r.slice())}));
+  /* v419: crossing other pieces → it takes its space from them and shares their edges */
+  { let P=null; try{ P=cgProj_(rings[0][0][0],rings[0][0][1]); }catch(e){}
+    const crosses=pc=>{ const X=pc.rings.map(r=>r.map(P.xy)); return cgOverlap_({rings},pc,P) && rings[0].some(q=>{ const u=P.xy(q); return !cgInRings_(u[0],u[1],X); }); };   // overlaps it and is not wholly inside it
+    if(P && have.some(crosses)){
+      const cv=cgCarve_(have, rings[0]);
+      if(cv.err){ toast(cv.err+" — kept as a drawn area on this phone only",true); return false; }
+      const list=cv.pieces.concat(cv.made.map(rs=>({id:null,name,rings:rs})));
+      csCommit_(t, list, "drew "+name);
+      const i=polys.indexOf(pg); if(i>=0){ polys.splice(i,1); try{ persistPoly(); }catch(e){} }
+      toast(name+" cut out of "+cv.crossed+" compartment"+(cv.crossed===1?"":"s")+" of "+t+(cv.made.length>1?" (in "+cv.made.length+" pieces)":"")+(cv.partly?" — part of the outline was not used":"")+" — it goes to the Sheet"); return true; } }
+  const list=have.concat([{id:null,name,rings}]);
   let holed=0; try{ holed=islandHoles_(list.map(c=>c.rings)); }catch(e){}      // v411: drawn inside a piece → an island of it
   csCommit_(t, list, "drew "+name);
   const i=polys.indexOf(pg); if(i>=0){ polys.splice(i,1); try{ persistPoly(); }catch(e){} }
@@ -9288,9 +9301,14 @@ function polyRingsNear_(lat,lon){ const out=[];
   if(typeof BOUND!=="undefined" && BOUND && BOUND.features) BOUND.features.forEach((f,fi)=>{ const g=f.geometry; if(!g) return;
     const ps=g.type==="Polygon"?[g.coordinates]:g.type==="MultiPolygon"?g.coordinates:[];
     ps.forEach((rings,pi)=>{ const ext=rings[0]; if(!ext) return; const ll=ext.map(c=>[c[1],c[0]]); if(bboxNear_(ll,lat,lon)) out.push({id:"bound:"+fi+":"+pi, ring:ringNorm_(ll)}); }); });
+  /* v419: the property's compartment pieces and its outline too, so a drawn area shares their corners and edges */
+  try{ const t=_drawTract||propActiveTract_(); if(t&&typeof csOf_==="function"){ csOf_(t).forEach(c=>c.rings.forEach((r,ri)=>{ if(r.length>=3&&bboxNear_(r,lat,lon)) out.push({id:"piece:"+c.id+":"+ri, ring:ringNorm_(r)}); }));
+      if(typeof csOutline_==="function") csOutline_(t).forEach((r,ri)=>{ if(r.length>=3&&bboxNear_(r,lat,lon)) out.push({id:"outline:"+ri, ring:ringNorm_(r)}); }); } }catch(e){}
   return out; }
 function getRingById_(id){ if(id.indexOf("poly:")===0){ const i=+id.slice(5); return polys[i]?ringNorm_(polys[i].pts):null; }
   if(id.indexOf("bound:")===0){ const a=id.split(":"), f=BOUND&&BOUND.features&&BOUND.features[+a[1]]; if(!f) return null; const g=f.geometry; const pg=g.type==="Polygon"?g.coordinates:(g.coordinates[+a[2]]||null); if(!pg) return null; return ringNorm_(pg[0].map(c=>[c[1],c[0]])); }
+  if(id.indexOf("piece:")===0){ const a=id.split(":"), c=(PROPS.shapes||{})[a[1]]; const r=c&&c.rings[+a[2]]; return r&&r.length>=3?ringNorm_(r):null; }      // v419
+  if(id.indexOf("outline:")===0){ try{ const r=csOutline_(_drawTract||propActiveTract_())[+id.split(":")[1]]; return r&&r.length>=3?ringNorm_(r):null; }catch(e){ return null; } }
   return null; }
 function projT_(p,a,b){ const dx=b[0]-a[0],dy=b[1]-a[1],L2=dx*dx+dy*dy; if(!L2) return 0; return Math.max(0,Math.min(1,((p[0]-a[0])*dx+(p[1]-a[1])*dy)/L2)); }
 function snapLatLng_(ll){ if(!polySnap || !fmap) return {lat:ll.lat,lon:ll.lng,snap:null};
@@ -9556,15 +9574,18 @@ function syncMeasuringClass_(){
   document.body.classList.toggle("measuring", any);
 }
 let _drawTract = (function(){ try{ return (STORE&&STORE.getItem("fi_drawtract"))||""; }catch(e){ return ""; } })();
-function setDrawTract_(v){ _drawTract=String(v||"").trim(); try{ if(STORE) STORE.setItem("fi_drawtract",_drawTract); }catch(e){} const b=$("polyTractBtn"); if(b) b.textContent="Tract: "+(_drawTract||"—"); }
+function setDrawTract_(v){ _drawTract=String(v||"").trim(); try{ if(STORE) STORE.setItem("fi_drawtract",_drawTract); }catch(e){} const b=$("polyTractBtn"); if(b) b.textContent="Property: "+(_drawTract||"—"); }
 function changeDrawTract_(){ const t=prompt("Tract name for the areas you draw (applies to all of them; leave blank for none):", _drawTract||manualTract||""); if(t===null) return; setDrawTract_(t); toast(_drawTract?`Drawn areas will be tagged tract “${_drawTract}”`:"Drawn areas will have no tract"); }
 function togglePoly(){
   polyMode=!polyMode;
   if(polyMode){ if(placeMode) togglePlace(); if(measureMode) clearMeasure(); if(routeMode) toggleRoute();
-    if(!_drawTract){ const t=prompt("Tract name for the areas you're about to draw (applies to all of them; leave blank for none):", manualTract||""); if(t!==null) setDrawTract_(t); }
+    /* v419: the property chosen on the map is where drawn areas go — no question asked; with none chosen, ask once and choose it */
+    { const act=propActiveTract_(); if(act) setDrawTract_(act);
+      else if(!_drawTract){ const t=prompt("Which property are you drawing? (its first area becomes the property outline; the next ones are cut out of it as compartments)", manualTract||""); if(t!==null&&String(t).trim()){ setDrawTract_(t); try{ addTract(String(t).trim()); propSetActive_(String(t).trim()); }catch(e){} } } }
     $("toolPoly").classList.add("on"); fmap.getContainer().style.cursor="crosshair"; $("polyBar").style.display="flex"; syncMeasuringClass_(); drawPoly(); updatePoly();
-    { const b=$("polyTractBtn"); if(b) b.textContent="Tract: "+(_drawTract||"—"); }
-    toast(polyPts.length?"Editing area — tap to add corners":"Tap the corners; Save to keep & name it"); }
+    { const b=$("polyTractBtn"); if(b) b.textContent="Property: "+(_drawTract||"—"); }
+    { let n=0; try{ n=_drawTract?csOf_(_drawTract).length:0; }catch(e){}
+      toast(polyPts.length?"Editing area — tap to add corners":(n?"Tap the corners of a compartment — taps stick to existing corners and edges, and it takes its space from the compartments it crosses":"Tap the corners of the property outline; Done saves it")); } }
   else { $("toolPoly").classList.remove("on"); fmap.getContainer().style.cursor=""; $("polyBar").style.display="none"; syncMeasuringClass_(); drawPoly(); }
 }
 function addPolyPoint(ll){ const s=snapLatLng_(ll); polyPts.push([s.lat,s.lon]); polyPtsSnap.push(s.snap||null); drawPoly(); updatePoly(); persistPoly(); updateLayerStatus(); }
@@ -14249,6 +14270,50 @@ function cgOverlap_(a, b, P){
   return deep(A,B)||deep(B,A);
 }
 function cgLayerHa_(list){ return list.reduce((t,c)=>t+cgPieceHa_(c.rings),0); }
+/* v419 — a point inside a ring (its centre when that is inside; otherwise a midpoint between two corners that is). */
+function cgInside_(rXY){ const n=rXY.length; let cx=0, cy=0; rXY.forEach(q=>{ cx+=q[0]/n; cy+=q[1]/n; }); if(cgInRing_(cx,cy,rXY)) return [cx,cy];
+  for(let i=0;i<n;i++) for(let j=i+2;j<n;j++){ const m=[(rXY[i][0]+rXY[j][0])/2,(rXY[i][1]+rXY[j][1])/2]; if(cgInRing_(m[0],m[1],rXY)) return m; } return [cx,cy]; }
+/* v419 — a drawn area takes its space from the pieces it crosses (Chris, 2026-10-13: areas drawn one after another
+   overlapped instead of sharing a boundary). Each piece the ring crosses is cut along it; the parts inside the ring
+   are joined into the new piece, the parts outside stay with the old one. The ring's own corners outside every
+   piece are dropped (that is outside the property), so the new piece shares its boundary exactly. A piece wholly
+   inside the ring is left alone (the new piece wraps round it). pieces: [{id,name,tract,rings}]; ring: [[lat,lon]]. */
+function cgCarve_(pieces, ring){
+  if(!ring||ring.length<3) return {err:"Tap at least three corners"};
+  const P=cgProj_(ring[0][0],ring[0][1]), RX=ring.map(P.xy);
+  if(cgSelfCross_(ring,P)) return {err:"That area crosses itself — draw it again without loops"};
+  const inR=q=>cgInRing_(q[0],q[1],RX), keep=[], taken=[]; let crossed=0, why="";
+  pieces.forEach(pc=>{
+    const X=pc.rings.map(r=>r.map(P.xy));
+    if(!cgOverlap_({rings:[ring]}, pc, P)){ keep.push(pc); return; }
+    const s=ring.findIndex(p=>{ const q=P.xy(p); return !cgInRings_(q[0],q[1],X); });
+    if(s<0){ keep.push(pc); return; }                                       // wholly inside this piece: an island, not a carve
+    const line=ring.slice(s).concat(ring.slice(0,s+1));                     // the ring as a line, started outside the piece
+    const chords=cgChords_(pc.rings, line, P);
+    if(!chords.length||chords.some(c=>c.holes)){ keep.push(pc); why=why||"hole"; return; }
+    let cur=[pc.rings];
+    for(const ch of chords){ const mid=cgMid_(ch.xy).p; const at=cur.findIndex(rs=>cgInRings_(mid[0],mid[1],rs.map(r=>r.map(P.xy)))); if(at<0) continue;
+      const sp=cgSplit_(cur[at], ch.xy, P); if(typeof sp==="string"){ why=why||sp; continue; } cur.splice(at,1,sp[0],sp[1]); }
+    if(cur.length===1){ keep.push(pc); return; }
+    const ins=[], outs=[]; cur.forEach(rs=>{ const q=cgInside_(rs[0].map(P.xy)); (inR(q)?ins:outs).push(rs); });
+    if(!ins.length||!outs.length){ keep.push(pc); return; }
+    outs.sort((a,b)=>cgPieceHa_(b)-cgPieceHa_(a));
+    outs.forEach((rs,i)=>keep.push(i===0?Object.assign({},pc,{rings:rs}):{id:null,name:null,tract:pc.tract,rings:rs,from:pc.id}));
+    ins.forEach(rs=>taken.push(rs)); crossed++;
+  });
+  if(!taken.length) return {err: why==="hole" ? "That area runs into a hole in the property — draw it either side" : "That area does not take in any part of a compartment"};
+  /* the parts taken become one piece where they share an edge; any that cannot be joined keep the same name (one compartment in pieces) */
+  const made=[]; let rest=taken.slice();
+  while(rest.length){ let acc={rings:rest.shift()}, more=true;
+    while(more){ more=false; for(let i=0;i<rest.length;i++){ const m=cgMerge_(acc,{rings:rest[i]}); if(!m.err){ acc={rings:m.rings}; rest.splice(i,1); more=true; break; } } }
+    made.push(acc.rings); }
+  /* the new corners go into the neighbours' edges too, so every piece shares them exactly */
+  const corners=[].concat(...made.map(rs=>rs[0]));
+  const out=keep.map(pc=>Object.assign({},pc,{rings:cgInsert_(pc.rings,corners,P)}));
+  const want=cgLayerHa_(pieces), got=cgLayerHa_(out)+made.reduce((t,rs)=>t+cgPieceHa_(rs),0);
+  if(!cgSound_(out.concat(made.map(rs=>({rings:rs}))), null, P) || Math.abs(got-want)>0.0005) return {err:"That area would leave an odd shape — try a simpler outline"};
+  return {pieces:out, made, crossed, partly:!!why};
+}
 /* A layer is sound when no piece crosses itself and the pieces' areas still add up as they did. */
 function cgSound_(list, wantHa, P){
   for(const c of list) for(const r of c.rings) if(r.length<3 || cgSelfCross_(r,P) || Math.abs(cgArea_(r.map(P.xy)))<0.01) return false;
@@ -14601,10 +14666,20 @@ function csAttrOpen_(id){
   showDataSheet_("Compartment", `<div style="font-size:12px;color:#a9c9b0;margin-bottom:8px">${ha.toFixed(2)} ha · ${(ha*HA_AC).toFixed(2)} ac on the map${parts>1?` · one of ${parts} pieces named ${esc(c.name)} (they count as one compartment)`:""}</div>`+
     `<label style="display:block;margin-bottom:8px"><span style="display:block;font-size:12px;color:#a9c9b0">Name</span><input id="csName" type="text" value="${esc(c.name)}" style="width:100%;box-sizing:border-box;font-size:16px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></label>`+
     `<label style="display:block;margin-bottom:10px"><span style="display:block;font-size:12px;color:#a9c9b0">MFTIP class</span><select id="csCls" style="font-size:16px;padding:7px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">${opts}</select></label>`+
-    `<div style="font-size:11px;color:#8fae95;margin-bottom:10px">Give two pieces the same name to count them as one compartment.</div>`+
-    `<div style="display:flex;gap:8px"><button type="button" class="btn submit" style="flex:1" onclick="csAttrSave_('${esc(id)}')">Save</button><button type="button" class="btn ghost" style="flex:1" onclick="closeDataSheet_()">Cancel</button></div>`);
+    `<label style="display:block;margin-bottom:10px"><span style="display:block;font-size:12px;color:#a9c9b0">Property (tract)</span><select id="csTract" style="font-size:16px;padding:7px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">${propTracts_().map(t=>`<option value="${esc(t)}"${propK_(t)===propK_(c.tract)?" selected":""}>${esc(t)}</option>`).join("")}<option value="__new__">New property…</option></select></label>`+
+    `<div style="font-size:11px;color:#8fae95;margin-bottom:10px">Give two pieces the same name to count them as one compartment. Choose another property to move this piece to it.</div>`+
+    `<div style="display:flex;gap:8px;margin-bottom:8px"><button type="button" class="btn submit" style="flex:1" onclick="csAttrSave_('${esc(id)}')">Save</button><button type="button" class="btn ghost" style="flex:1" onclick="closeDataSheet_()">Cancel</button></div>`+
+    (_csEd?"":`<div style="display:flex;gap:8px"><button type="button" class="btn ghost" style="flex:1" onclick="closeDataSheet_();csEdit_('${esc(c.tract)}');csMode_('cut')">✂ Cut it</button><button type="button" class="btn ghost" style="flex:1" onclick="closeDataSheet_();csEdit_('${esc(c.tract)}');csMode_('merge')">⊕ Join</button><button type="button" class="btn ghost" style="flex:1;border-color:#7a3a3a;color:#e9c9c9" onclick="csRemove_('${esc(id)}')">🗑 Remove</button></div>`));
 }
-function csAttrSave_(id){ const n=$("csName"), k=$("csCls"); if(csSetAttr_(id, n?n.value:"", k?k.value:null)){ closeDataSheet_(); csRender_(); } }
+function csAttrSave_(id){ const n=$("csName"), k=$("csCls"), tsel=$("csTract"); const c=(PROPS.shapes||{})[id]; if(!c) return;
+  let to=tsel?String(tsel.value||""):""; if(to==="__new__"){ to=prompt("Name of the new property:",""); if(to===null) return; to=String(to).trim(); if(!to) return; }
+  if(csSetAttr_(id, n?n.value:"", k?k.value:null)){
+    if(to && propK_(to)!==propK_(c.tract)){ const pc=(PROPS.shapes||{})[id]; try{ taApply_([{src:"piece",pc,name:pc.name,tract:pc.tract}], to); toast(pc.name+" is now a compartment of "+to); }catch(e){ toast("Could not move it: "+String(e&&e.message||e).slice(0,80),true); } }
+    closeDataSheet_(); csRender_(); } }
+/* v419 — a piece removed from the layer (a mistaken draw, say); its neighbours are not changed, so the outline keeps a gap there. */
+function csRemove_(id){ const c=(PROPS.shapes||{})[id]; if(!c) return; const ha=cgPieceHa_(c.rings);
+  if(!confirm("Remove the piece "+c.name+" ("+ha.toFixed(2)+" ha) from "+c.tract+"? Its neighbours keep their shape, so the property outline will have a gap there until it is redrawn or they are joined. Undo is on the compartment layer bar.")) return;
+  csCommit_(c.tract, csOf_(c.tract).filter(x=>x.id!==id), "removed "+c.name); closeDataSheet_(); csRender_(); toast("Removed "+c.name); }
 const CS_FILL={MFTIP:"#4caf50", CLTIP:"#1e8a3c", INELIGIBLE:"#9e9e9e", "":"#ffd24a"};
 function csRender_(){
   if(typeof fmap==="undefined"||!fmap||typeof L==="undefined") return;
