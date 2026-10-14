@@ -1283,7 +1283,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-13 · v420";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-14 · v421";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -6765,7 +6765,7 @@ function initMap(){
     if(placeMode){ placeAt(ll.lat,ll.lng); return; }
     if(nearbyPlotPopup_(ll)) return;                    // a plot pin near the tap wins over the boundary
     /* v419: a compartment of the property shown opens its sheet — name, class, property, cut, remove */
-    try{ if(typeof csPieceAt_==="function" && mapDetail_() && propActiveTract_()){ const pc=csPieceAt_(ll.lat,ll.lng); if(pc){ showBoundPopup(ll, csFeature_(pc)); return; } } }catch(e){}   // v420: the popup (Layer · Analysis · Species · Marking), with ✎ Edit in it
+    try{ if(typeof csPieceAtAny_==="function" && mapDetail_()){ const pc=csPieceAtAny_(ll.lat,ll.lng); if(pc){ showBoundPopup(ll, csFeature_(pc)); return; } } }catch(e){}   // v420: the popup (Layer · Analysis · Species · Marking), with ✎ Edit in it; v421: a piece of any property
     { const bf=boundaryFeatureAt(ll.lat,ll.lng); if(bf) showBoundPopup(ll,bf); }
   }catch(err){ toast("Couldn't open that: "+String(err&&err.message||err).slice(0,80),true); } };
   let _mapClickAt=0; fmap.on("click",e=>{ _mapClickAt=Date.now(); mapTapHandle_(e.latlng); });
@@ -6981,6 +6981,17 @@ function loadBoundaries(file){
   const lower=file.name.toLowerCase();
   const add=gj=>{ const fc=normalizeFC(gj); if(!fc.features.length){ toast("No polygons found",true); return; }
     const bf={id:genId(), name:file.name||"shapefile", features:fc.features};
+    /* v421: a file with no tract field is asked which property it is for (it was going to the property shown — Chris,
+       2026-10-14); one polygon is that property's outline, more are its compartments */
+    const tagged=fc.features.some(f=>tractField&&String((f.properties||{})[tractField]==null?"":(f.properties||{})[tractField]).trim());
+    if(!tagged){ boundAskTract_(bf, t=>{ if(!t){ toast("Not loaded — a file needs a property",true); return; }
+        if(!tractField) tractField="TRACT"; fc.features.forEach(f=>{ f.properties=f.properties||{}; f.properties[tractField]=t; }); addTract(t);
+        if(fc.features.length===1){ const rings=[]; featPolys_(fc.features[0]).forEach(pg=>pg.forEach(r=>{ if(r&&r.length>=3) rings.push(r.map(q=>[q[0],q[1]])); }));
+          if(rings.length){ propBndSet_(rings, file.name||"the loaded file", t); try{ propSetActive_(t); lioRender_(); }catch(e){} toast("Outline of "+t+" loaded from "+(file.name||"the file"));
+            setTimeout(()=>{ try{ if(!csOf_(t).length && confirm("Outline saved for "+t+". Cut it into compartments on the map now?")){ try{ closeLayersMenu(); }catch(e){} propZoomTo_(t,true); csEdit_(t); } }catch(e){} },300); return; } }
+        add2(bf,fc); }); return; }
+    add2(bf,fc); };
+  const add2=(bf,fc)=>{
     boundFiles.push(bf);
     rebuildBound();
     try{ setTimeout(()=>{ propTracts_().forEach(t=>{ try{ propAutoOutline_(t, true); }catch(e){} }); },50); }catch(e){}      // v403: outlines for properties that have none
@@ -6996,6 +7007,17 @@ function loadBoundaries(file){
     else if(kind==="shp"||kind==="zip"){ file.arrayBuffer().then(buf=>shp(buf)).then(ensureWGS84).then(add).catch(e=>toast("Shapefile error: "+e.message,true)); }
     else { toast("Use a .zip, .shp, .geojson or .json file",true); } });
 }
+/* v421 — which property is this file for? A sheet with the properties and a box for a new one. */
+function boundAskTract_(bf, then){ const n=(bf.features||[]).length, list=propTracts_(), cur=propActiveTract_();
+  const opts=list.map(t=>`<option value="${esc(t)}"${propK_(t)===propK_(cur)?" selected":""}>${esc(t)}</option>`).join("");
+  window._bndAskThen=then;
+  showDataSheet_("Which property is this file for?", `<div style="font-size:13px;color:#cfe3d2;margin-bottom:10px">${esc(bf.name||"The file")} has ${n} polygon${n===1?"":"s"} and no tract field. ${n===1?"One polygon becomes the property's <b>outline</b>, to be cut into compartments.":"They become the property's <b>compartments</b> on the Sheet."}</div>`+
+    `<label style="display:block;margin-bottom:8px"><span style="display:block;font-size:12px;color:#a9c9b0">Property</span><select id="bndAskSel" onchange="var i=document.getElementById('bndAskNew'); if(i) i.style.display=this.value==='__new__'?'block':'none'" style="width:100%;font-size:16px;padding:7px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"><option value="">— choose —</option>${opts}<option value="__new__">New property…</option></select></label>`+
+    `<input id="bndAskNew" type="text" placeholder="Name of the new property" style="display:none;width:100%;box-sizing:border-box;font-size:16px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6;margin-bottom:10px">`+
+    `<div style="display:flex;gap:8px"><button type="button" class="btn submit" style="flex:1" onclick="boundAskDone_()">Load it</button><button type="button" class="btn ghost" style="flex:1" onclick="boundAskDone_(true)">Cancel</button></div>`); }
+function boundAskDone_(cancel){ const then=window._bndAskThen; window._bndAskThen=null; let t="";
+  if(!cancel){ const sel=$("bndAskSel"), nw=$("bndAskNew"); t=sel?String(sel.value||""):""; if(t==="__new__") t=nw?String(nw.value||"").trim():""; if(!t){ toast("Choose a property, or name a new one",true); window._bndAskThen=then; return; } }
+  closeDataSheet_(); if(then) then(t); }
 /* v408 — the Sheet is where compartments live (Chris, 2026-10-12): a file's compartments become pieces of the compartment
    layer for their tract as soon as the file is loaded, so every phone that syncs the property gets them. A tract that
    already has pieces on the Sheet is asked: replace them with the file's, or keep them. A file with no tract field goes
@@ -7772,7 +7794,8 @@ function renderBoundPopup_(){
       if(v==null||String(v).trim()==="") return; rows+=row(k,String(v)); });
     if(!rows) note=`<div style="color:#5a7a62;margin-top:3px;font-size:11px">No values in the selected field(s) for this stand.</div>`;
   }
-  const edit = f.__piece ? `<button type="button" onclick="try{ fmap.closePopup(); }catch(e){} csAttrOpen_('${String(f.__piece).replace(/'/g,"&#39;")}')" style="display:block;width:100%;margin-top:8px;padding:10px;border-radius:8px;border:1px solid #9fb8a4;background:#f4f8f2;color:#16271a;font:inherit;font-size:12px">✎ Edit this compartment — name, class, property, cut, join, remove</button>` : "";
+  const pcE=csPieceForFeat_(f);      // v421: a file's compartment that is on the Sheet can be edited too
+  const edit = pcE ? `<button type="button" onclick="try{ fmap.closePopup(); }catch(e){} csAttrOpen_('${String(pcE.id).replace(/'/g,"&#39;")}')" style="display:block;width:100%;margin-top:8px;padding:10px;border-radius:8px;border:1px solid #9fb8a4;background:#f4f8f2;color:#16271a;font:inherit;font-size:12px">✎ Edit this compartment — name, class, property, cut, join, remove</button>` : "";
   const seg=(v,lab)=>`<span onclick="setBoundPopupView('${v}')" style="cursor:pointer;padding:2px 7px;border-radius:6px;font-size:11px;`+
     (_bpView===v?`background:#16271a;color:#eafae8`:`color:#5a7a62`)+`">${lab}</span>`;
   const table=rows?`<table style="border-collapse:collapse;font-size:12px;width:100%">${rows}</table>`:"";
@@ -11184,6 +11207,8 @@ function propSync_(then, opts){
         if(propActsOk){ Object.values(PROPS.acts||{}).forEach(a=>{ if(a&&a.id&&other(a)&&!goneA[a.id]) na[a.id]=a; }); r.acts.forEach(a=>{ if(a&&a.id&&!goneA[a.id]) na[a.id]=a; }); Object.keys(mineA).forEach(id=>{ const mine=(PROPS.acts||{})[id]; if(mine&&!goneA[id]) na[id]=mine; }); PROPS.acts=na; } }
       /* v420: a property whose compartments came down from the Sheet without an outline gets one from them (Chris, 2026-10-13:
          Pefferlaw showed its compartments when chosen and nothing at all otherwise) */
+      /* v421: an outline saved as several parcels is dissolved to its perimeter (once; the dissolved one is saved back) */
+      try{ Object.keys(np).forEach(k=>{ const pr=np[k]; if(!pr||!Array.isArray(pr.boundary)||pr.boundary.length<2) return; const d=bndDissolve_(pr.boundary); if(d!==pr.boundary&&d.length<pr.boundary.length){ const keep=_ppTract; _ppTract=pr.tract; try{ propBndSet_(d, "parcel lines dissolved", pr.tract); }finally{ _ppTract=keep; } } }); }catch(e){}
       try{ if(propShapesOk){ const seen={}; Object.values(ns).forEach(c=>{ const k=propK_(c.tract); if(seen[k]) return; seen[k]=1; const pr=PROPS.props[k]; if(!pr||!(Array.isArray(pr.boundary)&&pr.boundary.length)||pr.bndAuto) propAutoOutline_(c.tract,true); }); } }catch(e){}
       propPersist_(); try{ mnRender_(); }catch(e){} try{ csRender_(); }catch(e){} try{ ftRender_(); }catch(e){} try{ lnRender_(); }catch(e){} try{ ovRender_(); }catch(e){} fin(true);
     });
@@ -11473,6 +11498,7 @@ function propSaveForm_(thenSummary){
 }
 function propBndSet_(rings, what, tract){
   const t=tract||_ppTract; if(!t) return;
+  try{ const d=bndDissolve_(rings); if(d!==rings){ what=(what||"")+" (parcel lines dissolved)"; rings=d; } }catch(e){}      // v421
   if(rings.length>200){ toast("That outline has "+rings.length+" separate parts — more than the Sheet keeps (200). Use a file with just the property's outline.",true); return; }
   // keep it under what one Sheet cell holds: thin evenly, never below the shape's corners count of 4
   let pts=rings.reduce((n,r)=>n+r.length,0); const max=1800;
@@ -11533,7 +11559,7 @@ function cltipOpen_(tract){
     `<li>Come back and tap <b>Load the export</b> below.</li></ol>`+
     `<div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 6px">`+
     `<a class="btn submit" style="text-decoration:none;display:inline-block" href="${CLTIP_VIEWER}" target="_blank" rel="noopener">🗺 Open the CLTIP viewer</a>`+
-    `<label class="btn ghost" style="display:inline-block;cursor:pointer">⬆ Load the export<input type="file" accept=".zip,.shp,.geojson,.json" style="display:none" onchange="cltipLoad_(this.files&&this.files[0],${JSON.stringify(t)})"></label></div>`+
+    `<label class="btn ghost" style="display:inline-block;cursor:pointer">⬆ Load the export<input type="file" accept=".zip,.shp,.geojson,.json" style="display:none" onchange="cltipLoad_(this.files&&this.files[0],${JSON.stringify(t).replace(/"/g,"&quot;")})"></label></div>`+
     (t?"":`<div style="font-size:12px;color:#e8c35a;margin-bottom:6px">Pick the property first (Layers → Property shown on the map) so the outline has somewhere to go.</div>`)+
     `<div style="font-size:11px;color:#8fae95">The viewer's parcel data is under the Ontario Parcel Licence Agreement shown there; the export is yours to load. The outline is saved to the Properties tab of the Sheet and shared with the crew. A GeoJSON export also works.</div></div>`;
   showInfoSheet_("Outline from the CLTIP viewer", h);
@@ -11907,6 +11933,9 @@ function lioOnMapOpen_(){
   if(!propBackendOk && connected && !isOffline()) propSync_(ok=>{ if(ok) lioRender_(); });
 }
 /* v397: picking a property in the Layers menu zooms the map to it (Chris, 2026-10-09); a button does the same again. */
+/* v421 — zoom to every property (their outlines, else their compartments) */
+function propZoomAll_(){ let b=null; propTracts_().forEach(t=>{ const e=propExtent_(t); if(!e) return; b=b?[Math.min(b[0],e[0]),Math.min(b[1],e[1]),Math.max(b[2],e[2]),Math.max(b[3],e[3])]:e.slice(); });
+  if(!b) return false; try{ if(typeof fmap!=="undefined"&&fmap&&window.L){ fmap.fitBounds(L.latLngBounds([[b[1],b[0]],[b[3],b[2]]]),{padding:[30,30],maxZoom:16}); return true; } }catch(e){} return false; }
 function propZoomTo_(tract, quiet){ const t=tract||propActiveTract_(); if(!t) return false; const e=propExtent_(t);
   if(!e){ if(!quiet) toast("No outline or compartments for "+t+" yet — nothing to zoom to",true); return false; }
   try{ if(typeof fmap!=="undefined"&&fmap&&window.L){ fmap.fitBounds(L.latLngBounds([[e[1],e[0]],[e[3],e[2]]]),{padding:[30,30],maxZoom:17}); return true; } }catch(err){}
@@ -11965,7 +11994,8 @@ function findProps_(q){ const k=propK_(q); if(!k) return []; const list=propTrac
 function findPropFill_(){ const el=$("findProp"); if(!el) return; const cur=propActiveTract_();
   el.innerHTML=`<option value="">Or pick a property…</option>`+propTracts_().map(t=>{ const e=(typeof ovExtOf_==="function"?ovExtOf_(t):propExtent_(t)); return `<option value="${esc(t)}">${esc(t)}${propK_(t)===propK_(cur)?" (shown)":""}${e?"":" — nothing to zoom to yet"}</option>`; }).join(""); }
 /* v417: one button that shows every property again, drops the search pin and empties the box */
-function findClearAll_(){ try{ mapOnlyClear_(); }catch(e){} try{ if(typeof findPinClear_==="function") findPinClear_(); else if(findPin&&fmap){ fmap.removeLayer(findPin); findPin=null; } }catch(e){} const i=$("findInput"); if(i) i.value=""; try{ findRender_([]); }catch(e){} findClose_(); }
+function findClearAll_(){ try{ mapOnlyClear_(); }catch(e){} try{ propSetActive_(""); lioCache=null; csRender_(); lioRender_(); }catch(e){}      // v421: no property stays highlighted
+  try{ propZoomAll_(); }catch(e){} try{ if(typeof findPinClear_==="function") findPinClear_(); else if(findPin&&fmap){ fmap.removeLayer(findPin); findPin=null; } }catch(e){} const i=$("findInput"); if(i) i.value=""; try{ findRender_([]); }catch(e){} findClose_(); }
 function findPickProp_(t){ propSetActive_(t); mapOnly=String(t||""); try{ STORE&&STORE.setItem("fi_maponly",mapOnly); }catch(e){}      // v406: only this one
   try{ renderBoundaries(); renderMapPins(); if(crewShown&&crewData.length) renderCrewPlots(crewData,true); }catch(e){} try{ lioCache=null; lioRender_(); lioOnMapOpen_(); }catch(e){} try{ const b=$("findShowAll"); if(b) b.style.display=""; }catch(e){}
   const z=propZoomTo_(t); findMsg_(z?"Showing only "+t+" — tap Show all for the rest":t+" has no outline or compartments to zoom to yet"); if(z) setTimeout(findClose_,900); }
@@ -12641,43 +12671,60 @@ async function mmRender_(tract, o, onPct, frozen){
   /* v401: every part of a compartment is labelled (the largest with the acres and the stand lines, the others
      with the name); a leader line and its anchor take their room in `boxes`, and a leader is only laid where
      it crosses nothing already placed — so labels no longer sit on each other's points. */
-  /* v404: the sizes are automatic (34 → 28 → 22 px as the compartment allows); "Label size" on the options page scales them */
-  const lsc=Math.max(.5,Math.min(1.6,(o.labelScale||100)/100)), F="Arial, Helvetica, sans-serif", sizes=[34,28,22].map(v=>Math.round(v*lsc)), smallFs=Math.round(22*lsc);
+  /* v404: the sizes are automatic (34 → 28 → 22 px as the compartment allows); "Label size" on the options page scales them.
+     v421 (Chris, 2026-10-14, "be an expert cartographer"): the sizes also step down with the number of compartments on
+     the map (14 or fewer: full size; 40: about 60 %), a label is placed inside its compartment at any size down to the
+     smallest before it is sent outside, and the labels that must go outside sit in a ring just off the property
+     outline at the spot nearest their compartment — short straight leaders, placed after every inside label so no
+     leader runs over one. */
+  const nParts=D.comps.reduce((n,c)=>n+c.polygons.length,0), dens=Math.max(.55,Math.min(1,Math.sqrt(14/Math.max(1,nParts))));
+  const lsc=Math.max(.5,Math.min(1.6,(o.labelScale||100)/100))*dens, F="Arial, Helvetica, sans-serif", sizes=[34,28,22,18].map(v=>Math.max(14,Math.round(v*lsc))), smallFs=Math.max(14,Math.round(20*lsc));
   const segFree=(x0,y0,x1,y1)=>{ const n=Math.max(2,Math.ceil(Math.hypot(x1-x0,y1-y0)/14)); for(let i=0;i<=n;i++){ const x=x0+(x1-x0)*i/n, y=y0+(y1-y0)*i/n; if(boxes.some(a=>x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h)) return false; } return true; };
   const segBoxes=(x0,y0,x1,y1)=>{ const n=Math.max(1,Math.ceil(Math.hypot(x1-x0,y1-y0)/16)); for(let i=0;i<=n;i++){ const x=x0+(x1-x0)*i/n, y=y0+(y1-y0)*i/n; boxes.push({x:x-5,y:y-5,w:10,h:10}); } };
   /* v401: every compartment's anchor point takes its room before any label is placed, so no label lands on a neighbour's point */
   const anchors=D.comps.map(c=>c.polygons.map(r=>{ const px=r.map(ring=>ring.map(q=>V.toPx(q[0],q[1]))); return mmInside_(px, MM_FRAME); })).flat().filter(Boolean);
   anchors.forEach(a=>boxes.push({x:a.x-7,y:a.y-7,w:14,h:14}));
+  /* the spots a leader label may take: along the outline, just outside it, two rows deep (made once, on demand) */
+  let _callouts=null; const callouts=(w,h)=>{ if(_callouts) return _callouts; const out=[]; const inAny=(x,y)=>outPx.some(r=>mmPtIn_([r],x,y));
+    outPx.forEach(r=>{ const n=r.length; for(let i=0;i<n;i++){ const a=r[i], b=r[(i+1)%n], L=Math.hypot(b[0]-a[0],b[1]-a[1]); if(L<1) continue; let nx=-(b[1]-a[1])/L, ny=(b[0]-a[0])/L;
+        const mx=(a[0]+b[0])/2, my=(a[1]+b[1])/2; if(inAny(mx+nx*6,my+ny*6)){ nx=-nx; ny=-ny; }            // outward
+        const ext=(Math.abs(nx)*w+Math.abs(ny)*h)/2+10, sp=Math.max(26,w*0.55), k=Math.max(1,Math.round(L/sp));
+        for(let j=0;j<=k;j++){ const t=j/k, x=a[0]+(b[0]-a[0])*t, y=a[1]+(b[1]-a[1])*t; out.push([x+nx*ext,y+ny*ext]); out.push([x+nx*(ext+h*1.15),y+ny*(ext+h*1.15)]); } } });
+    _callouts=out; return out; };
+  const leadOf=(t,at)=>{ const cx=t.x+t.w/2, cy=t.y+t.h/2, dx=at.x-cx, dy=at.y-cy, L=Math.hypot(dx,dy)||1; const ex=Math.abs(dx)*t.h>Math.abs(dy)*t.w ? t.w/2/Math.abs(dx)*L : t.h/2/Math.abs(dy)*L; return [cx+dx/L*ex, cy+dy/L*ex]; };
+  const items=[];
   D.comps.forEach(c=>{
     const parts=c.polygons.map((r,i)=>{ const px=r.map(ring=>ring.map(q=>V.toPx(q[0],q[1]))); let x0=1/0,x1=-1/0,y0=1/0,y1=-1/0; (px[0]||[]).forEach(p=>{ x0=Math.min(x0,p[0]); x1=Math.max(x1,p[0]); y0=Math.min(y0,p[1]); y1=Math.max(y1,p[1]); }); return {px, i, area:(x1-x0)*(y1-y0)}; })
       .filter(p=>p.px[0]&&p.px[0].length>=3).sort((a,b)=>b.area-a.area);
     parts.forEach((part,pi)=>{ const big=part.px, at=mmInside_(big, MM_FRAME); if(!at) return;
       const acL=(pi===0&&o.acts&&c.act&&c.act.length)?c.act.slice(0,2).map(a=>acKindName_(a.kind).split(" /")[0]+" "+a.year).join(" · "):"";
       const l1=c.name, l2=(c.partLabels&&c.partLabels[part.i])?c.partLabels[part.i]:(pi===0?(c.label||""):""), l3=pi===0?(acL||(c.stand&&c.stand.comp?c.stand.comp:"")):"", l4=(pi===0&&!acL&&c.stand&&c.stand.figs)?c.stand.figs:"";
-      const box=(fs,x,y)=>{ ctx.font="bold "+fs+"px "+F; let w=Math.max(ctx.measureText(l1).width, l2?ctx.measureText(l2).width:0); const sf=Math.round(fs*0.68); ctx.font=sf+"px "+F; if(l3) w=Math.max(w,ctx.measureText(l3).width); if(l4) w=Math.max(w,ctx.measureText(l4).width);
-        w+=12; const h=Math.round(fs*(l2?2.5:1.3))+(l3?sf+4:0)+(l4?sf+4:0); return {x:x-w/2,y:y-h/2,w,h,fs,sf}; };
-      let b=null;
-      outer2: for(const fs of sizes){ const t0=box(fs,at.x,at.y), st=Math.max(t0.h,40);
-        for(const v of [[0,0],[0,-1],[0,1],[-1,0],[1,0],[-1,-1],[1,-1],[-1,1],[1,1],[0,-2],[0,2],[-2,0],[2,0]]){ const t=box(fs,at.x+v[0]*st,at.y+v[1]*st); if(mmBoxIn_(big,t,8)&&free(t)){ b=t; break outer2; } } }
-      let leader=null, lead=null;
-      if(!b){ const small=box(smallFs,at.x,at.y), step=Math.max(small.w,small.h)*0.6;
-        /* the leader runs from the box edge to the point: a spot is taken only if that line crosses nothing placed */
-        const leadOf=t=>{ const cx=t.x+t.w/2, cy=t.y+t.h/2, dx=at.x-cx, dy=at.y-cy, L=Math.hypot(dx,dy)||1; const ex=Math.abs(dx)*t.h>Math.abs(dy)*t.w ? t.w/2/Math.abs(dx)*L : t.h/2/Math.abs(dy)*L; return [cx+dx/L*ex, cy+dy/L*ex]; };
-        outer: for(const strict of (outPx.length?[true,false]:[false])) for(let k=1;k<=5;k++) for(const ang of [0,180,90,270,45,135,225,315]){ const r=at.room+k*step, x=at.x+Math.cos(ang*Math.PI/180)*r, y=at.y+Math.sin(ang*Math.PI/180)*r;
-          const t=box(smallFs,x,y); if(!free(t)||!mmBoxOut_(big,t)||(strict&&!mmBoxOut_(outPx,t))) continue; const s0=leadOf(t); if(!segFree(s0[0],s0[1],at.x,at.y)) continue; b=t; leader=true; lead=s0; break outer; }
-        if(!b){ /* nothing clear enough for a clean leader: the nearest free spot, leader crossing or not */
-          outer3: for(let k=1;k<=5;k++) for(const ang of [0,180,90,270,45,135,225,315]){ const r=at.room+k*step, x=at.x+Math.cos(ang*Math.PI/180)*r, y=at.y+Math.sin(ang*Math.PI/180)*r; const t=box(smallFs,x,y); if(free(t)&&mmBoxOut_(big,t)){ b=t; leader=true; lead=leadOf(t); break outer3; } } }
-      }
-      if(!b) b=box(smallFs,at.x,at.y);                             // nowhere clear: the small label where it is
-      boxes.push(b);
-      if(leader){ segBoxes(lead[0],lead[1],at.x,at.y);
-        ctx.beginPath(); ctx.moveTo(lead[0],lead[1]); ctx.lineTo(at.x,at.y); ctx.strokeStyle=bg; ctx.lineWidth=6; ctx.stroke(); ctx.strokeStyle=fg; ctx.lineWidth=2.5; ctx.stroke();
-        ctx.beginPath(); ctx.arc(at.x,at.y,5,0,Math.PI*2); ctx.fillStyle=fg; ctx.fill(); }
-      ctx.font="bold "+b.fs+"px "+F; const cx=b.x+b.w/2, extra=(l3?b.sf+4:0)+(l4?b.sf+4:0), cy=b.y+(b.h-extra)/2, dy=Math.round(b.fs*0.6);
-      if(l2){ mmHaloText_(ctx,l1,cx,cy-dy,fg,bg); mmHaloText_(ctx,l2,cx,cy+dy,fg,bg); } else mmHaloText_(ctx,l1,cx,cy,fg,bg);
-      if(l3||l4){ ctx.font=b.sf+"px "+F; let yy=cy+(l2?dy:Math.round(b.fs*0.1))+Math.round(b.fs*0.55)+b.sf/2; if(l3){ mmHaloText_(ctx,l3,cx,yy,fg,bg); yy+=b.sf+4; } if(l4) mmHaloText_(ctx,l4,cx,yy,fg,bg); }
-    });
-  });
+      items.push({c, big, at, l1, l2, l3, l4}); }); });
+  const boxFor=it=>(fs,x,y)=>{ ctx.font="bold "+fs+"px "+F; let w=Math.max(ctx.measureText(it.l1).width, it.l2?ctx.measureText(it.l2).width:0); const sf=Math.round(fs*0.68); ctx.font=sf+"px "+F; if(it.l3) w=Math.max(w,ctx.measureText(it.l3).width); if(it.l4) w=Math.max(w,ctx.measureText(it.l4).width);
+    w+=12; const h=Math.round(fs*(it.l2?2.5:1.3))+(it.l3?sf+4:0)+(it.l4?sf+4:0); return {x:x-w/2,y:y-h/2,w,h,fs,sf}; };
+  /* pass 1: inside its compartment, the largest size that fits */
+  items.forEach(it=>{ const box=boxFor(it), {big,at}=it;
+    outer2: for(const fs of sizes){ const t0=box(fs,at.x,at.y), st=Math.max(t0.h,40);
+      for(const v of [[0,0],[0,-1],[0,1],[-1,0],[1,0],[-1,-1],[1,-1],[-1,1],[1,1],[0,-2],[0,2],[-2,0],[2,0]]){ const t=box(fs,at.x+v[0]*st,at.y+v[1]*st); if(mmBoxIn_(big,t,8)&&free(t)){ it.b=t; boxes.push(t); break outer2; } } } });
+  /* pass 2: the rest go outside, those nearest the outline first (the shortest leaders take the nearest spots) */
+  const distOut=it=>{ let d=1/0; outPx.forEach(r=>{ for(let i=0;i<r.length;i++){ const a=r[i], b=r[(i+1)%r.length], dx=b[0]-a[0], dy=b[1]-a[1], L2=dx*dx+dy*dy; let u=L2?((it.at.x-a[0])*dx+(it.at.y-a[1])*dy)/L2:0; u=Math.max(0,Math.min(1,u)); d=Math.min(d,Math.hypot(a[0]+u*dx-it.at.x,a[1]+u*dy-it.at.y)); } }); return d; };
+  items.filter(it=>!it.b).map(it=>({it,d:distOut(it)})).sort((p,q)=>p.d-q.d).forEach(({it})=>{ const box=boxFor(it), {big,at}=it; let b=null, lead=null;
+    const small=box(smallFs,at.x,at.y);
+    if(outPx.length){ const near=callouts(small.w,small.h).map(c=>({c,d:Math.hypot(c[0]-at.x,c[1]-at.y)})).sort((p,q)=>p.d-q.d).slice(0,120);
+      for(const {c} of near){ const t=box(smallFs,c[0],c[1]); if(!free(t)||!mmBoxOut_(big,t)||!mmBoxOut_(outPx,t)) continue; const s0=leadOf(t,at); if(!segFree(s0[0],s0[1],at.x,at.y)) continue; b=t; lead=s0; break; } }
+    if(!b){ const step=Math.max(small.w,small.h)*0.6;      // the v401 spiral, for a map with no outline or a crowded one
+      outer: for(const strict of (outPx.length?[true,false]:[false])) for(let k=1;k<=5;k++) for(const ang of [0,180,90,270,45,135,225,315]){ const r=at.room+k*step, x=at.x+Math.cos(ang*Math.PI/180)*r, y=at.y+Math.sin(ang*Math.PI/180)*r;
+        const t=box(smallFs,x,y); if(!free(t)||!mmBoxOut_(big,t)||(strict&&!mmBoxOut_(outPx,t))) continue; const s0=leadOf(t,at); if(!segFree(s0[0],s0[1],at.x,at.y)) continue; b=t; lead=s0; break outer; }
+      if(!b){ outer3: for(let k=1;k<=5;k++) for(const ang of [0,180,90,270,45,135,225,315]){ const r=at.room+k*step, x=at.x+Math.cos(ang*Math.PI/180)*r, y=at.y+Math.sin(ang*Math.PI/180)*r; const t=box(smallFs,x,y); if(free(t)&&mmBoxOut_(big,t)){ b=t; lead=leadOf(t,at); break outer3; } } } }
+    if(!b){ b=box(smallFs,at.x,at.y); lead=null; }                   // nowhere clear: the small label where it is
+    it.b=b; it.lead=lead; boxes.push(b); if(lead) segBoxes(lead[0],lead[1],at.x,at.y); });
+  /* draw: leaders first, then every label over them */
+  items.forEach(it=>{ if(!it.lead) return; const {at}=it; ctx.beginPath(); ctx.moveTo(it.lead[0],it.lead[1]); ctx.lineTo(at.x,at.y); ctx.strokeStyle=bg; ctx.lineWidth=6; ctx.stroke(); ctx.strokeStyle=fg; ctx.lineWidth=2.5; ctx.stroke();
+    ctx.beginPath(); ctx.arc(at.x,at.y,5,0,Math.PI*2); ctx.fillStyle=fg; ctx.fill(); });
+  items.forEach(it=>{ const b=it.b; if(!b) return; const {l1,l2,l3,l4}=it;
+    ctx.font="bold "+b.fs+"px "+F; const cx=b.x+b.w/2, extra=(l3?b.sf+4:0)+(l4?b.sf+4:0), cy=b.y+(b.h-extra)/2, dy=Math.round(b.fs*0.6);
+    if(l2){ mmHaloText_(ctx,l1,cx,cy-dy,fg,bg); mmHaloText_(ctx,l2,cx,cy+dy,fg,bg); } else mmHaloText_(ctx,l1,cx,cy,fg,bg);
+    if(l3||l4){ ctx.font=b.sf+"px "+F; let yy=cy+(l2?dy:Math.round(b.fs*0.1))+Math.round(b.fs*0.55)+b.sf/2; if(l3){ mmHaloText_(ctx,l3,cx,yy,fg,bg); yy+=b.sf+4; } if(l4) mmHaloText_(ctx,l4,cx,yy,fg,bg); } });
   // v388: the points and their names, before the road names and lot labels so they keep their place
   // v393: on Map 4 (o.names false) the points keep their symbols and the lines their style, but the names stay off
   try{ ftDrawOn_(ctx, V, D.feats||[], boxes, o.aerial, present, o.names!==false, "names"); }catch(e){ notes.push("Point names: "+String(e.message||e)); }
@@ -13703,29 +13750,56 @@ function pkSchedulePage_(tract, acts, win){
    made that way (bndAuto, on this phone) so a later change to the compartments remakes it; an outline a person
    set from a file or drew is never replaced. */
 const BND_SNAP_M=0.25;
+/* v421 — slivers: compartments digitised apart leave gaps a metre or two wide between them; with the quarter-metre
+   snap those gaps came out as thin holes and notches in the outline ("property lines inside the property" — Chris,
+   2026-10-14, Bendor and Graves). The outline is now tried at 0.25 m, then 1 m, then 3 m: the first that leaves no
+   thin hole (narrower than 3 m on average) is kept; failing that, the last one with its thin holes dropped. */
 function propOutlineFromComps_(tract){
+  let best=null, last=null;
+  for(const snap of [BND_SNAP_M, 1, 3]){ const r=propOutlineFromComps0_(tract, snap); last=r; if(!r.rings.length) continue;
+    if(r.rings.some((rg,i)=>i>0&&propRingThin_(rg,3))) continue;
+    if(!best||r.rings.length<best.rings.length) best=Object.assign(r,{snap}); }      // the fewest rings wins; the smallest snap on a tie
+  if(best) return best;
+  if(last&&last.rings.length){ const keep=last.rings.filter((rg,i)=>i===0||!propRingThin_(rg,3)); return Object.assign(last,{rings:keep, snap:3, thinned:last.rings.length-keep.length}); }
+  return last;
+}
+/* a ring narrower than `w` metres on average: its area over half its perimeter */
+function propRingThin_(ring, w){ try{ const P=cgProj_(ring[0][0],ring[0][1]), X=ring.map(q=>P.xy(q)); let per=0; for(let i=0;i<X.length;i++){ const a=X[i], b=X[(i+1)%X.length]; per+=Math.hypot(a[0]-b[0],a[1]-b[1]); } const area=Math.abs(cgArea_(X)); return per>0 && area/(per/2)<w; }catch(e){ return false; } }
+function propOutlineFromComps0_(tract, SNAP){
   const comps=propCompsGeo_(tract).filter(c=>c.polygons.length); if(!comps.length) return {rings:[], why:"no compartments"};
   let rings0=[]; comps.forEach(c=>c.polygons.forEach(pg=>{ const r=(pg[0]||[]).filter(q=>Array.isArray(q)&&isFinite(+q[0])&&isFinite(+q[1])).map(q=>[+q[0],+q[1]]); if(r.length>=3) rings0.push(r); }));
   if(!rings0.length) return {rings:[], why:"no polygons"};
+  return outlineFromRings0_(rings0, SNAP);
+}
+/* v421 — an outline made of several parcels (a CLTIP export of the lots that make the property) is the same job: the
+   shared parcel lines cancel and the perimeter remains ("the boundary should only be around the perimeter" — Chris). */
+function bndDissolve_(rings){ try{ const all=(rings||[]).filter(r=>r&&r.length>=3).map(r=>r.map(q=>[+q[0],+q[1]])); if(all.length<2) return rings;
+    /* a ring inside another is a hole of the outline (an excluded parcel), not a parcel to dissolve: set aside, put back after */
+    const P=cgProj_(all[0][0][0],all[0][0][1]), XY=all.map(r=>r.map(q=>P.xy(q)));
+    const isHole=i=>XY.some((o,j)=>j!==i&&Math.abs(cgArea_(o))>Math.abs(cgArea_(XY[i]))&&XY[i].every(q=>cgInRing_(q[0],q[1],o)));
+    const holes=all.filter((r,i)=>isHole(i)), rs=all.filter((r,i)=>!isHole(i)); if(rs.length<2) return rings;
+    let best=null; for(const snap of [BND_SNAP_M, 1, 3]){ const r=outlineFromRings0_(rs, snap); if(!r.rings.length||r.off>0.02) continue; if(r.rings.some((rg,i)=>i>0&&propRingThin_(rg,3))) continue; if(!best||r.rings.length<best.rings.length) best=r; }
+    return best&&best.rings.length<rs.length ? best.rings.concat(holes) : rings; }catch(e){ return rings; } }
+function outlineFromRings0_(rings0, SNAP){
   const P=cgProj_(rings0[0][0][0],rings0[0][0][1]);
   /* v409: a compartment lying wholly inside another (an island — a stand file that does not cut holes for the small
      stands within a big one) adds nothing to the outline: left out here, so it is not "an overlap" (Chris, 2026-10-12) */
   let islands=0;
-  { const XY0=rings0.map(r=>r.map(q=>P.xy(q))), A0=XY0.map(x=>Math.abs(cgArea_(x))), tolI=BND_SNAP_M*4;
+  { const XY0=rings0.map(r=>r.map(q=>P.xy(q))), A0=XY0.map(x=>Math.abs(cgArea_(x))), tolI=SNAP*4;
     const within=(A,B)=>{ for(let k=0;k<A.length;k++){ const a=A[k], b=A[(k+1)%A.length]; for(const q of [a,[(a[0]+b[0])/2,(a[1]+b[1])/2]]){ if(cgInRing_(q[0],q[1],B)) continue; let d=1/0; for(let m=0;m<B.length&&d>tolI;m++) d=Math.min(d,cgSegD_(q[0],q[1],B[m],B[(m+1)%B.length]).d); if(d>tolI) return false; } } return true; };
     const keep=rings0.map((r,i)=>{ for(let j=0;j<rings0.length;j++){ if(j===i||A0[j]<=A0[i]) continue; if(within(XY0[i],XY0[j])) return false; } return true; });
     islands=keep.filter(k=>!k).length; if(islands) rings0=rings0.filter((r,i)=>keep[i]); }
   /* 1. corners within the snap distance become one (grid hash, neighbours checked) */
-  const cell=Math.max(1,BND_SNAP_M*4), grid={}, corners=[];
+  const cell=Math.max(1,SNAP*4), grid={}, corners=[];
   const keyOf=xy=>Math.floor(xy[0]/cell)+","+Math.floor(xy[1]/cell);
   const canon=p=>{ const xy=P.xy(p); const gx=Math.floor(xy[0]/cell), gy=Math.floor(xy[1]/cell);
-    for(let i=-1;i<=1;i++) for(let j=-1;j<=1;j++){ const l=grid[(gx+i)+","+(gy+j)]; if(!l) continue; for(const c of l){ if(Math.hypot(c.xy[0]-xy[0],c.xy[1]-xy[1])<=BND_SNAP_M) return c; } }
+    for(let i=-1;i<=1;i++) for(let j=-1;j<=1;j++){ const l=grid[(gx+i)+","+(gy+j)]; if(!l) continue; for(const c of l){ if(Math.hypot(c.xy[0]-xy[0],c.xy[1]-xy[1])<=SNAP) return c; } }
     const c={xy, p:[+p[0].toFixed(7),+p[1].toFixed(7)], k:corners.length}; corners.push(c); (grid[keyOf(xy)]=grid[keyOf(xy)]||[]).push(c); return c; };
   let rings=rings0.map(r=>{ const o=[]; r.forEach(p=>{ const c=canon(p); if(!o.length||o[o.length-1]!==c) o.push(c); }); if(o.length>1&&o[0]===o[o.length-1]) o.pop(); return o; }).filter(r=>r.length>=3);
   /* 2. a corner lying on another ring's edge is let into that edge (a T-junction), so the shared edge cancels */
   rings=rings.map(r=>{ let out=r.slice(); let changed=true, guard=0;
     while(changed&&guard++<50){ changed=false; for(let i=0;i<out.length;i++){ const a=out[i], b=out[(i+1)%out.length]; let best=null, bt=-1;
-        for(const c of corners){ if(c===a||c===b||out.indexOf(c)>=0) continue; const d=cgSegD_(c.xy[0],c.xy[1],a.xy,b.xy); if(d.d<=BND_SNAP_M && d.t>0.001 && d.t<0.999 && (best===null||d.t<bt)){ best=c; bt=d.t; } }
+        for(const c of corners){ if(c===a||c===b||out.indexOf(c)>=0) continue; const d=cgSegD_(c.xy[0],c.xy[1],a.xy,b.xy); if(d.d<=SNAP && d.u>0.001 && d.u<0.999 && (best===null||d.u<bt)){ best=c; bt=d.u; } }      // v421: cgSegD_ gives u, not t — the T-junction step never ran before
         if(best){ out.splice(i+1,0,best); changed=true; break; } } }
     return out; });
   /* 3. shared edges cancel; the rest chain into rings */
@@ -13752,7 +13826,7 @@ function propOutlineFromComps_(tract){
   /* a corner or edge-middle of one compartment well inside another: they overlap (a hole inside a compartment is not this — a hole is a separate ring here) */
   const XY=rings0.map(r=>r.map(p=>P.xy(p)));
   for(let i=0;i<XY.length;i++) for(let j=0;j<XY.length;j++){ if(i===j) continue; const A=XY[i], B=XY[j]; const samples=[]; for(let k=0;k<A.length;k++){ const a=A[k], b=A[(k+1)%A.length]; samples.push(a,[(a[0]+b[0])/2,(a[1]+b[1])/2]); }
-    for(const q of samples){ if(!cgInRing_(q[0],q[1],B)) continue; let d=1/0; for(let k=0;k<B.length;k++) d=Math.min(d,cgSegD_(q[0],q[1],B[k],B[(k+1)%B.length]).d); if(d>BND_SNAP_M*4) return {rings:[], why:"compartments overlap each other"}; } }
+    for(const q of samples){ if(!cgInRing_(q[0],q[1],B)) continue; let d=1/0; for(let k=0;k<B.length;k++) d=Math.min(d,cgSegD_(q[0],q[1],B[k],B[(k+1)%B.length]).d); if(d>SNAP*4) return {rings:[], why:"compartments overlap each other"}; } }
   return {rings:outer.map(x=>x.r), ha:sum, compsHa:tot, off, islands, why:off>0.02?"the outline's area is "+(off*100).toFixed(1)+"% off the compartments' — a gap or overlap":""};
 }
 /* make the outline where there is none (or where it was made this way before); never over a person's outline */
@@ -14567,6 +14641,13 @@ function csSnap_(ll){
     if(d<=14 && (!best||d<best.d)) best={d,p}; })));
   return best?best.p:[ll.lat,ll.lng];
 }
+/* v421 — a piece of any property under the point (the chosen property's first) */
+function csPieceAtAny_(lat,lon){ const P=cgProj_(lat,lon), a=propK_(propActiveTract_()); let hit=null;
+  csAll_().sort((x,y)=>(propK_(y.tract)===a)-(propK_(x.tract)===a)).some(c=>{ if(cgInRings_(0,0,c.rings.map(r=>r.map(P.xy)))){ hit=c; return true; } return false; }); return hit; }
+/* v421 — the piece a boundary file's compartment is on the Sheet as (same name, its tract or the chosen property) */
+function csPieceForFeat_(f){ if(!f||f.__piece) return f&&f.__piece?(PROPS.shapes||{})[f.__piece]:null; const name=bpStandName_(f); if(!name) return null;
+  const ts=[featTract_(f), propActiveTract_()].filter(Boolean); for(const t of ts){ const pc=csOf_(t).find(c=>propK_(c.name)===propK_(name)); if(pc) return pc; }
+  const all=csAll_().filter(c=>propK_(c.name)===propK_(name)); return all.length===1?all[0]:null; }
 function csPieceAt_(lat,lon){ const P=cgProj_(lat,lon); let hit=null;
   csOf_(_csEd?_csEd.tract:propActiveTract_()).forEach(c=>{ if(cgInRings_(0,0,c.rings.map(r=>r.map(P.xy)))) hit=c; }); return hit; }
 function csTap_(ll){
