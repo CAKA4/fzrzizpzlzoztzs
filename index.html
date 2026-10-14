@@ -1283,7 +1283,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-13 · v419";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-13 · v420";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -6294,8 +6294,7 @@ function bpPopupOpen_(){
    gives no usable area. */
 function bpAreaFor_(f){
   try{
-    const pr=(f&&f.properties)||{}; if(!standField) return null;
-    const stand=String(pr[standField]!=null?pr[standField]:"").trim(); if(!stand) return null;
+    const stand=bpStandName_(f); if(!stand) return null;      // v420
     const tract=(tractField?String(pr[tractField]!=null?pr[tractField]:"").trim():"") || manualTract || "";
     const nm=tract?(tract+" \u00b7 "+stand):stand;
     const ca=compartmentAreas_(), ha=ca.areas[nm];
@@ -6766,7 +6765,7 @@ function initMap(){
     if(placeMode){ placeAt(ll.lat,ll.lng); return; }
     if(nearbyPlotPopup_(ll)) return;                    // a plot pin near the tap wins over the boundary
     /* v419: a compartment of the property shown opens its sheet — name, class, property, cut, remove */
-    try{ if(typeof csPieceAt_==="function" && mapDetail_() && propActiveTract_()){ const pc=csPieceAt_(ll.lat,ll.lng); if(pc){ csAttrOpen_(pc.id); return; } } }catch(e){}
+    try{ if(typeof csPieceAt_==="function" && mapDetail_() && propActiveTract_()){ const pc=csPieceAt_(ll.lat,ll.lng); if(pc){ showBoundPopup(ll, csFeature_(pc)); return; } } }catch(e){}   // v420: the popup (Layer · Analysis · Species · Marking), with ✎ Edit in it
     { const bf=boundaryFeatureAt(ll.lat,ll.lng); if(bf) showBoundPopup(ll,bf); }
   }catch(err){ toast("Couldn't open that: "+String(err&&err.message||err).slice(0,80),true); } };
   let _mapClickAt=0; fmap.on("click",e=>{ _mapClickAt=Date.now(); mapTapHandle_(e.latlng); });
@@ -7438,8 +7437,7 @@ function standAnFetch_(force){
   document.body.appendChild(sc);
 }
 function standAnFor_(f){
-  const p=f&&f.properties||{}; if(!standField) return null;
-  const k=String(p[standField]==null?"":p[standField]).trim().toLowerCase();
+  const k=bpStandName_(f).toLowerCase();      // v420: a piece's name counts too
   return k?(standAn[k]||null):null;
 }
 function standAnVal_(a,key){
@@ -7609,8 +7607,7 @@ function setBoundPopupView(v){ _bpView=v; if(v==="analysis") standAnFetch_(false
    invisible: bpBasis_ prints what the figures were computed from and says so plainly when the
    Sheet's analysis counts more. */
 function bpPlotsFor_(f){
-  const p=(f&&f.properties)||{};
-  const name=standField?String(p[standField]==null?"":p[standField]).trim():"";
+  const name=bpStandName_(f);      // v420
   if(!name) return {name:"",plots:[]};
   const key=name.toLowerCase();
   /* Deliberately NOT sumPlots_(): that honours whatever collector and tract the Stand summary
@@ -7713,7 +7710,7 @@ function bpSpeciesHtml_(s){
 function renderBoundPopup_(){
   const f=_bpFeat; if(!f) return;
   const p=f.properties||{};
-  const title=(standField&&p[standField]!=null&&String(p[standField]).trim()!=="")?String(p[standField]):"Stand";
+  const title=bpStandName_(f)||"Stand";      // v420
   const row=(k,v)=>`<tr><td style="color:#5a7a62;padding:1px 10px 1px 0;vertical-align:top;white-space:nowrap">${esc(k)}</td><td style="padding:1px 0;vertical-align:top">${esc(String(v))}</td></tr>`;
   // declared at function scope, not inside the analysis branch — the body template below reads it, and
   // a block-scoped const used outside its block is exactly the ReferenceError that killed this popup once
@@ -7768,11 +7765,14 @@ function renderBoundPopup_(){
              :`<div style="color:#5a7a62;font-size:11px;margin-top:3px">No live trees tallied in this compartment yet.</div>`)
            +bpBasis_(f,s.nplots||0,fromSheet);
     }
+  } else if(f.__piece){
+    Object.keys(p).forEach(k=>{ if(k==="STAND") return; rows+=row(k,String(p[k])); });      // v420: a piece's own details
   } else {
     popupFields.forEach(k=>{ if(k===standField) return; const v=p[k];
       if(v==null||String(v).trim()==="") return; rows+=row(k,String(v)); });
     if(!rows) note=`<div style="color:#5a7a62;margin-top:3px;font-size:11px">No values in the selected field(s) for this stand.</div>`;
   }
+  const edit = f.__piece ? `<button type="button" onclick="try{ fmap.closePopup(); }catch(e){} csAttrOpen_('${String(f.__piece).replace(/'/g,"&#39;")}')" style="display:block;width:100%;margin-top:8px;padding:10px;border-radius:8px;border:1px solid #9fb8a4;background:#f4f8f2;color:#16271a;font:inherit;font-size:12px">✎ Edit this compartment — name, class, property, cut, join, remove</button>` : "";
   const seg=(v,lab)=>`<span onclick="setBoundPopupView('${v}')" style="cursor:pointer;padding:2px 7px;border-radius:6px;font-size:11px;`+
     (_bpView===v?`background:#16271a;color:#eafae8`:`color:#5a7a62`)+`">${lab}</span>`;
   const table=rows?`<table style="border-collapse:collapse;font-size:12px;width:100%">${rows}</table>`:"";
@@ -7783,7 +7783,7 @@ function renderBoundPopup_(){
   /* The species table is five columns and the marking table is four bands plus a removed/kept
      split — both need more room than the two-column Layer view. */
   const wide=(_bpView==="species"||_bpView==="marking");
-  const body=`<div style="max-height:${wide?"52vh":"38vh"};overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${table}${ageMsg}${note}${rpt}</div>`;
+  const body=`<div style="max-height:${wide?"52vh":"38vh"};overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${table}${ageMsg}${note}${rpt}${edit}</div>`;
   _bpPopup=L.popup({maxWidth:wide?340:280,autoPan:true,className:"bpop"+(wide?" bpop-wide":"")}).setLatLng(_bpLatLng)
     .setContent(`<div style="font-family:'Courier New',monospace;color:#16271a;line-height:1.4">`+
       `<b style="font-size:13px">${esc(title)}</b>`+
@@ -11182,7 +11182,10 @@ function propSync_(then, opts){
       /* v396: the planned activities, the same way. */
       { const na={}, goneA={}, mineA=Object.assign({}, waitA, propDirty.acts||{}); delA.concat(propDirty.actDel||[]).forEach(id=>{ goneA[id]=1; });
         if(propActsOk){ Object.values(PROPS.acts||{}).forEach(a=>{ if(a&&a.id&&other(a)&&!goneA[a.id]) na[a.id]=a; }); r.acts.forEach(a=>{ if(a&&a.id&&!goneA[a.id]) na[a.id]=a; }); Object.keys(mineA).forEach(id=>{ const mine=(PROPS.acts||{})[id]; if(mine&&!goneA[id]) na[id]=mine; }); PROPS.acts=na; } }
-      propPersist_(); try{ mnRender_(); }catch(e){} try{ csRender_(); }catch(e){} try{ ftRender_(); }catch(e){} try{ lnRender_(); }catch(e){} fin(true);
+      /* v420: a property whose compartments came down from the Sheet without an outline gets one from them (Chris, 2026-10-13:
+         Pefferlaw showed its compartments when chosen and nothing at all otherwise) */
+      try{ if(propShapesOk){ const seen={}; Object.values(ns).forEach(c=>{ const k=propK_(c.tract); if(seen[k]) return; seen[k]=1; const pr=PROPS.props[k]; if(!pr||!(Array.isArray(pr.boundary)&&pr.boundary.length)||pr.bndAuto) propAutoOutline_(c.tract,true); }); } }catch(e){}
+      propPersist_(); try{ mnRender_(); }catch(e){} try{ csRender_(); }catch(e){} try{ ftRender_(); }catch(e){} try{ lnRender_(); }catch(e){} try{ ovRender_(); }catch(e){} fin(true);
     });
   }, 30000);
 }
@@ -14659,6 +14662,12 @@ function csMoveCorner_(tract, key, to){
   const now=cgLayerHa_(list); if(tiles ? Math.abs(now-was)>=0.0005 : (propHa!=null && Math.abs(now-propHa)>Math.abs(was-propHa)+0.0005)) return "area";
   csCommit_(tract, list, "move a corner"); return "";
 }
+/* v420 — a piece as a feature for the compartment popup: its name is the stand, so the Analysis, Species and Marking
+   views find its plots the way they do for a boundary file's compartment. */
+function csFeature_(pc){ const rec=propComp_(pc.tract,pc.name)||{}, ha=cgPieceHa_(pc.rings);
+  return {type:"Feature", __piece:pc.id, properties:{STAND:pc.name, "MFTIP class":rec.cls||"— not set —", Property:pc.tract, Area:ha.toFixed(2)+" ha · "+(ha*HA_AC).toFixed(2)+" ac"},
+    geometry:{type:"Polygon", coordinates:pc.rings.map(r=>r.map(q=>[q[1],q[0]]).concat([[r[0][1],r[0][0]]]))}}; }
+function bpStandName_(f){ const p=(f&&f.properties)||{}; if(f&&f.__piece) return String(p.STAND||"").trim(); if(!standField) return ""; return String(p[standField]==null?"":p[standField]).trim(); }
 function csAttrOpen_(id){
   const c=(PROPS.shapes||{})[id]; if(!c) return;
   const rec=propComp_(c.tract,c.name)||{}, ha=cgPieceHa_(c.rings), parts=csOf_(c.tract).filter(x=>propK_(x.name)===propK_(c.name)).length;
