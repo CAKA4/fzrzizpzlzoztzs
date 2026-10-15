@@ -1308,7 +1308,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-15 · v434";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-15 · v435";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -7062,7 +7062,11 @@ function csAutoFromFile_(bf){
   if(!list.length){ toast("Set a Tract name under Layers, or pick the property shown on the map, so these compartments can go to the Sheet",true); return 0; }
   let n=0, kept=[];
   list.forEach(t=>{ addTract(t); const have=csOf_(t).length;
-    if(have && !confirm(t+" already has "+have+" compartment piece"+(have===1?"":"s")+" on the Sheet.\n\nRebuild them from the loaded files (this one has "+(cnt[propK_(t)]||0)+" compartment"+(cnt[propK_(t)]===1?"":"s")+" for it)? Cancel keeps the ones on the Sheet.")){ kept.push(t); return; }
+    /* v435: first offer to add only the compartments the Sheet is missing — the pieces there stay as they are */
+    if(have){ const miss=csMissingFromFile_(t);
+      if(miss.length && confirm(t+" already has "+have+" compartment piece"+(have===1?"":"s")+" on the Sheet. The loaded file has "+miss.length+" compartment"+(miss.length===1?"":"s")+" it doesn't: "+miss.slice(0,12).join(", ")+(miss.length>12?" …":"")+".\n\nAdd just "+(miss.length===1?"that one":"those "+miss.length)+"? The pieces on the Sheet stay exactly as they are.\n\nOK adds them · Cancel for the other choices")){
+        if(csFromFile_(t,{addMissing:true,label:"added from "+(bf.name||"a file")})) n++; return; } }
+    if(have && !confirm(t+" already has "+have+" compartment piece"+(have===1?"":"s")+" on the Sheet.\n\nRebuild ALL of them from the loaded files (this one has "+(cnt[propK_(t)]||0)+" compartment"+(cnt[propK_(t)]===1?"":"s")+" for it)? Cuts, joins and renames made in the app since are replaced (Undo on this phone brings them back). Cancel keeps the ones on the Sheet.")){ kept.push(t); return; }
     if(csFromFile_(t,{noConfirm:true,label:"loaded from "+(bf.name||"a file")})) n++; });
   try{ renderBoundaries(); }catch(e){}
   if(kept.length) toast("Kept the Sheet's pieces for "+kept.join(", ")+" — the file's compartments for "+(kept.length===1?"it":"them")+" are on this phone only");
@@ -11474,7 +11478,8 @@ function propRender_(keep){
     else h+=`<div style="font-size:12px;color:#cfe3d2;margin-bottom:6px">${made.length} piece${made.length===1?"":"s"} · ${Object.keys(names).length} compartment${Object.keys(names).length===1?"":"s"}. These are the property's compartments: loaded boundary files and drawn areas for ${esc(t)} are not counted while the layer has pieces.</div>`+
       `<div style="display:flex;gap:6px;margin-bottom:6px"><button type="button" class="btn ghost" style="flex:1" onclick="csEdit_(_ppTract)">✂ Edit on the map</button><button type="button" class="btn ghost" style="flex:1" onclick="csExportShp_(_ppTract)">⇩ Shapefile</button></div>`+
       `<div style="display:flex;gap:6px;margin-bottom:6px"><button type="button" class="btn ghost" style="flex:1" onclick="if(csFromOutline_(_ppTract)) propRender_(true)">Start again from the outline</button>`+
-      (fromFile.length?`<button type="button" class="btn ghost" style="flex:1" onclick="if(csFromFile_(_ppTract)) propRender_(true)">Start again from the loaded file</button>`:"")+`</div>`;
+      (fromFile.length?`<button type="button" class="btn ghost" style="flex:1" onclick="if(csFromFile_(_ppTract)) propRender_(true)">Start again from the loaded file</button>`:"")+`</div>`+
+      (()=>{ const miss=csMissingFromFile_(t); return miss.length?`<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="if(csFromFile_(_ppTract,{addMissing:true})) propRender_(true)">⊕ Add the ${miss.length} compartment${miss.length===1?"":"s"} missing from the layer</button><div style="font-size:11px;color:#8fae95;line-height:1.45;margin-bottom:6px">In the loaded file but not on the Sheet: ${esc(miss.slice(0,12).join(", "))}${miss.length>12?" …":""}. The pieces already there stay as they are.</div>`:""; })();
     if(made.length){ const chk=csCheck_(t); if(!chk.ok) h+=`<div style="font-size:12px;color:#ffd24a;margin-bottom:6px">${chk.over?"Some pieces of the layer overlap (two phones may have cut it at the same time) — open the editor to fix them.":"The layer's pieces add up to "+chk.layHa.toFixed(2)+" ha but the outline is "+chk.propHa.toFixed(2)+" ha — start again from the outline to match it."}</div>`; } }
   // v388: the points
   { const pts=ftOf_(t), sens=pts.filter(f=>f.sens).length, kinds={}; pts.forEach(f=>{ kinds[f.kind]=(kinds[f.kind]||0)+1; });
@@ -14611,11 +14616,21 @@ function csThin_(pieces, P, tol){ tol=tol||CS_THIN_M; const cnt={}; pieces.forEa
   function dp2(X,i,j,out,t){ if(j-i<2) return; let best=-1,bd=-1; for(let m=i+1;m<j;m++){ const d=cgSegD_(X[m][0],X[m][1],X[i],X[j]).d; if(d>bd){ bd=d; best=m; } }
     if(bd>t){ dp2(X,i,best,out,t); out.push(best); dp2(X,best,j,out,t); } }
   return dropped; }
+/* v435: the share of a piece's area already covered by the layer's pieces (0…1) */
+function csCoveredShare_(pc, have, P){ try{ const pcX=globalThis.polygonClipping||window.polygonClipping; const xy=r=>r.map(P.xy);
+  const A=Math.abs(cgArea_(xy(pc.rings[0]))); if(!(A>0)||!have.length) return 0;
+  const me=[pc.rings.map(r=>{ const q=xy(r); return q.concat([q[0]]); })];
+  const them=have.map(c=>c.rings.map(r=>{ const q=xy(r); return q.concat([q[0]]); }));
+  const inter=pcX.intersection(me, pcX.union.apply(null, them)); let a=0; inter.forEach(pg=>pg.forEach((r,i)=>{ a+=(i===0?1:-1)*Math.abs(cgArea_(r.slice(0,-1))); }));
+  return a/A; }catch(e){ return 0; } }
+/* v435: the loaded file's compartments of a property that its layer has no compartment of the same name for */
+function csMissingFromFile_(t){ const have={}; csOf_(t).forEach(c=>{ have[propK_(c.name)]=1; });
+  return propCompsGeo_(t,true).filter(c=>(c.src==="file"||c.src==="drawn")&&!have[propK_(c.name)]).map(c=>c.name); }
 function csFromFile_(tract, o){ o=o||{};
   const t=tract||_ppTract||propActiveTract_(); if(!t){ toast("Choose the property first",true); return false; }
   const comps=propCompsGeo_(t,true).filter(c=>c.src==="file"||c.src==="drawn");
   if(!comps.length){ toast("No compartment polygons are loaded for this property — open the file under Layers first (and set its stand and tract fields)",true); return false; }
-  if(csOf_(t).length && !o.noConfirm && !confirm("Start the compartment layer again from the loaded file? The "+csOf_(t).length+" pieces made so far are replaced (Undo can bring them back).")) return false;
+  if(csOf_(t).length && !o.noConfirm && !o.addMissing && !confirm("Start the compartment layer again from the loaded file? The "+csOf_(t).length+" pieces made so far are replaced (Undo can bring them back).")) return false;
   const pieces=[];
   comps.forEach(c=>(c.polygons||[]).forEach(pg=>{ const rings=(pg||[]).filter(r=>r&&r.length>=3).map(r=>cgDedupe_(r.map(cgLL_))).filter(r=>r.length>=3); if(rings.length) pieces.push({id:null, name:c.name, rings, src:c.src}); }));
   if(!pieces.length){ toast("The loaded polygons could not be read",true); return false; }
@@ -14652,6 +14667,21 @@ function csFromFile_(tract, o){ o=o||{};
   const out=sound.map(pc=>({id:null, name:pc.name, rings:pc.rings}));
   try{ islandHoles_(out.map(pc=>pc.rings)); }catch(e){}      // v410: an island piece is a hole in its host piece, so the pieces add up to the outline
   if(!out.length){ toast("None of the loaded polygons could be used"+(dropped.length?" — their outlines cross themselves or are pinched in the file: "+dropped.join(", "):""),true); return false; }
+  /* v435 — add only what the layer is missing (Chris, 2026-10-15: Centennial's file had compartments the Sheet lacked; rebuilding
+     the whole layer would undo the cuts, joins and renames made since). The layer's pieces are kept exactly as they are; a file
+     compartment is added when the layer has no compartment of its name AND it is not already covered by the layer (one
+     renamed in the app is not added twice). */
+  if(o.addMissing){ const have=csOf_(t), names={}; have.forEach(c=>{ names[propK_(c.name)]=1; });
+    let covered=[]; const add=out.filter(pc=>!names[propK_(pc.name)]).filter(pc=>{ const a=csCoveredShare_(pc, have, P); if(a>0.5){ covered.push(pc.name); return false; } return true; });
+    const addNames=[...new Set(add.map(pc=>pc.name))];
+    if(!add.length){ toast("Nothing to add: the layer of "+t+" already has every compartment in the loaded file"+(covered.length?" ("+[...new Set(covered)].join(", ")+" lie on pieces already there, under another name)":"")+".",!!covered.length); return false; }
+    csCommit_(t, have.map(c=>({id:c.id, name:c.name, rings:c.rings})).concat(add), o.label||"add the missing compartments from the loaded file");
+    const chk2=csCheck_(t);
+    toast("Added "+addNames.length+" compartment"+(addNames.length===1?"":"s")+" to "+t+": "+addNames.join(", ")+". The "+have.length+" piece"+(have.length===1?"":"s")+" already there are unchanged."
+      +([...new Set(covered)].length?" Not added, as they lie on pieces already there under another name: "+[...new Set(covered)].join(", ")+".":"")
+      +(dropped.length?" Left out (the file's outline crosses itself or is pinched): "+dropped.join(", ")+".":"")
+      +(chk2.ok?"":chk2.over?" Some pieces overlap now — join or move corners until they fit.":""), !chk2.ok||!!dropped.length||!!covered.length);
+    return true; }
   csCommit_(t, out, o.label||"start from the loaded file");
   /* the file's own adjusted acres, where the compartment has no typed figure yet, so the area summary keeps them */
   try{ const have=(PROPS.comps||{})[propK_(t)]||{}, keep=[]; comps.forEach(c=>{ const rec=have[propK_(c.name)]; if(c.fAdj!=null && isFinite(+c.fAdj) && !(rec && rec.manual!=="" && rec.manual!=null) && out.some(pc=>propK_(pc.name)===propK_(c.name))) keep.push({name:c.name, manual:+c.fAdj, unit:"ac"}); });
