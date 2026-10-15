@@ -1308,7 +1308,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-15 · v439";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-15 · v440";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -11836,7 +11836,7 @@ async function lioEnsure_(tract, force, quiet){
     /* opt: a layer added later (woodland, v383) does not make every copy already saved count as incomplete
        — Map 4 fetches it for itself when it is missing. */
     const complete=c=>c&&c.layers&&LIO_LAYERS.every(L_=>L_.opt||(c.layers[L_.k]&&c.layers[L_.k].fc));
-    if(!force && cache && !cache.partial && lioCovers_(cache.bbox,need) && complete(cache)){ lioUse_(tract,cache); return; }
+    if(!force && cache && !cache.partial && lioCovers_(cache.bbox,need) && complete(cache)){ lioUse_(tract,cache); twUpgrade_(tract,cache); return; }
     if(isOffline()){
       if(cache){ lioUse_(tract,cache); lioStatus_(`Showing the copy saved ${esc(lioWhen_(cache.at))}. No signal to fetch more.`); }
       else lioStatus_(`No signal — the provincial layers for <b>${esc(tract)}</b> will be fetched when there is.`);
@@ -11856,7 +11856,7 @@ async function lioEnsure_(tract, force, quiet){
     lioStatus_(`Fetching the provincial layers for <b>${esc(tract)}</b>…`);
     const out={v:1, tract:tract, bbox:want, at:new Date().toISOString(), layers:{}}, failed=[], failedOpt=[];
     for(const L_ of LIO_LAYERS){
-      try{ const fc=await lioFetchLayer_(L_, want); out.layers[L_.k]={fc:{type:"FeatureCollection",features:fc.features}, n:fc.features.length, at:out.at, cut:!!fc.cut}; }
+      try{ const fc=await lioFetchLayer_(L_, want); out.layers[L_.k]={fc:{type:"FeatureCollection",features:fc.features}, n:fc.features.length, at:out.at, cut:!!fc.cut, tv:fc.tv}; }
       catch(e){ (L_.opt?failedOpt:failed).push(L_.label+": "+String(e&&e.message||e).slice(0,60));      // v416: an optional layer (woodland, towns) failing does not make the set partial
         const old=cache&&cache.layers&&cache.layers[L_.k]; if(old) out.layers[L_.k]=Object.assign({},old,{stale:true}); }
     }
@@ -11907,27 +11907,41 @@ const LIO_STYLE={
    polygon centres as points {NAME, KIND:"town"|"place"}. Fetched for a box of at least 0.5° × 0.35° (about 40 × 39 km)
    round the one asked for; direct from the phone, else through the Sheet (`towns` GET). Cached with the other
    provincial layers. Statistics Canada Open Licence. */
-const TW_SERVICE="https://geo.statcan.gc.ca/geo_wa/rest/services/2021/Cartographic_boundary_files/MapServer", TW_LAYERS=[{id:7,name:"PCNAME",kind:"town"},{id:8,name:"DPLNAME",kind:"place"}];
+/* v440 — Newmarket was missing (Chris, 2026-10-15: Puttock, in Newmarket, said "Ballantrae 12 km"). Newmarket is part of the vast
+   Toronto population centre, whose "centre" is downtown — so no Newmarket point at all. The census subdivisions (layer 9) add the
+   towns and cities by their municipal names (Newmarket, Aurora, Uxbridge…); a population centre spanning more than ~25 km
+   (Toronto) is left out, its towns coming from the subdivisions instead. TW_V marks a towns layer fetched this way. */
+const TW_SERVICE="https://geo.statcan.gc.ca/geo_wa/rest/services/2021/Cartographic_boundary_files/MapServer", TW_V=2,
+  TW_LAYERS=[{id:7,name:"PCNAME",kind:"town",maxSpan:0.25},{id:9,name:"CSDNAME",kind:"muni",extra:"CSDTYPE",types:/^(C|CY|T|TV|V|VL)$/},{id:8,name:"DPLNAME",kind:"place"}];
+const TW_RANK={town:0, muni:1, place:2};
 const TW_ATTRIB="Towns and places: Statistics Canada, 2021 Census boundary files, licensed under the Statistics Canada Open Licence.";
 function twBox_(bbox){ const cx=(bbox[0]+bbox[2])/2, cy=(bbox[1]+bbox[3])/2, w=Math.max(0.5,bbox[2]-bbox[0]), h=Math.max(0.35,bbox[3]-bbox[1]); return [+(cx-w/2).toFixed(4),+(cy-h/2).toFixed(4),+(cx+w/2).toFixed(4),+(cy+h/2).toFixed(4)]; }
 async function twLayer_(L, box){
-  const q="/"+L.id+"/query?geometry="+box.join(",")+"&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields="+L.name+"&returnGeometry=true&outSR=4326&geometryPrecision=4&maxAllowableOffset=0.002&f=geojson";
+  const q="/"+L.id+"/query?geometry="+box.join(",")+"&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields="+L.name+(L.extra?","+L.extra:"")+"&returnGeometry=true&outSR=4326&geometryPrecision=4&maxAllowableOffset=0.002&f=geojson";
   try{ const j=await rnFetchJson_(TW_SERVICE+q); if(j&&Array.isArray(j.features)) return j.features; }catch(e){}
   if(connected && propBackendOk){ const r=await new Promise(res=>jsonp_("action=towns&bbox="+box.join(",")+"&layer="+L.id, x=>res(x), 30000)); if(r&&r.ok&&Array.isArray(r.features)) return r.features; throw new Error((r&&r.error)||"the towns service did not answer"); }
   throw new Error("the towns service did not answer");
 }
+/* v440: a towns layer saved before v440 (no subdivisions) is fetched again once, quietly, when there is signal */
+async function twUpgrade_(tract, cache){ try{ const t=cache&&cache.layers&&cache.layers.towns; if((t&&t.tv>=TW_V)||isOffline()||!cache.bbox) return;
+    const fc=await twFetch_(cache.bbox); cache.layers.towns={fc:{type:"FeatureCollection",features:fc.features}, n:fc.features.length, at:new Date().toISOString(), tv:TW_V};
+    try{ await ldbPut(lioKey_(tract),cache); }catch(e){} if(propK_(propActiveTract_())===propK_(tract)) lioUse_(tract,cache); }catch(e){} }
 async function twFetch_(bbox){
   const box=twBox_(bbox), by={}; let failed=0;
-  await Promise.all(TW_LAYERS.map(async L=>{ try{ (await twLayer_(L,box)).forEach(f=>{ const nm=String((f.properties||{})[L.name]||"").trim(); if(!nm) return; const g=mmGeomParts_(f.geometry); let a=0,b=0,n=0;
-      g.polys.forEach(pg=>(pg[0]||[]).forEach(q=>{ a+=q[0]; b+=q[1]; n++; })); if(!n) return; const k=propK_(nm.replace(/\s*-\s*.*$/,"")); if(by[k]&&by[k].kind==="town") return;
-      by[k]={name:nm.replace(/\s*-\s*.*$/,""), kind:L.kind, lat:+(a/n).toFixed(5), lon:+(b/n).toFixed(5)}; }); }catch(e){ failed++; } }));
+  await Promise.all(TW_LAYERS.map(async L=>{ try{ (await twLayer_(L,box)).forEach(f=>{ const pr=f.properties||{}, nm=String(pr[L.name]||"").trim(); if(!nm) return;
+      if(L.types && !L.types.test(String(pr[L.extra]||"").trim())) return;      // v440: towns and cities only, not townships
+      const g=mmGeomParts_(f.geometry); let a=0,b=0,n=0, x0=1/0,x1=-1/0,y0=1/0,y1=-1/0;
+      g.polys.forEach(pg=>(pg[0]||[]).forEach(q=>{ a+=q[0]; b+=q[1]; n++; if(q[0]<y0)y0=q[0]; if(q[0]>y1)y1=q[0]; if(q[1]<x0)x0=q[1]; if(q[1]>x1)x1=q[1]; })); if(!n) return;
+      if(L.maxSpan && Math.max(x1-x0, y1-y0)>L.maxSpan) return;      // v440: a metropolis (Toronto) — its centre says nothing about where its towns are
+      const nm2=nm.replace(/\s*-\s*.*$/,"").replace(/\s*\((Part|part)[^)]*\)\s*$/,""), k=propK_(nm2); if(by[k]&&TW_RANK[by[k].kind]<=TW_RANK[L.kind]) return;
+      by[k]={name:nm2, kind:L.kind, lat:+(a/n).toFixed(5), lon:+(b/n).toFixed(5)}; }); }catch(e){ failed++; } }));
   if(failed===TW_LAYERS.length) throw new Error("towns could not be fetched");
   const feats=Object.values(by).map(t=>({type:"Feature",properties:{NAME:t.name,KIND:t.kind},geometry:{type:"Point",coordinates:[t.lon,t.lat]}}));
-  return {type:"FeatureCollection",features:feats,n:feats.length,bbox:box};
+  return {type:"FeatureCollection",features:feats,n:feats.length,bbox:box,tv:TW_V};
 }
 /* the nearest town (population centre first, else a place) to a point, with its distance in km and bearing */
 function twNearest_(fc, lat, lon){ let best=null; ((fc&&fc.features)||[]).forEach(f=>{ if(!f.geometry||f.geometry.type!=="Point") return; const q=f.geometry.coordinates, dx=(q[0]-lon)*111.32*Math.cos(lat*Math.PI/180), dy=(q[1]-lat)*111.132, d=Math.hypot(dx,dy);
-    const town=(f.properties||{}).KIND==="town"; const score=d+(town?0:15);      // a real town up to 15 km further still wins over a hamlet
+    const kd=(f.properties||{}).KIND, town=kd==="town"||kd==="muni"; const score=d+(kd==="town"?0:kd==="muni"?2:15);      // a real town up to 15 km further still wins over a hamlet; v440: a municipality's own centre counts as a town
     if(!best||score<best.score) best={name:(f.properties||{}).NAME, kind:(f.properties||{}).KIND, lat:q[1], lon:q[0], km:d, bearing:Math.atan2(dx,dy), score}; }); return best; }
 function lioToggle_(k){ lioVis[k]=!lioVis[k]; try{ STORE&&STORE.setItem("fi_liovis",JSON.stringify(lioVis)); }catch(e){} lioRender_(); }
 function lioTogglesHtml_(){
