@@ -1308,7 +1308,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-15 · v436";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-15 · v437";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -7087,11 +7087,11 @@ function tractNorm_(t){ return String(t||"").toLowerCase().replace(/&/g," and ")
 function csImportSummary_(bf, rows){ if(!rows.length) return;
   const li=(k,v)=>v&&v.length?`<div style="margin:2px 0 0 10px;color:#cfe3d2">${k}: ${esc(v.join(", "))}</div>`:"";
   const body=rows.map(r=>{ const head=r.result==="copied"?`${r.added.length} compartment${r.added.length===1?"":"s"} put on the Sheet`
-      :r.result==="added"?`${r.added.length} missing compartment${r.added.length===1?"":"s"} added — the ${r.kept} already on the Sheet unchanged`
+      :r.result==="added"?`${r.added.length} missing compartment${r.added.length===1?"":"s"} or part${r.added.length===1?"":"s"} added — the ${r.kept} already on the Sheet unchanged`
       :r.result==="nothing"?`nothing missing — the ${r.had} on the Sheet unchanged`:r.result==="error"?"could not be read: "+esc(r.err||""):"nothing could be used from the file";
     return `<div style="padding:8px 0;border-bottom:1px solid #2a4030"><div style="font:700 13px system-ui;color:#eafae8">${esc(r.tract)} <span style="font-weight:400;color:#8fae95">· ${r.inFile} in the file</span></div>`+
       `<div style="font-size:12px;color:${r.result==="error"?"#ff8a80":"#cfe3d2"}">${head}</div>`+
-      li("Added",r.result==="added"?r.added:null)+li("Already there under another name (not added)",r.covered)+li("Thinned to fit the Sheet",r.fitted)+
+      li("Added",r.result==="added"?r.added:null)+li("Already there under another name (not added)",r.covered)+li("Thinned to fit the Sheet",r.fitted)+li("Outline mended (pinched or crossing itself in the file)",r.repaired)+
       li("<span style='color:#ffd24a'>Too many corners for the Sheet even thinned (on this phone only)</span>".replace(/<[^>]+>/g,""),r.still)+
       li("Left out — the outline crosses itself or is pinched in the file",r.dropped)+(r.skippedOut?`<div style="margin:2px 0 0 10px;color:#cfe3d2">${r.skippedOut} outside the property left out</div>`:"")+`</div>`; }).join("");
   showDataSheet_("Compartments from "+(bf&&bf.name||"the file"), `<div style="font-size:12px;color:#8fae95;margin-bottom:6px">To replace a property's compartments with the file's, use Property details → Start again from the loaded file.</div>${body}<button type="button" class="btn submit" style="width:100%;margin-top:10px" onclick="closeDataSheet_()">OK</button>`); }
@@ -7429,8 +7429,9 @@ function renderBoundaries(){
     if(hp(featTract_(f))) return;      // v408: this tract's compartments are its pieces on the Sheet now
     /* v436: nor a file compartment lying on a piece of any property — its tract written differently in the file ("Udora" for
        "Udora Tract") drew it a second time over the Sheet's, which looked like a highlight */
-    try{ const g=f.geometry, r0=g.type==="Polygon"?g.coordinates[0]:g.coordinates[0][0]; const c=centroid(r0);
-      if(pointInRing(c[0],c[1],r0) && csPieceInner_(c[1],c[0])) return; }catch(e){}
+    try{ const g=f.geometry, r0=g.type==="Polygon"?g.coordinates[0]:g.coordinates[0][0]; let c=centroid(r0);
+      if(!pointInRing(c[0],c[1],r0)){ const Pj=cgProj_(r0[0][1],r0[0][0]), at=mmInside_([r0.map(q=>Pj.xy([q[1],q[0]]))]); c=at?(q=>[q[1],q[0]])(Pj.ll([at.x,at.y])):null; }      // v437: a point truly inside a bent compartment
+      if(c && csPieceInner_(c[1],c[0])) return; }catch(e){}
     if(!featTract_(f) && standField && pieceNames[propK_(f.properties?f.properties[standField]:"")]) return;   // v418
     const polys=f.geometry.type==="Polygon"?[f.geometry.coordinates]:f.geometry.coordinates;
     const name=standField?f.properties[standField]:"";
@@ -14663,6 +14664,18 @@ function csFitSheet_(pieces, P){ const fitted=[], still=[];
     for(const t of [2,4,8,16]){ csThin_(pieces, P, t, {only:[pc], lim:0.01}); if(csSheetLen_(pc)<=CS_SHEET_MAX){ ok=true; break; } }
     (ok?fitted:still).push(pc.name); });
   return {fitted, still}; }
+/* v437 — a compartment whose outline is pinched (a corner used twice), crosses itself or carries a spike in the file was left
+   out (Udora: 115b, 115d, 115f). It is mended instead: the outline is run through a polygon union, which splits it at the
+   pinch or crossing into proper shapes and drops spikes; every corner that was in the file keeps its exact position, so the
+   edges shared with neighbours still meet. Each resulting shape becomes a part of the compartment. */
+function csRepair_(pc, P){ try{ const pcX=globalThis.polygonClipping||window.polygonClipping; if(!pcX) return [];
+    const orig={}; pc.rings.forEach(r=>r.forEach(p=>{ const q=P.xy(p); orig[q[0].toFixed(3)+","+q[1].toFixed(3)]=p; }));
+    const back=q=>orig[q[0].toFixed(3)+","+q[1].toFixed(3)]||cgLL_(P.ll(q));
+    const geom=[pc.rings.map(r=>{ const X=r.map(P.xy); return X.concat([X[0]]); })];
+    const res=pcX.union(geom), out=[];
+    res.forEach(poly=>{ const rings=poly.map(r=>cgDedupe_(r.slice(0,-1).map(back))).filter(r=>r.length>=3); if(!rings.length) return;
+      const cand={id:null, name:pc.name, rings}; if(Math.abs(cgArea_(rings[0].map(P.xy)))<1) return; if(cgSound_([cand], null, P)) out.push(cand); });
+    return out; }catch(e){ return []; } }
 /* v435: the share of a piece's area already covered by the layer's pieces (0…1) */
 function csCoveredShare_(pc, have, P){ try{ const pcX=globalThis.polygonClipping||window.polygonClipping; const xy=r=>r.map(P.xy);
   const A=Math.abs(cgArea_(xy(pc.rings[0]))); if(!(A>0)||!have.length) return 0;
@@ -14711,7 +14724,8 @@ function csFromFile_(tract, o){ o=o||{};
   let thinned=0; try{ thinned=csThin_(pieces, P); }catch(e){}
   let fit={fitted:[],still:[]}; try{ fit=csFitSheet_(pieces, P); }catch(e){}      // v436
   /* 3. a ring the file left pinched or crossing itself would stop every cut and move on the layer: left out, by name */
-  const sound=[]; pieces.forEach(pc=>{ if(pc.rings.length && pc.rings[0].length>=3 && cgSound_([pc], null, P)) sound.push(pc); else dropped.push(pc.name); });
+  const sound=[], repaired=[]; pieces.forEach(pc=>{ if(pc.rings.length && pc.rings[0].length>=3 && cgSound_([pc], null, P)) { sound.push(pc); return; }
+    const fixed=csRepair_(pc, P); if(fixed.length){ fixed.forEach(f=>sound.push(f)); repaired.push(pc.name); } else dropped.push(pc.name); });      // v437: mended, not left out
   const out=sound.map(pc=>({id:null, name:pc.name, rings:pc.rings}));
   try{ islandHoles_(out.map(pc=>pc.rings)); }catch(e){}      // v410: an island piece is a hole in its host piece, so the pieces add up to the outline
   if(!out.length){ toast("None of the loaded polygons could be used"+(dropped.length?" — their outlines cross themselves or are pinched in the file: "+dropped.join(", "):""),true); return false; }
@@ -14720,9 +14734,11 @@ function csFromFile_(tract, o){ o=o||{};
      compartment is added when the layer has no compartment of its name AND it is not already covered by the layer (one
      renamed in the app is not added twice). */
   if(o.addMissing){ const have=csOf_(t), names={}; have.forEach(c=>{ names[propK_(c.name)]=1; }); if(o.report) o.report.kept=have.length;
-    let covered=[]; const add=out.filter(pc=>!names[propK_(pc.name)]).filter(pc=>{ const a=csCoveredShare_(pc, have, P); if(a>0.5){ covered.push(pc.name); return false; } return true; });
+    /* v437: a part of a compartment the layer has under that name but not in that place (115d's second part, mended) is
+       added too — a file part counts as there when the layer already covers most of it, whatever it is called there */
+    let covered=[]; const add=out.filter(pc=>{ const a=csCoveredShare_(pc, have, P); if(a>0.5){ if(!names[propK_(pc.name)]) covered.push(pc.name); return false; } return true; });
     const addNames=[...new Set(add.map(pc=>pc.name))];
-    const rep_=o.report||{}; Object.assign(rep_,{dropped:dropped.slice(), skippedOut, fitted:fit.fitted.filter(n=>add.some(pc=>pc.name===n)), still:fit.still.filter(n=>add.some(pc=>pc.name===n)), covered:[...new Set(covered)]});
+    const rep_=o.report||{}; Object.assign(rep_,{repaired:[...new Set(repaired)], dropped:dropped.slice(), skippedOut, fitted:fit.fitted.filter(n=>add.some(pc=>pc.name===n)), still:fit.still.filter(n=>add.some(pc=>pc.name===n)), covered:[...new Set(covered)]});
     if(!add.length){ rep_.result="nothing"; toast("Nothing to add: the layer of "+t+" already has every compartment in the loaded file"+(covered.length?" ("+[...new Set(covered)].join(", ")+" lie on pieces already there, under another name)":"")+".",!!covered.length); return false; }
     csCommit_(t, have.map(c=>({id:c.id, name:c.name, rings:c.rings})).concat(add), o.label||"add the missing compartments from the loaded file");
     rep_.result="added"; rep_.added=addNames; rep_.kept=have.length;
@@ -14733,12 +14749,12 @@ function csFromFile_(tract, o){ o=o||{};
       +(chk2.ok?"":chk2.over?" Some pieces overlap now — join or move corners until they fit.":""), !chk2.ok||!!dropped.length||!!covered.length);
     return true; }
   csCommit_(t, out, o.label||"start from the loaded file");
-  if(o.report) Object.assign(o.report,{result:"copied", added:[...new Set(out.map(pc=>pc.name))], dropped:dropped.slice(), skippedOut, fitted:fit.fitted, still:fit.still});
+  if(o.report) Object.assign(o.report,{result:"copied", repaired:[...new Set(repaired)], added:[...new Set(out.map(pc=>pc.name))], dropped:dropped.slice(), skippedOut, fitted:fit.fitted, still:fit.still});
   /* the file's own adjusted acres, where the compartment has no typed figure yet, so the area summary keeps them */
   try{ const have=(PROPS.comps||{})[propK_(t)]||{}, keep=[]; comps.forEach(c=>{ const rec=have[propK_(c.name)]; if(c.fAdj!=null && isFinite(+c.fAdj) && !(rec && rec.manual!=="" && rec.manual!=null) && out.some(pc=>propK_(pc.name)===propK_(c.name))) keep.push({name:c.name, manual:+c.fAdj, unit:"ac"}); });
     if(keep.length) propSaveLocal_({tract:t}, keep); }catch(e){}
   const chk=csCheck_(t), n=out.length, names=Object.keys(out.reduce((o,c)=>(o[propK_(c.name)]=1,o),{})).length, big=fit.still.slice();
-  const extra=(dropped.length?" Left out (the file's outline crosses itself or is pinched): "+dropped.join(", ")+".":"")+(skippedOut?" "+skippedOut+" polygon"+(skippedOut===1?"":"s")+" outside this property left out.":"")+(big.length?" Too many corners for the Sheet (about 1,800 at most): "+big.join(", ")+".":"");
+  const extra=(repaired.length?" Mended (pinched or crossing itself in the file): "+[...new Set(repaired)].join(", ")+".":"")+(dropped.length?" Left out (the file's outline crosses itself or is pinched): "+dropped.join(", ")+".":"")+(skippedOut?" "+skippedOut+" polygon"+(skippedOut===1?"":"s")+" outside this property left out.":"")+(big.length?" Too many corners for the Sheet (about 1,800 at most): "+big.join(", ")+".":"");
   toast(n+" piece"+(n===1?"":"s")+" ("+names+" compartment"+(names===1?"":"s")+") copied from the loaded file"+(chk.ok?"":chk.over?" — some pieces overlap; join or move corners until they fit":" — they add up to "+chk.layHa.toFixed(2)+" ha, the outline is "+chk.propHa.toFixed(2)+" ha; move the outer corners onto the outline")+"."+extra, !chk.ok||!!extra);
   return true;
 }
