@@ -1308,7 +1308,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-15 · v438";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-15 · v439";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -7038,6 +7038,10 @@ function loadBoundaries(file){
     else { toast("Use a .zip, .shp, .geojson or .json file",true); } });
 }
 /* v421 — which property is this file for? A sheet with the properties and a box for a new one. */
+/* v439: a file loaded before v421 with no tract field — its compartments were lent to every property without its own. Say whose they are. */
+function boundSetTract_(id){ const bf=(boundFiles||[]).find(f=>f.id===id); if(!bf) return;
+  boundAskTract_(bf, t=>{ if(!t) return; if(!tractField) tractField="TRACT"; (bf.features||[]).forEach(f=>{ if(featTract_(f)) return; f.properties=f.properties||{}; f.properties[tractField]=t; }); addTract(t);
+    try{ rebuildBound(); cacheBoundaries(); renderBoundaries(); renderLayerList(); }catch(e){} try{ csAutoFromFile_(bf); }catch(e){} toast((bf.name||"The file")+" is now "+t+"'s"); }); }
 function boundAskTract_(bf, then){ const n=(bf.features||[]).length, list=propTracts_(), cur=propActiveTract_();
   const opts=list.map(t=>`<option value="${esc(t)}"${propK_(t)===propK_(cur)?" selected":""}>${esc(t)}</option>`).join("");
   window._bndAskThen=then;
@@ -7133,7 +7137,7 @@ function renderLayerList(){
   if(!boundFiles.length){ c.innerHTML=""; c.style.display="none"; return; }
   c.style.display="block";
   c.innerHTML=`<div class="layer-hd">Boundary files</div>`+boundFiles.map(f=>
-    `<div class="layer-row"><span>${esc(f.name)} <small>(${f.features.length})</small></span><button type="button" onclick="removeBoundFile('${esc(f.id)}')">✕</button></div>`).join("");
+    `<div class="layer-row"><span>${esc(f.name)} <small>(${f.features.length})</small>${(f.features||[]).some(x=>!featTract_(x))?` <small style="color:#ffd24a">· no property</small>`:""}</span>${(f.features||[]).some(x=>!featTract_(x))?`<button type="button" onclick="boundSetTract_('${esc(f.id)}')" title="Which property is this file for?">🏠</button>`:""}<button type="button" onclick="removeBoundFile('${esc(f.id)}')">✕</button></div>`).join("");
 }
 /* On/off visibility for each map overlay. Layer stays loaded — this only shows/hides it.
    `sheet` is the crew layer: every plot in the Sheet. It had no switch at all before v350 — the
@@ -7432,7 +7436,7 @@ function renderBoundaries(){
        "Udora Tract") drew it a second time over the Sheet's, which looked like a highlight */
     try{ const g=f.geometry, r0=g.type==="Polygon"?g.coordinates[0]:g.coordinates[0][0]; let c=centroid(r0);
       if(!pointInRing(c[0],c[1],r0)){ const Pj=cgProj_(r0[0][1],r0[0][0]), at=mmInside_([r0.map(q=>Pj.xy([q[1],q[0]]))]); c=at?(q=>[q[1],q[0]])(Pj.ll([at.x,at.y])):null; }      // v437: a point truly inside a bent compartment
-      if(c && csPieceInner_(c[1],c[0])) return; }catch(e){}
+      const pc=c?csPieceInner_(c[1],c[0]):null; if(pc && (!only || propK_(pc.tract)===only)) return; }catch(e){}      // v439: only where that piece is drawn
     if(!featTract_(f) && standField && pieceNames[propK_(f.properties?f.properties[standField]:"")]) return;   // v418
     const polys=f.geometry.type==="Polygon"?[f.geometry.coordinates]:f.geometry.coordinates;
     const name=standField?f.properties[standField]:"";
@@ -11487,7 +11491,8 @@ function propRender_(keep){
      (b.length>1?`<button type="button" class="btn ghost" onclick="propDissolveBnd_()">⌂ Outline → one perimeter (${b.length} rings)</button>`:"")+
      (propCompsGeo_(t).length?`<button type="button" class="btn ghost" onclick="propAutoOutline_(_ppTract)">⬚ Outline from the compartments</button>`:"")+
      `<button type="button" class="btn ghost" onclick="cltipOpen_(_ppTract)">🗺 From the CLTIP viewer…</button></div>`+
-     (b.length&&p.bndAuto?`<div style="font-size:11px;color:#8fae95;margin-bottom:6px">This outline was made from the compartments and follows them when they change.</div>`:"");
+     (b.length&&p.bndAuto?`<div style="font-size:11px;color:#8fae95;margin-bottom:6px">This outline was made from the compartments and follows them when they change.</div>`:"")+
+     (()=>{ const tw=propBndTwin_(t); return tw?`<div style="font-size:12px;color:#ffd24a;margin-bottom:6px;line-height:1.45">⚠ This outline is the same as ${esc(tw)}'s. It was most likely made from a boundary file that has no tract field — that file's compartments were taken for every property without its own. If ${esc(t)} is not there, remove this outline.</div><button type="button" class="btn ghost" style="margin-bottom:6px" onclick="propClearBnd_()">✕ Remove this outline</button>`:""; })();
   if(!files.length&&!drawn.length) h+=`<div style="font-size:11px;color:#8fae95;margin-bottom:6px">Load the owner's shapefile (Layers → Load &amp; import → Stand boundaries), or draw the outline with the map's Draw tool, then pick it here.</div>`;
   // compartments
   _ppComps=propCompsGeo_(t);
@@ -11638,6 +11643,18 @@ function propDelete_(tract){ const t=String(tract||_ppTract||propActiveTract_()|
   try{ closeDataSheet_(); }catch(e){} try{ lioRender_(); renderBoundaries(); findPropFill_(); }catch(e){}
   const fileHas=(boundFiles||[]).some(bf=>(bf.features||[]).some(f=>propK_(featTract_(f))===k));
   toast("Deleted "+t+(fileHas?" — the loaded boundary file still carries its compartments; remove the file under Layers → Files if they should go too":""),true); }
+/* v439 — Puttock and Southwind Crt (Chris, 2026-10-15): choosing one showed the other — both carried the same outline, made at a
+   file load from a boundary file with no tract field, whose compartments propCompsGeo_ lends to any property without its own.
+   Outlines are made from a property's own compartments only now; an outline the same as another property's is pointed out. */
+function propBndTwin_(t){ try{ const me=propGet_(t)||{}; if(!Array.isArray(me.boundary)||!me.boundary.length) return "";
+    const P=cgProj_(me.boundary[0][0][0], me.boundary[0][0][1]), A=me.boundary.reduce((s,r)=>s+Math.abs(cgArea_(r.map(P.xy))),0); if(!(A>0)) return "";
+    const pcX=globalThis.polygonClipping||window.polygonClipping, geo=b=>b.map(r=>{ const X=r.map(P.xy); return [X.concat([X[0]])]; });
+    for(const o of propTracts_()){ if(propK_(o)===propK_(t)) continue; const p=propGet_(o)||{}; if(!Array.isArray(p.boundary)||!p.boundary.length) continue;
+      if(JSON.stringify(p.boundary)===JSON.stringify(me.boundary)) return o;
+      try{ const B=p.boundary.reduce((s,r)=>s+Math.abs(cgArea_(r.map(P.xy))),0); if(Math.abs(B-A)>A*0.05) continue;
+        const I=pcX.intersection(pcX.union.apply(null,geo(me.boundary)), pcX.union.apply(null,geo(p.boundary))); let a=0; I.forEach(pg=>pg.forEach((r,i)=>{ a+=(i?-1:1)*Math.abs(cgArea_(r.slice(0,-1))); }));
+        if(a>=A*0.95) return o; }catch(e){} }
+  }catch(e){} return ""; }
 function propClearBnd_(){ const t=_ppTract; if(!t) return; if(!confirm("Remove the property outline for "+t+"?")) return; try{ const k=propK_(t); if(PROPS.props[k]) delete PROPS.props[k].bndAuto; }catch(e){}
   propSaveLocal_({tract:t, boundary:[]}, null); propRender_(true); try{ lioRender_(); }catch(e){} }
 /* ---------- v405 — the provincial CLTIP viewer as a way to get the property outline ----------
@@ -11754,7 +11771,7 @@ function lioTried_(k,v){ const m=lioTries_(); if(v==null) delete m[k]; else m[k]
 function propExtent_(tract){
   const p=propGet_(tract); let pts=[];
   if(p&&Array.isArray(p.boundary)&&p.boundary.length) p.boundary.forEach(r=>r.forEach(q=>pts.push(q)));
-  else propCompsGeo_(tract).forEach(c=>c.polygons.forEach(pg=>(pg[0]||[]).forEach(q=>pts.push(q))));
+  else propCompsGeo_(tract).filter(c=>!c.unassigned).forEach(c=>c.polygons.forEach(pg=>(pg[0]||[]).forEach(q=>pts.push(q))));      // v439: not another property's file
   pts=pts.filter(q=>isFinite(q[0])&&isFinite(q[1])); if(!pts.length) return null;
   let w=1/0,s=1/0,e=-1/0,n=-1/0; pts.forEach(q=>{ if(q[1]<w)w=q[1]; if(q[1]>e)e=q[1]; if(q[0]<s)s=q[0]; if(q[0]>n)n=q[0]; });
   return [w,s,e,n];
@@ -13885,7 +13902,7 @@ function propOutlineFromComps_(tract){
     if(!best||r.rings.length<best.rings.length) best=Object.assign(r,{snap}); if(best.rings.length===1) break; }      // the fewest rings wins; the smallest snap on a tie
   if(best) return best;
   /* v430: compartments that overlap (or leave a ring that will not close) — the union of their outer rings */
-  try{ const rs=[]; propCompsGeo_(tract).forEach(c=>c.polygons.forEach(pg=>{ if(pg&&pg[0]&&pg[0].length>=3) rs.push(pg[0].map(q=>[+q[0],+q[1]])); }));
+  try{ const rs=[]; propCompsGeo_(tract).filter(c=>!c.unassigned).forEach(c=>c.polygons.forEach(pg=>{ if(pg&&pg[0]&&pg[0].length>=3) rs.push(pg[0].map(q=>[+q[0],+q[1]])); }));
     const d=rs.length?bndDissolveWhy_(rs):null; if(d&&d.union&&d.rings&&d.rings.length) return {rings:d.rings, why:"", union:true, snap:d.snap||0}; }catch(e){}
   if(last&&last.rings.length){ const keep=last.rings.filter((rg,i)=>i===0||!propRingThin_(rg,3)); return Object.assign(last,{rings:keep, snap:3, thinned:last.rings.length-keep.length}); }
   return last;
@@ -13893,7 +13910,7 @@ function propOutlineFromComps_(tract){
 /* a ring narrower than `w` metres on average: its area over half its perimeter */
 function propRingThin_(ring, w){ try{ const P=cgProj_(ring[0][0],ring[0][1]), X=ring.map(q=>P.xy(q)); let per=0; for(let i=0;i<X.length;i++){ const a=X[i], b=X[(i+1)%X.length]; per+=Math.hypot(a[0]-b[0],a[1]-b[1]); } const area=Math.abs(cgArea_(X)); return per>0 && area/(per/2)<w; }catch(e){ return false; } }
 function propOutlineFromComps0_(tract, SNAP){
-  const comps=propCompsGeo_(tract).filter(c=>c.polygons.length); if(!comps.length) return {rings:[], why:"no compartments"};
+  const comps=propCompsGeo_(tract).filter(c=>c.polygons.length&&!c.unassigned); if(!comps.length) return {rings:[], why:"no compartments of its own"};      // v439: never a file's untagged compartments
   let rings0=[]; comps.forEach(c=>c.polygons.forEach(pg=>{ const r=(pg[0]||[]).filter(q=>Array.isArray(q)&&isFinite(+q[0])&&isFinite(+q[1])).map(q=>[+q[0],+q[1]]); if(r.length>=3) rings0.push(r); }));
   if(!rings0.length) return {rings:[], why:"no polygons"};
   return outlineFromRings0_(rings0, SNAP);
