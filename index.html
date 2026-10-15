@@ -1308,7 +1308,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-14 · v430";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-14 · v432";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -11254,7 +11254,7 @@ function propSync_(then, opts){
          Pefferlaw showed its compartments when chosen and nothing at all otherwise) */
       /* v421: an outline saved as several parcels is dissolved to its perimeter (once; the dissolved one is saved back) */
       try{ Object.keys(np).forEach(k=>{ const pr=np[k]; if(!pr||!Array.isArray(pr.boundary)||pr.boundary.length<2) return; const d=bndDissolve_(pr.boundary); if(d!==pr.boundary&&d.length<pr.boundary.length){ const keep=_ppTract; _ppTract=pr.tract; try{ propBndSet_(d, "parcel lines dissolved", pr.tract); }finally{ _ppTract=keep; } } }); }catch(e){}
-      try{ if(propShapesOk){ const seen={}; Object.values(ns).forEach(c=>{ const k=propK_(c.tract); if(seen[k]) return; seen[k]=1; const pr=PROPS.props[k]; if(!pr||!(Array.isArray(pr.boundary)&&pr.boundary.length)||pr.bndAuto) propAutoOutline_(c.tract,true); }); } }catch(e){}
+      try{ if(propShapesOk){ const seen={}; Object.values(ns).forEach(c=>{ const k=propK_(c.tract); if(seen[k]) return; seen[k]=1; const pr=PROPS.props[k]; if(!pr||!(Array.isArray(pr.boundary)&&pr.boundary.length)||pr.bndAuto){ try{ propAutoOutline_(c.tract,true); }catch(e){} } }); } }catch(e){}      // v432: one tract failing no longer skips the rest
       propPersist_(); try{ mnRender_(); }catch(e){} try{ csRender_(); }catch(e){} try{ ftRender_(); }catch(e){} try{ lnRender_(); }catch(e){} try{ ovRender_(); }catch(e){} fin(true);
     });
   }, 30000);
@@ -11898,6 +11898,21 @@ function mapOnlyChip_(){ let c=$("mapOnlyChip"); const mv=$("mapView"); if(!c&&m
 function namesToggle_(){ const on=!(labelVis.ov!==false && labelVis.pts!==false); labelVis.ov=on; labelVis.pts=on; try{ STORE&&STORE.setItem("fi_labelvis",JSON.stringify(labelVis)); }catch(e){}
   try{ ovRender_(); }catch(e){} try{ ftRender_(); }catch(e){} const el=$("ovLblChk"); if(el) el.checked=on; namesBtn_(); toast(on?"Property names and points shown":"Property names and points hidden"); }
 function namesBtn_(){ const b=$("toolNames"); if(b) b.classList.toggle("on", labelVis.ov!==false && labelVis.pts!==false); }
+/* v432 — Pefferlaw showed as a dot again (Chris, 2026-10-14): a property with compartments on the phone but no saved outline
+   relied on the outline being made at a sync (pieces only) or at a file load, and one tract failing there skipped the
+   rest. The overview now draws the compartments' perimeter itself whenever there is no saved outline, and tries once
+   per session to save it as the property's outline, so the Sheet and the other phones get it too. */
+var _ovAutoC={}, _ovAutoTried={};
+function ovAutoKey_(t){ const k=propK_(t); let n=0; try{ csOf_(t).forEach(c=>c.rings.forEach(r=>n+=r.length)); }catch(e){}
+  const f=((typeof boundFiles!=="undefined"&&boundFiles)||[]).map(b=>(b.id||b.name||"")+":"+((b.features||[]).length)).join(",");
+  return k+"|"+n+"|"+f+"|"+(typeof standField!=="undefined"?standField:"")+"|"+(typeof tractField!=="undefined"?tractField:""); }
+function ovAutoOutline_(t){ const p=propGet_(t)||{}; if(Array.isArray(p.boundary)&&p.boundary.length) return [];
+  const key=ovAutoKey_(t); if(_ovAutoC[propK_(t)]&&_ovAutoC[propK_(t)].key===key) return _ovAutoC[propK_(t)].rings;
+  let rings=[]; try{ if(!propCompsGeo_(t).some(c=>!c.unassigned&&(c.polygons||[]).some(pg=>pg&&pg[0]&&pg[0].length>=3))) throw 0;      // its own compartments only — never untagged ones
+    const r=propOutlineFromComps_(t); if(r&&r.rings&&r.rings.length) rings=bndShow_(t,r.rings).filter(rg=>rg&&rg.length>=3); }catch(e){ rings=[]; }
+  _ovAutoC[propK_(t)]={key,rings}; return rings; }
+function ovAutoSave_(t){ const k=propK_(t); if(_ovAutoTried[k]) return; _ovAutoTried[k]=1;
+  setTimeout(()=>{ try{ propAutoOutline_(t,true); }catch(e){} },0); }
 function ovRender_(){
   if(typeof fmap==="undefined"||!fmap||!window.L) return;
   if(!ovLayer){ try{ ovLayer=L.layerGroup().addTo(fmap); ovLabelLayer=L.layerGroup().addTo(fmap); fmap.on("moveend zoomend",ovLabels_); }catch(e){ return; } }
@@ -11908,6 +11923,10 @@ function ovRender_(){
     if(Array.isArray(p.boundary)&&p.boundary.length){ bndShow_(t,p.boundary).forEach(r=>{ if(!r||r.length<3) return;      /* v430: the perimeter */
         const pg=L.polygon(r.map(q=>[+q[0],+q[1]]),{color:MAP_STYLE.propColor,weight:MAP_STYLE.propWidth,opacity:1,fill:true,fillColor:MAP_STYLE.propColor,fillOpacity:0,smoothFactor:1.5,bubblingMouseEvents:false});      // v422: the same for every property — the chosen one is not highlighted
         pg.on("click",()=>{ if(!mapDetail_()||!isA) propPickActive_(t); }); pg.addTo(ovLayer); }); }
+    else if(ovAutoOutline_(t).length){ ovAutoOutline_(t).forEach(r=>{      /* v432: no saved outline, but compartments on the phone — draw their perimeter (and save it once) */
+        const pg=L.polygon(r.map(q=>[+q[0],+q[1]]),{color:MAP_STYLE.propColor,weight:MAP_STYLE.propWidth,opacity:1,fill:true,fillColor:MAP_STYLE.propColor,fillOpacity:0,smoothFactor:1.5,bubblingMouseEvents:false});
+        pg.on("click",()=>{ if(!mapDetail_()||!isA) propPickActive_(t); }); pg.addTo(ovLayer); });
+      ovAutoSave_(t); }
     else { if(!namesOn) return; const e=ovExtOf_(t); if(!e) return; const c=[(e[1]+e[3])/2,(e[0]+e[2])/2];      // v406: the dot goes with the name
       const m=L.circleMarker(c,{radius:7,color:"#c62828",weight:2,fillColor:"#fff",fillOpacity:.9,bubblingMouseEvents:false}); m.on("click",()=>propPickActive_(t)); m.addTo(ovLayer); } });
   ovLabels_();
@@ -11921,7 +11940,7 @@ function ovLabels_(){
      property shown in detail, whose compartments carry their own labels, drops its name */
   const detail=mapDetail_(), active=propK_(propActiveTract_());
   const b=fmap.getBounds(); let n=0;
-  propTracts_().forEach(t=>{ if(n>=OV_LABEL_MAX||!mapOnlyIs_(t)) return; const p=propGet_(t)||{}, hasOutline=Array.isArray(p.boundary)&&p.boundary.length>0;
+  propTracts_().forEach(t=>{ if(n>=OV_LABEL_MAX||!mapOnlyIs_(t)) return; const p=propGet_(t)||{}, hasOutline=(Array.isArray(p.boundary)&&p.boundary.length>0)||ovAutoOutline_(t).length>0;
     if(detail && hasOutline && propK_(t)===active) return;
     const e=ovExtOf_(t); if(!e) return; const c=[(e[1]+e[3])/2,(e[0]+e[2])/2]; if(!b.contains(c)) return; n++;
     L.marker(c,{interactive:false,keyboard:false,icon:L.divIcon({className:"ov-lbl",html:`<span style="font:700 11px system-ui;color:#fff;background:rgba(198,40,40,.85);padding:2px 6px;border-radius:9px;white-space:nowrap;position:relative;left:-50%">${esc(t)}</span>`,iconSize:[0,0]})}).addTo(ovLabelLayer); });
@@ -11946,6 +11965,7 @@ function lioRender_(){
       pointToLayer:(f,ll)=>{ if(L_.k==="towns"){ const m=L.circleMarker(ll,Object.assign({radius:6},st)); try{ m.bindTooltip(String((f.properties||{}).NAME||""),{permanent:true,direction:"right",offset:[6,0],className:"town-tip"}); }catch(e){} return m; } return L.circleMarker(ll,Object.assign({radius:3},st)); }, interactive:false, pane:"lioPane"}).addTo(lioLayer); });
   const p=propGet_(t);
   if(p&&Array.isArray(p.boundary)&&p.boundary.length) bndShow_(p.tract||propActiveTract_(),p.boundary).forEach(r=>L.polygon(r,{color:MAP_STYLE.propColor,weight:MAP_STYLE.propWidth,fill:false,interactive:false}).addTo(propLineLayer));
+  else if(t) ovAutoOutline_(t).forEach(r=>L.polygon(r,{color:MAP_STYLE.propColor,weight:MAP_STYLE.propWidth,fill:false,interactive:false}).addTo(propLineLayer));      // v432
   let at=$("lioAttrib");
   if(!at){ const mv=$("mapView"); if(mv){ at=document.createElement("div"); at.id="lioAttrib";
     at.style.cssText="position:absolute;left:6px;bottom:calc(4px + env(safe-area-inset-bottom));z-index:900;font:10px system-ui;color:#fff;background:rgba(0,0,0,.45);padding:2px 5px;border-radius:4px;pointer-events:none;max-width:70%";
