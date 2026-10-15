@@ -1308,7 +1308,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-15 · v437";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-15 · v438";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -7078,6 +7078,7 @@ function csAutoFromFile_(bf){
   list.forEach(t=>{ addTract(t); const have=csOf_(t).length, rep={tract:t, inFile:cnt[propK_(t)]||0, had:have};
     try{ if(csFromFile_(t, have?{addMissing:true,report:rep,label:"added from "+(bf.name||"a file")}:{noConfirm:true,report:rep,label:"loaded from "+(bf.name||"a file")})) n++; }catch(e){ rep.result="error"; rep.err=String(e&&e.message||e); }
     rows.push(rep); });
+  try{ list.forEach(t=>{ const d=csDedupe_(t), k=Object.keys(d)[0]; if(k){ const r=rows.find(x=>propK_(x.tract)===propK_(k)); if(r) r.dupes=d[k]; } }); }catch(e){}      // v438
   try{ renderBoundaries(); }catch(e){}
   try{ csImportSummary_(bf, rows); }catch(e){}
   return n; }
@@ -7091,7 +7092,7 @@ function csImportSummary_(bf, rows){ if(!rows.length) return;
       :r.result==="nothing"?`nothing missing — the ${r.had} on the Sheet unchanged`:r.result==="error"?"could not be read: "+esc(r.err||""):"nothing could be used from the file";
     return `<div style="padding:8px 0;border-bottom:1px solid #2a4030"><div style="font:700 13px system-ui;color:#eafae8">${esc(r.tract)} <span style="font-weight:400;color:#8fae95">· ${r.inFile} in the file</span></div>`+
       `<div style="font-size:12px;color:${r.result==="error"?"#ff8a80":"#cfe3d2"}">${head}</div>`+
-      li("Added",r.result==="added"?r.added:null)+li("Already there under another name (not added)",r.covered)+li("Thinned to fit the Sheet",r.fitted)+li("Outline mended (pinched or crossing itself in the file)",r.repaired)+
+      li("Added",r.result==="added"?r.added:null)+li("Already there under another name (not added)",r.covered)+li("Thinned to fit the Sheet",r.fitted)+li("Outline mended (pinched or crossing itself in the file)",r.repaired)+(r.dupes?`<div style="margin:2px 0 0 10px;color:#cfe3d2">${r.dupes} duplicate cop${r.dupes===1?"y":"ies"} of compartments removed</div>`:"")+
       li("<span style='color:#ffd24a'>Too many corners for the Sheet even thinned (on this phone only)</span>".replace(/<[^>]+>/g,""),r.still)+
       li("Left out — the outline crosses itself or is pinched in the file",r.dropped)+(r.skippedOut?`<div style="margin:2px 0 0 10px;color:#cfe3d2">${r.skippedOut} outside the property left out</div>`:"")+`</div>`; }).join("");
   showDataSheet_("Compartments from "+(bf&&bf.name||"the file"), `<div style="font-size:12px;color:#8fae95;margin-bottom:6px">To replace a property's compartments with the file's, use Property details → Start again from the loaded file.</div>${body}<button type="button" class="btn submit" style="width:100%;margin-top:10px" onclick="closeDataSheet_()">OK</button>`); }
@@ -11298,6 +11299,7 @@ function propSync_(then, opts){
       /* v421: an outline saved as several parcels is dissolved to its perimeter (once; the dissolved one is saved back) */
       try{ Object.keys(np).forEach(k=>{ const pr=np[k]; if(!pr||!Array.isArray(pr.boundary)||pr.boundary.length<2) return; const d=bndDissolve_(pr.boundary); if(d!==pr.boundary&&d.length<pr.boundary.length){ const keep=_ppTract; _ppTract=pr.tract; try{ propBndSet_(d, "parcel lines dissolved", pr.tract); }finally{ _ppTract=keep; } } }); }catch(e){}
       try{ if(propShapesOk){ const seen={}; Object.values(ns).forEach(c=>{ const k=propK_(c.tract); if(seen[k]) return; seen[k]=1; const pr=PROPS.props[k]; if(!pr||!(Array.isArray(pr.boundary)&&pr.boundary.length)||pr.bndAuto){ try{ propAutoOutline_(c.tract,true); }catch(e){} } }); } }catch(e){}      // v432: one tract failing no longer skips the rest
+      try{ if(propShapesOk){ const d=csDedupe_(scope?r.scope:null), ks=Object.keys(d); if(ks.length) setTimeout(()=>toast("Removed duplicate compartments: "+ks.map(k=>k+" ×"+d[k]).join(", ")),1200); } }catch(e){}      // v438
       propPersist_(); try{ mnRender_(); }catch(e){} try{ csRender_(); }catch(e){} try{ ftRender_(); }catch(e){} try{ lnRender_(); }catch(e){} try{ ovRender_(); }catch(e){} fin(true);
     });
   }, tract?45000:90000);      // v436: every property's layers can take the Sheet a while to read
@@ -14664,6 +14666,25 @@ function csFitSheet_(pieces, P){ const fitted=[], still=[];
     for(const t of [2,4,8,16]){ csThin_(pieces, P, t, {only:[pc], lim:0.01}); if(csSheetLen_(pc)<=CS_SHEET_MAX){ ok=true; break; } }
     (ok?fitted:still).push(pc.name); });
   return {fitted, still}; }
+/* v438 — the same compartment more than once (Chris, 2026-10-15: Dainty's 78a — 18.54 ha on its layer, 55.62 ha in the marking
+   totals, three copies). A file loaded while the phone had not got the property's pieces from the Sheet (a sync that timed out)
+   was copied again under new ids. Pieces of one property with the same name that cover each other (95 % both ways) are one
+   compartment: the first is kept, the copies are deleted here and on the Sheet. Returns {tract: copies removed}. */
+function csDedupe_(only){ const out={}; let pcX=null; try{ pcX=globalThis.polygonClipping||window.polygonClipping; }catch(e){}
+  const byT={}; csAll_().forEach(c=>{ if(only&&propK_(c.tract)!==propK_(only)) return; (byT[propK_(c.tract)]=byT[propK_(c.tract)]||[]).push(c); });
+  Object.values(byT).forEach(list=>{ const t=list[0].tract, gone={}; const P=cgProj_(list[0].rings[0][0][0], list[0].rings[0][0][1]);
+    const sig=c=>JSON.stringify(c.rings.map(r=>r.map(cgLL_)));
+    list.sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+    for(let i=0;i<list.length;i++){ const a=list[i]; if(gone[a.id]) continue;
+      for(let j=i+1;j<list.length;j++){ const b=list[j]; if(gone[b.id]||propK_(a.name)!==propK_(b.name)) continue;
+        let same=sig(a)===sig(b);
+        if(!same){ const ba=csBox_(a), bb=csBox_(b); if(ba[0]>bb[1]||bb[0]>ba[1]||ba[2]>bb[3]||bb[2]>ba[3]) continue;
+          try{ same=csCoveredShare_(a,[b],P)>=0.95 && csCoveredShare_(b,[a],P)>=0.95; }catch(e){ same=false; } }
+        if(same) gone[b.id]=1; } }
+    const n=Object.keys(gone).length; if(!n) return;
+    csCommit_(t, list.filter(c=>!gone[c.id]).map(c=>({id:c.id, name:c.name, rings:c.rings})), "remove duplicate compartments", true);
+    out[t]=n; });
+  return out; }
 /* v437 — a compartment whose outline is pinched (a corner used twice), crosses itself or carries a spike in the file was left
    out (Udora: 115b, 115d, 115f). It is mended instead: the outline is run through a polygon union, which splits it at the
    pinch or crossing into proper shapes and drops spikes; every corner that was in the file keeps its exact position, so the
@@ -15002,8 +15023,9 @@ function csMoveCorner_(tract, key, to){
 }
 /* v420 — a piece as a feature for the compartment popup: its name is the stand, so the Analysis, Species and Marking
    views find its plots the way they do for a boundary file's compartment. */
-function csFeature_(pc){ const rec=propComp_(pc.tract,pc.name)||{}, ha=cgPieceHa_(pc.rings);
-  return {type:"Feature", __piece:pc.id, properties:{STAND:pc.name, "MFTIP class":rec.cls||"— not set —", Property:pc.tract, Area:ha.toFixed(2)+" ha · "+(ha*HA_AC).toFixed(2)+" ac"},
+function csFeature_(pc){ const rec=propComp_(pc.tract,pc.name)||{}, same=csOf_(pc.tract).filter(c=>propK_(c.name)===propK_(pc.name)), ha=same.length>1?same.reduce((t,c)=>t+cgPieceHa_(c.rings),0):cgPieceHa_(pc.rings);
+  /* v438: the compartment's area — every part of it, as the marking totals use — and how many parts */
+  return {type:"Feature", __piece:pc.id, properties:{STAND:pc.name, "MFTIP class":rec.cls||"— not set —", Property:pc.tract, Area:ha.toFixed(2)+" ha · "+(ha*HA_AC).toFixed(2)+" ac"+(same.length>1?" ("+same.length+" parts)":"")},
     geometry:{type:"Polygon", coordinates:pc.rings.map(r=>r.map(q=>[q[1],q[0]]).concat([[r[0][1],r[0][0]]]))}}; }
 function bpStandName_(f){ const p=(f&&f.properties)||{}; if(f&&f.__piece) return String(p.STAND||"").trim(); if(!standField) return ""; return String(p[standField]==null?"":p[standField]).trim(); }
 function csAttrOpen_(id){
