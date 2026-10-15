@@ -827,7 +827,7 @@
         <label style="display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:13px;color:#e8f0e6"><input type="checkbox" id="ovLblChk" checked onchange="toggleLabels('ov')" style="width:18px;height:18px"> Property names on the zoomed-out map</label>
         <button type="button" onclick="closeLayersMenu();propZoomTo_()">🔍 Zoom to this property</button>
         <button type="button" onclick="closeLayersMenu();mapOnlyClear_()">👁 Show all properties (after a Find showed only one)</button>
-        <button type="button" onclick="closeLayersMenu();toast('Fetching every property…');propSync_(function(ok){ toast(ok?'Every property is up to date on this phone':'Could not reach the Sheet',!ok); },{all:true})">⟳ Sync all properties (normally only the chosen one is fetched)</button>
+        <button type="button" onclick="closeLayersMenu();toast('Fetching every property…');propSync_(function(ok,why){ toast(ok?'Every property is up to date on this phone':propSyncWhyMsg_(why),!ok); },{all:true})">⟳ Sync all properties (normally only the chosen one is fetched)</button>
         <button type="button" onclick="closeLayersMenu();openPropSheet_()">🏠 Property details &amp; MFTIP areas</button>
         <button type="button" onclick="closeLayersMenu();cltipOpen_()">🗺 Property outline from the CLTIP viewer…</button>
         <div id="lioStatus" class="ls-muted" style="font-size:11px;line-height:1.4;padding:2px"></div>
@@ -1308,7 +1308,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-15 · v435";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-15 · v436";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -6804,12 +6804,12 @@ function initMap(){
     c.addEventListener("touchmove",e=>{ if(!p0||e.touches.length!==1) return; if(Math.hypot(e.touches[0].clientX-p0[0],e.touches[0].clientY-p0[1])>12) moved=true; },{passive:true});
     c.addEventListener("touchend",e=>{ if(!p0||moved||Date.now()-t0>500||e.changedTouches.length!==1) { p0=null; return; } const x=e.changedTouches[0].clientX, y=e.changedTouches[0].clientY, started=t0; p0=null;
       const hit=document.elementFromPoint(x,y); if(hit&&hit.closest&&hit.closest(".leaflet-marker-icon,.leaflet-popup,.map-rail,.map-chips,.map-legend,.layers-menu,#findBar,#propBar,#mapDrop")) return;   // a marker or a control handles itself
-      setTimeout(()=>{ if(_mapClickAt>=started) return; try{ const r=c.getBoundingClientRect(); mapTapHandle_(fmap.containerPointToLatLng([x-r.left,y-r.top])); }catch(err){} },450); },{passive:true}); }catch(e){}
+      setTimeout(()=>{ if(_mapClickAt>=started||_ovPickAt>=started) return; /* v436: a tap that chose a property (and zoomed) is done */ try{ const r=c.getBoundingClientRect(); mapTapHandle_(fmap.containerPointToLatLng([x-r.left,y-r.top])); }catch(err){} },450); },{passive:true}); }catch(e){}
   // Keep taps on the on-map controls from also being treated as map clicks (which in draw modes would drop a stray point).
   try{ ["measureBar","routeBar","polyBar","mapDrop","layersMenu","findBar","propBar"].forEach(id=>{ const el=$(id); if(el){ L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); } });
     const sc=document.querySelector(".layers-scroll"); if(sc){ L.DomEvent.disableClickPropagation(sc); L.DomEvent.disableScrollPropagation(sc); }
     const rail=document.querySelector(".map-rail"); if(rail) L.DomEvent.disableClickPropagation(rail); }catch(e){}
-  fmap.on("moveend zoomend",()=>{ try{ renderLabels(); renderRefLabels(); }catch(e){}
+  fmap.on("moveend zoomend",()=>{ try{ renderLabels(); renderRefLabels(); }catch(e){} try{ if(!_csEd&&mapDetail_()) csRenderSoon_(); }catch(e){}
     try{ schedulePinRender_(); }catch(e){} });   // rebuild the on-screen pin subset for the new view
   $("boundInput").addEventListener("change",e=>{ const f=e.target.files[0]; e.target.value=""; if(f) loadBoundaries(f); });
   $("pointsInput").addEventListener("change",e=>{ const f=e.target.files[0]; e.target.value=""; if(f) importRefFile(f); });
@@ -7056,21 +7056,45 @@ function boundAskDone_(cancel){ const then=window._bndAskThen; window._bndAskThe
 function csAutoFromFile_(bf){
   if(typeof csFromFile_!=="function") return 0;
   if(!standField){ toast("Pick the Stand name field under Layers — then the compartments can go to the Sheet (Property details → Start from the loaded file)",true); return 0; }
+  /* v436 — a property name in the file written differently from the property's ("Udora" / "Udora Tract", "Bendor & Graves" /
+     "Bendor and Graves") is asked about once and, if it is the same property, the file's compartments are filed under it.
+     Before, they went to a new property of the file's spelling and the real one kept its gaps (Chris, 2026-10-15). */
+  try{ const known=t=>!!((PROPS.props||{})[propK_(t)] || csOf_(t).length || (typeof saved!=="undefined"&&(saved||[]).some(p=>p&&propK_(p.TRACT)===propK_(t))));      // a property in its own right, not only named in a loaded file
+    const props=propTracts_().filter(known), have={}; props.forEach(p=>{ have[propK_(p)]=p; }); const asked={};
+    (bf&&bf.features||[]).forEach(f=>{ const t=featTract_(f); if(!t||have[propK_(t)]||asked[propK_(t)]!==undefined) return;
+      const m=props.filter(p=>tractNorm_(p)===tractNorm_(t)); asked[propK_(t)]=null;
+      if(m.length===1 && confirm("The file calls a property “"+t+"”. Is that “"+m[0]+"”?\n\nOK puts its compartments under "+m[0]+" · Cancel makes a new property “"+t+"”.")) asked[propK_(t)]=m[0]; });
+    if(Object.values(asked).some(Boolean)){ (bf.features||[]).forEach(f=>{ const t=featTract_(f), to=t&&asked[propK_(t)]; if(!to) return;
+        if(tractField&&f.properties&&f.properties[tractField]!=null&&String(f.properties[tractField]).trim()!=="") f.properties[tractField]=to; else manualTract=to; });
+      try{ rebuildBound(); cacheBoundaries(); }catch(e){} } }catch(e){}
   const tr={}, cnt={}; (bf&&bf.features||[]).forEach(f=>{ const t=featTract_(f); if(!t) return; tr[propK_(t)]=t; cnt[propK_(t)]=(cnt[propK_(t)]||0)+1; });
   let list=Object.values(tr);
   if(!list.length){ const a=propActiveTract_(); if(a){ list=[a]; cnt[propK_(a)]=(bf.features||[]).length; } }
   if(!list.length){ toast("Set a Tract name under Layers, or pick the property shown on the map, so these compartments can go to the Sheet",true); return 0; }
-  let n=0, kept=[];
-  list.forEach(t=>{ addTract(t); const have=csOf_(t).length;
-    /* v435: first offer to add only the compartments the Sheet is missing — the pieces there stay as they are */
-    if(have){ const miss=csMissingFromFile_(t);
-      if(miss.length && confirm(t+" already has "+have+" compartment piece"+(have===1?"":"s")+" on the Sheet. The loaded file has "+miss.length+" compartment"+(miss.length===1?"":"s")+" it doesn't: "+miss.slice(0,12).join(", ")+(miss.length>12?" …":"")+".\n\nAdd just "+(miss.length===1?"that one":"those "+miss.length)+"? The pieces on the Sheet stay exactly as they are.\n\nOK adds them · Cancel for the other choices")){
-        if(csFromFile_(t,{addMissing:true,label:"added from "+(bf.name||"a file")})) n++; return; } }
-    if(have && !confirm(t+" already has "+have+" compartment piece"+(have===1?"":"s")+" on the Sheet.\n\nRebuild ALL of them from the loaded files (this one has "+(cnt[propK_(t)]||0)+" compartment"+(cnt[propK_(t)]===1?"":"s")+" for it)? Cuts, joins and renames made in the app since are replaced (Undo on this phone brings them back). Cancel keeps the ones on the Sheet.")){ kept.push(t); return; }
-    if(csFromFile_(t,{noConfirm:true,label:"loaded from "+(bf.name||"a file")})) n++; });
+  /* v436: no questions per property — a property with no compartments on the Sheet gets the file's; one that has some gets only
+     those it is missing (nothing already there is changed). Replacing a whole layer from a file is Property details → Start again
+     from the loaded file. Then one summary of what happened to every property in the file. */
+  let n=0; const rows=[];
+  list.forEach(t=>{ addTract(t); const have=csOf_(t).length, rep={tract:t, inFile:cnt[propK_(t)]||0, had:have};
+    try{ if(csFromFile_(t, have?{addMissing:true,report:rep,label:"added from "+(bf.name||"a file")}:{noConfirm:true,report:rep,label:"loaded from "+(bf.name||"a file")})) n++; }catch(e){ rep.result="error"; rep.err=String(e&&e.message||e); }
+    rows.push(rep); });
   try{ renderBoundaries(); }catch(e){}
-  if(kept.length) toast("Kept the Sheet's pieces for "+kept.join(", ")+" — the file's compartments for "+(kept.length===1?"it":"them")+" are on this phone only");
+  try{ csImportSummary_(bf, rows); }catch(e){}
   return n; }
+/* v436: a property name reduced to its letters and digits, without "tract"/"property", "&" read as "and" */
+function tractNorm_(t){ return String(t||"").toLowerCase().replace(/&/g," and ").replace(/\b(the|tract|property|woodlot|farm)\b/g," ").replace(/[^a-z0-9]+/g,""); }
+/* v436: what the file did to each property, in one sheet (the toasts went by one on top of another) */
+function csImportSummary_(bf, rows){ if(!rows.length) return;
+  const li=(k,v)=>v&&v.length?`<div style="margin:2px 0 0 10px;color:#cfe3d2">${k}: ${esc(v.join(", "))}</div>`:"";
+  const body=rows.map(r=>{ const head=r.result==="copied"?`${r.added.length} compartment${r.added.length===1?"":"s"} put on the Sheet`
+      :r.result==="added"?`${r.added.length} missing compartment${r.added.length===1?"":"s"} added — the ${r.kept} already on the Sheet unchanged`
+      :r.result==="nothing"?`nothing missing — the ${r.had} on the Sheet unchanged`:r.result==="error"?"could not be read: "+esc(r.err||""):"nothing could be used from the file";
+    return `<div style="padding:8px 0;border-bottom:1px solid #2a4030"><div style="font:700 13px system-ui;color:#eafae8">${esc(r.tract)} <span style="font-weight:400;color:#8fae95">· ${r.inFile} in the file</span></div>`+
+      `<div style="font-size:12px;color:${r.result==="error"?"#ff8a80":"#cfe3d2"}">${head}</div>`+
+      li("Added",r.result==="added"?r.added:null)+li("Already there under another name (not added)",r.covered)+li("Thinned to fit the Sheet",r.fitted)+
+      li("<span style='color:#ffd24a'>Too many corners for the Sheet even thinned (on this phone only)</span>".replace(/<[^>]+>/g,""),r.still)+
+      li("Left out — the outline crosses itself or is pinched in the file",r.dropped)+(r.skippedOut?`<div style="margin:2px 0 0 10px;color:#cfe3d2">${r.skippedOut} outside the property left out</div>`:"")+`</div>`; }).join("");
+  showDataSheet_("Compartments from "+(bf&&bf.name||"the file"), `<div style="font-size:12px;color:#8fae95;margin-bottom:6px">To replace a property's compartments with the file's, use Property details → Start again from the loaded file.</div>${body}<button type="button" class="btn submit" style="width:100%;margin-top:10px" onclick="closeDataSheet_()">OK</button>`); }
 /* a drawn area becomes a piece of the shown property's compartment layer the moment it is finished */
 function csFromDrawn_(pg){
   const t=String((pg&&pg.tract)||propActiveTract_()||"").trim(); if(!t||!pg||!pg.pts||pg.pts.length<3) return false;
@@ -7403,6 +7427,10 @@ function renderBoundaries(){
   BOUND.features.forEach(f=>{
     if(only){ const ft=propK_(featTract_(f)); if(ft?ft!==only:tagged) return; }
     if(hp(featTract_(f))) return;      // v408: this tract's compartments are its pieces on the Sheet now
+    /* v436: nor a file compartment lying on a piece of any property — its tract written differently in the file ("Udora" for
+       "Udora Tract") drew it a second time over the Sheet's, which looked like a highlight */
+    try{ const g=f.geometry, r0=g.type==="Polygon"?g.coordinates[0]:g.coordinates[0][0]; const c=centroid(r0);
+      if(pointInRing(c[0],c[1],r0) && csPieceInner_(c[1],c[0])) return; }catch(e){}
     if(!featTract_(f) && standField && pieceNames[propK_(f.properties?f.properties[standField]:"")]) return;   // v418
     const polys=f.geometry.type==="Polygon"?[f.geometry.coordinates]:f.geometry.coordinates;
     const name=standField?f.properties[standField]:"";
@@ -7628,14 +7656,14 @@ function rptMail_(id){
 }
 /* One JSONP helper — this pattern was written out longhand at a dozen call sites. */
 function jsonp_(query, done, ms){
-  if(!connected || isOffline()){ done(null); return; }
+  if(!connected || isOffline()){ done(null,"offline"); return; }
   const cb="__j"+Date.now()+Math.floor(Math.random()*999), sep=SCRIPT_URL.includes("?")?"&":"?";
   const sc=document.createElement("script");
   let settled=false;
   const clean=()=>{ try{ delete window[cb]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc); };
   window[cb]=r=>{ if(settled) return; settled=true; clean(); done(r); };
-  sc.onerror=()=>{ if(settled) return; settled=true; clean(); done(null); };
-  setTimeout(()=>{ if(!settled){ settled=true; clean(); done(null); } }, ms||30000);
+  sc.onerror=()=>{ if(settled) return; settled=true; clean(); done(null,"error"); };      // v436: why it failed, for the message
+  setTimeout(()=>{ if(!settled){ settled=true; clean(); done(null,"timeout"); } }, ms||30000);
   sc.src=SCRIPT_URL+sep+tokQ_()+query+"&callback="+cb;
   document.body.appendChild(sc);
 }
@@ -7871,9 +7899,11 @@ function standAt(lon,lat){
 }
 // Stand ID for a point: the loaded boundary file wins; then the compartments on the Sheet (v433); then a hand-drawn area polygon.
 function standOrPolyAt_(lat,lon){ let s=standAt(lon,lat); if(!s){ const pc=csPieceInner_(lat,lon); if(pc) s=pc.name; } if(!s){ const h=pointInPolys_(lat,lon); if(h) s=h.name; } return s||null; }
+const _csBoxC=new WeakMap(); function csBox_(c){ let b=_csBoxC.get(c); if(b&&b.r===c.rings) return b.b; let a=1/0,z=-1/0,w=1/0,e=-1/0; (c.rings[0]||[]).forEach(p=>{ if(p[0]<a)a=p[0]; if(p[0]>z)z=p[0]; if(p[1]<w)w=p[1]; if(p[1]>e)e=p[1]; }); b=[a,z,w,e]; _csBoxC.set(c,{r:c.rings,b}); return b; }
 /* v433: the smallest compartment piece (any property's, the chosen one's first) the point is in */
 function csPieceInner_(lat,lon,list){ try{ const P=cgProj_(lat,lon), a=propK_(propActiveTract_()); let best=null, bestA=1/0, bestMine=false;
-  (list||csAll_()).forEach(c=>{ if(!c||!c.rings||!c.rings.length) return; const xy=c.rings.map(r=>r.map(P.xy)); if(!cgInRings_(0,0,xy)) return;
+  (list||csAll_()).forEach(c=>{ if(!c||!c.rings||!c.rings.length) return; const bb=csBox_(c); if(lat<bb[0]||lat>bb[1]||lon<bb[2]||lon>bb[3]) return;      // v436: quick box test first
+    const xy=c.rings.map(r=>r.map(P.xy)); if(!cgInRings_(0,0,xy)) return;
     const ar=Math.abs(cgArea_(xy[0]))-xy.slice(1).reduce((t,r)=>t+Math.abs(cgArea_(r)),0), mine=!list&&propK_(c.tract)===a;
     if((mine&&!bestMine)||((mine===bestMine)&&ar<bestA)){ best=c; bestA=ar; bestMine=mine; } }); return best; }catch(e){ return null; } }
 // AGE for a point: read the chosen age attribute from whichever loaded compartment polygon contains it.
@@ -11172,14 +11202,16 @@ let _propSyncedAll=false;
 function propSync_(then, opts){
   opts=opts||{};
   if(!_propLoaded){ _propReady.then(()=>propSync_(then,opts)); return; }
-  const fin=ok=>{ _propSyncing=false; if(then) try{ then(ok); }catch(e){} };
-  if(_propSyncing){ if(then) setTimeout(()=>then(false),0); return; }
-  if(!connected||isOffline()){ if(then) then(false); return; }
+  /* v436 — a sync asked for while another is running waits for it and then runs (Chris, 2026-10-15: "Sync all properties"
+     sometimes said it could not reach the Sheet — it had only found the map's own sync still going). The answer says why. */
+  const fin=(ok,why)=>{ _propSyncing=false; _propSyncWhy=ok?"":(why||"answer"); if(then) try{ then(ok,_propSyncWhy); }catch(e){} const nx=_propSyncNext.splice(0); nx.forEach(f=>{ try{ f(); }catch(e){} }); };
+  if(_propSyncing){ _propSyncNext.push(()=>propSync_(then,opts)); return; }
+  if(!connected||isOffline()){ if(then) then(false,"offline"); return; }
   _propSyncing=true;
   const tract=opts.all?"":(opts.tract||propActiveTract_()||"");
   const getAt=Date.now(); _propGetAt=getAt;
-  jsonp_("action=propget"+(tract?"&tract="+encodeURIComponent(tract):""), r=>{
-    if(!r||r.ok!==true||!Array.isArray(r.props)){ fin(false); return; }     // a backend older than v380 says nothing
+  jsonp_("action=propget"+(tract?"&tract="+encodeURIComponent(tract):""), (r,why)=>{
+    if(!r||r.ok!==true||!Array.isArray(r.props)){ fin(false, r?"answer":(why||"error")); return; }     // a backend older than v380 says nothing
     const scope=propK_(r.scope||""); if(!scope) _propSyncedAll=true;         // what the reply covers: one property, or everything
     const other=rec=>scope && propK_(rec&&rec.tract)!==scope;                  // a record of another property: kept as the phone has it
     propBackendOk=true;
@@ -11267,8 +11299,12 @@ function propSync_(then, opts){
       try{ if(propShapesOk){ const seen={}; Object.values(ns).forEach(c=>{ const k=propK_(c.tract); if(seen[k]) return; seen[k]=1; const pr=PROPS.props[k]; if(!pr||!(Array.isArray(pr.boundary)&&pr.boundary.length)||pr.bndAuto){ try{ propAutoOutline_(c.tract,true); }catch(e){} } }); } }catch(e){}      // v432: one tract failing no longer skips the rest
       propPersist_(); try{ mnRender_(); }catch(e){} try{ csRender_(); }catch(e){} try{ ftRender_(); }catch(e){} try{ lnRender_(); }catch(e){} try{ ovRender_(); }catch(e){} fin(true);
     });
-  }, 30000);
+  }, tract?45000:90000);      // v436: every property's layers can take the Sheet a while to read
 }
+let _propSyncNext=[], _propSyncWhy="";
+/* v436: what to say when a sync did not get through */
+function propSyncWhyMsg_(why){ return why==="offline"?"No connection — the phone is offline":why==="timeout"?"The Sheet took too long to answer. If this keeps happening, run FRI Tools → 🧹 Fix & tidy → Remove blank rows from the map tabs on the Sheet, then try again"
+  :why==="answer"?"The Sheet answered but not with the properties — is the latest Code.gs deployed?":"Could not reach the Sheet — check the connection and try again"; }
 function propHasWaiting_(){ return Object.keys(propDirty.props).length>0 || Object.keys(propDirty.comps).length>0 || Object.keys(propDirty.notes||{}).length>0 || (propDirty.noteDel||[]).length>0 || Object.keys(propDirty.shapes||{}).length>0 || (propDirty.shapeDel||[]).length>0 || Object.keys(propDirty.feats||{}).length>0 || (propDirty.featDel||[]).length>0 || Object.keys(propDirty.lines||{}).length>0 || (propDirty.lineDel||[]).length>0 || Object.keys(propDirty.acts||{}).length>0 || (propDirty.actDel||[]).length>0; }
 /* One push at a time: a second one waits for the first, so a delete cannot overtake the save of the
    same note still on its way. */
@@ -11932,11 +11968,11 @@ function ovRender_(){
   const namesOn=!(typeof labelVis!=="undefined"&&labelVis.ov===false);
   propTracts_().forEach(t=>{ const p=propGet_(t)||{}, isA=propK_(t)===active; if(!mapOnlyIs_(t)) return;      // v406: one property only
     if(Array.isArray(p.boundary)&&p.boundary.length){ bndShow_(t,p.boundary).forEach(r=>{ if(!r||r.length<3) return;      /* v430: the perimeter */
-        const pg=L.polygon(r.map(q=>[+q[0],+q[1]]),{color:MAP_STYLE.propColor,weight:MAP_STYLE.propWidth,opacity:1,fill:true,fillColor:MAP_STYLE.propColor,fillOpacity:0,smoothFactor:1.5,bubblingMouseEvents:false});      // v422: the same for every property — the chosen one is not highlighted
-        pg.on("click",()=>{ if(!mapDetail_()||!isA) propPickActive_(t); }); pg.addTo(ovLayer); }); }
+        const pg=L.polygon(r.map(q=>[+q[0],+q[1]]),{color:MAP_STYLE.propColor,weight:MAP_STYLE.propWidth,opacity:1,fill:true,fillColor:MAP_STYLE.propColor,fillOpacity:0,smoothFactor:1.5,bubblingMouseEvents:false,interactive:!mapDetail_()});      // v436: a tap zoomed in goes to the compartment under it; v422: the same for every property — the chosen one is not highlighted
+        pg.on("click",()=>{ _ovPickAt=Date.now(); if(!mapDetail_()||!isA) propPickActive_(t); }); pg.addTo(ovLayer); }); }
     else if(ovAutoOutline_(t).length){ ovAutoOutline_(t).forEach(r=>{      /* v432: no saved outline, but compartments on the phone — draw their perimeter (and save it once) */
-        const pg=L.polygon(r.map(q=>[+q[0],+q[1]]),{color:MAP_STYLE.propColor,weight:MAP_STYLE.propWidth,opacity:1,fill:true,fillColor:MAP_STYLE.propColor,fillOpacity:0,smoothFactor:1.5,bubblingMouseEvents:false});
-        pg.on("click",()=>{ if(!mapDetail_()||!isA) propPickActive_(t); }); pg.addTo(ovLayer); });
+        const pg=L.polygon(r.map(q=>[+q[0],+q[1]]),{color:MAP_STYLE.propColor,weight:MAP_STYLE.propWidth,opacity:1,fill:true,fillColor:MAP_STYLE.propColor,fillOpacity:0,smoothFactor:1.5,bubblingMouseEvents:false,interactive:!mapDetail_()});
+        pg.on("click",()=>{ _ovPickAt=Date.now(); if(!mapDetail_()||!isA) propPickActive_(t); }); pg.addTo(ovLayer); });
       ovAutoSave_(t); }
     else { if(!namesOn) return; const e=ovExtOf_(t); if(!e) return; const c=[(e[1]+e[3])/2,(e[0]+e[2])/2];      // v406: the dot goes with the name
       const m=L.circleMarker(c,{radius:7,color:"#c62828",weight:2,fillColor:"#fff",fillOpacity:.9,bubblingMouseEvents:false}); m.on("click",()=>propPickActive_(t)); m.addTo(ovLayer); } });
@@ -11958,6 +11994,7 @@ function ovLabels_(){
 }
 /* crossing the detail zoom redraws the chosen property's layers (they draw nothing below it) */
 function mapZoomDetail_(){ const d=mapDetail_(); if(_ovDetail===d) return; _ovDetail=d;
+  try{ ovRender_(); }catch(e){}      // v436: the outlines take taps only zoomed out
   try{ mnRender_(); }catch(e){} try{ csRender_(); }catch(e){} try{ ftRender_(); }catch(e){} try{ lnRender_(); }catch(e){} try{ lioLayerVis_(); }catch(e){} try{ ovLabels_(); }catch(e){} }
 function lioLayerVis_(){ if(!lioLayer||!fmap) return; const d=mapDetail_(); try{ const pane=fmap.getPane("lioPane"); if(pane) pane.style.display=d?"":"none"; }catch(e){} }
 function lioRender_(){
@@ -14600,15 +14637,15 @@ const CS_SNAP_M=0.25;
    that two rings share (a common edge, a T-junction let in) is always kept, so neighbours stay fitted. Douglas–Peucker
    between the kept corners. */
 const CS_THIN_M=1.0;
-function csThin_(pieces, P, tol){ tol=tol||CS_THIN_M; const cnt={}; pieces.forEach(pc=>pc.rings.forEach(r=>r.forEach(p=>{ const k=cgKey_(p); cnt[k]=(cnt[k]||0)+1; })));
+function csThin_(pieces, P, tol, opt){ tol=tol||CS_THIN_M; opt=opt||{}; const cnt={}; pieces.forEach(pc=>pc.rings.forEach(r=>r.forEach(p=>{ const k=cgKey_(p); cnt[k]=(cnt[k]||0)+1; })));
   let dropped=0;
   /* a corner a metre off a long edge still sweeps a strip (1 m × 170 m is 170 m²), so each ring is thinned only as far
      as its area holds within 0.05 % (or 1 m²): the tolerance is halved until it does, and a ring that never does
      keeps every corner */
-  pieces.forEach(pc=>{ pc.rings=pc.rings.map(r=>{ const n=r.length; if(n<=4) return r; const X=r.map(P.xy), forced=[]; r.forEach((p,i)=>{ if(cnt[cgKey_(p)]>1) forced.push(i); });
+  pieces.forEach(pc=>{ if(opt.only&&opt.only.indexOf(pc)<0) return; pc.rings=pc.rings.map(r=>{ const n=r.length; if(n<=4) return r; const X=r.map(P.xy), forced=[]; r.forEach((p,i)=>{ if(cnt[cgKey_(p)]>1) forced.push(i); });
       const s=forced.length?forced[0]:0, idx=i=>(s+i)%n, RX=[]; for(let i=0;i<n;i++) RX.push(X[idx(i)]); RX.push(X[s]);
       const F=[0]; forced.forEach(i=>{ const j=(i-s+n)%n; if(j>0) F.push(j); }); F.sort((a,b)=>a-b); F.push(n);
-      const A0=Math.abs(cgArea_(X)), lim=Math.max(1, A0*0.0005);
+      const A0=Math.abs(cgArea_(X)), lim=opt.lim?Math.max(1, A0*opt.lim):Math.max(1, A0*0.0005);
       for(let t=tol; t>=tol/16; t/=2){ const keep={}; for(let a=0;a<F.length-1;a++){ keep[F[a]]=1; const out=[]; dp2(RX,F[a],F[a+1],out,t); out.forEach(i=>keep[i]=1); }
         const out=[], OX=[]; for(let i=0;i<n;i++) if(keep[i]){ out.push(r[idx(i)]); OX.push(X[idx(i)]); }
         if(out.length<3) continue; if(Math.abs(Math.abs(cgArea_(OX))-A0)<=lim){ dropped+=n-out.length; return out; } }
@@ -14616,6 +14653,16 @@ function csThin_(pieces, P, tol){ tol=tol||CS_THIN_M; const cnt={}; pieces.forEa
   function dp2(X,i,j,out,t){ if(j-i<2) return; let best=-1,bd=-1; for(let m=i+1;m<j;m++){ const d=cgSegD_(X[m][0],X[m][1],X[i],X[j]).d; if(d>bd){ bd=d; best=m; } }
     if(bd>t){ dp2(X,i,best,out,t); out.push(best); dp2(X,best,j,out,t); } }
   return dropped; }
+/* v436 — a compartment with more corners than a Sheet cell holds (about 1,800) was refused by the Sheet and stayed on the phone
+   only — Udora's missing compartments. Such a piece is thinned further, a step at a time (2 m … 16 m, its area held within 1 %),
+   corners shared with its neighbours always kept, until it fits. Returns the names thinned and any still too big. */
+const CS_SHEET_MAX=44000;
+function csSheetLen_(pc){ return JSON.stringify(pc.rings.map(r=>r.map(cgLL_))).length; }
+function csFitSheet_(pieces, P){ const fitted=[], still=[];
+  pieces.forEach(pc=>{ if(csSheetLen_(pc)<=CS_SHEET_MAX) return; let ok=false;
+    for(const t of [2,4,8,16]){ csThin_(pieces, P, t, {only:[pc], lim:0.01}); if(csSheetLen_(pc)<=CS_SHEET_MAX){ ok=true; break; } }
+    (ok?fitted:still).push(pc.name); });
+  return {fitted, still}; }
 /* v435: the share of a piece's area already covered by the layer's pieces (0…1) */
 function csCoveredShare_(pc, have, P){ try{ const pcX=globalThis.polygonClipping||window.polygonClipping; const xy=r=>r.map(P.xy);
   const A=Math.abs(cgArea_(xy(pc.rings[0]))); if(!(A>0)||!have.length) return 0;
@@ -14662,6 +14709,7 @@ function csFromFile_(tract, o){ o=o||{};
       return cgDedupe_(out); }).filter(r=>r.length>=3); });
   /* v408: thinned to about a metre, shared corners kept */
   let thinned=0; try{ thinned=csThin_(pieces, P); }catch(e){}
+  let fit={fitted:[],still:[]}; try{ fit=csFitSheet_(pieces, P); }catch(e){}      // v436
   /* 3. a ring the file left pinched or crossing itself would stop every cut and move on the layer: left out, by name */
   const sound=[]; pieces.forEach(pc=>{ if(pc.rings.length && pc.rings[0].length>=3 && cgSound_([pc], null, P)) sound.push(pc); else dropped.push(pc.name); });
   const out=sound.map(pc=>({id:null, name:pc.name, rings:pc.rings}));
@@ -14671,11 +14719,13 @@ function csFromFile_(tract, o){ o=o||{};
      the whole layer would undo the cuts, joins and renames made since). The layer's pieces are kept exactly as they are; a file
      compartment is added when the layer has no compartment of its name AND it is not already covered by the layer (one
      renamed in the app is not added twice). */
-  if(o.addMissing){ const have=csOf_(t), names={}; have.forEach(c=>{ names[propK_(c.name)]=1; });
+  if(o.addMissing){ const have=csOf_(t), names={}; have.forEach(c=>{ names[propK_(c.name)]=1; }); if(o.report) o.report.kept=have.length;
     let covered=[]; const add=out.filter(pc=>!names[propK_(pc.name)]).filter(pc=>{ const a=csCoveredShare_(pc, have, P); if(a>0.5){ covered.push(pc.name); return false; } return true; });
     const addNames=[...new Set(add.map(pc=>pc.name))];
-    if(!add.length){ toast("Nothing to add: the layer of "+t+" already has every compartment in the loaded file"+(covered.length?" ("+[...new Set(covered)].join(", ")+" lie on pieces already there, under another name)":"")+".",!!covered.length); return false; }
+    const rep_=o.report||{}; Object.assign(rep_,{dropped:dropped.slice(), skippedOut, fitted:fit.fitted.filter(n=>add.some(pc=>pc.name===n)), still:fit.still.filter(n=>add.some(pc=>pc.name===n)), covered:[...new Set(covered)]});
+    if(!add.length){ rep_.result="nothing"; toast("Nothing to add: the layer of "+t+" already has every compartment in the loaded file"+(covered.length?" ("+[...new Set(covered)].join(", ")+" lie on pieces already there, under another name)":"")+".",!!covered.length); return false; }
     csCommit_(t, have.map(c=>({id:c.id, name:c.name, rings:c.rings})).concat(add), o.label||"add the missing compartments from the loaded file");
+    rep_.result="added"; rep_.added=addNames; rep_.kept=have.length;
     const chk2=csCheck_(t);
     toast("Added "+addNames.length+" compartment"+(addNames.length===1?"":"s")+" to "+t+": "+addNames.join(", ")+". The "+have.length+" piece"+(have.length===1?"":"s")+" already there are unchanged."
       +([...new Set(covered)].length?" Not added, as they lie on pieces already there under another name: "+[...new Set(covered)].join(", ")+".":"")
@@ -14683,10 +14733,11 @@ function csFromFile_(tract, o){ o=o||{};
       +(chk2.ok?"":chk2.over?" Some pieces overlap now — join or move corners until they fit.":""), !chk2.ok||!!dropped.length||!!covered.length);
     return true; }
   csCommit_(t, out, o.label||"start from the loaded file");
+  if(o.report) Object.assign(o.report,{result:"copied", added:[...new Set(out.map(pc=>pc.name))], dropped:dropped.slice(), skippedOut, fitted:fit.fitted, still:fit.still});
   /* the file's own adjusted acres, where the compartment has no typed figure yet, so the area summary keeps them */
   try{ const have=(PROPS.comps||{})[propK_(t)]||{}, keep=[]; comps.forEach(c=>{ const rec=have[propK_(c.name)]; if(c.fAdj!=null && isFinite(+c.fAdj) && !(rec && rec.manual!=="" && rec.manual!=null) && out.some(pc=>propK_(pc.name)===propK_(c.name))) keep.push({name:c.name, manual:+c.fAdj, unit:"ac"}); });
     if(keep.length) propSaveLocal_({tract:t}, keep); }catch(e){}
-  const chk=csCheck_(t), n=out.length, names=Object.keys(out.reduce((o,c)=>(o[propK_(c.name)]=1,o),{})).length, big=out.filter(pc=>JSON.stringify(pc.rings).length>45000).map(pc=>pc.name);
+  const chk=csCheck_(t), n=out.length, names=Object.keys(out.reduce((o,c)=>(o[propK_(c.name)]=1,o),{})).length, big=fit.still.slice();
   const extra=(dropped.length?" Left out (the file's outline crosses itself or is pinched): "+dropped.join(", ")+".":"")+(skippedOut?" "+skippedOut+" polygon"+(skippedOut===1?"":"s")+" outside this property left out.":"")+(big.length?" Too many corners for the Sheet (about 1,800 at most): "+big.join(", ")+".":"");
   toast(n+" piece"+(n===1?"":"s")+" ("+names+" compartment"+(names===1?"":"s")+") copied from the loaded file"+(chk.ok?"":chk.over?" — some pieces overlap; join or move corners until they fit":" — they add up to "+chk.layHa.toFixed(2)+" ha, the outline is "+chk.propHa.toFixed(2)+" ha; move the outer corners onto the outline")+"."+extra, !chk.ok||!!extra);
   return true;
@@ -14961,17 +15012,24 @@ function csRemove_(id){ const c=(PROPS.shapes||{})[id]; if(!c) return; const ha=
   if(!confirm("Remove the piece "+c.name+" ("+ha.toFixed(2)+" ha) from "+c.tract+"? Its neighbours keep their shape, so the property outline will have a gap there until it is redrawn or they are joined. Undo is on the compartment layer bar.")) return;
   csCommit_(c.tract, csOf_(c.tract).filter(x=>x.id!==id), "removed "+c.name); closeDataSheet_(); csRender_(); toast("Removed "+c.name); }
 const CS_FILL={MFTIP:"#4caf50", CLTIP:"#1e8a3c", INELIGIBLE:"#9e9e9e", "":"#ffd24a"};
+var _ovPickAt=0; let _csRT=null; function csRenderSoon_(){ if(_csRT) clearTimeout(_csRT); _csRT=setTimeout(()=>{ _csRT=null; try{ csRender_(); }catch(e){} },120); }
 function csRender_(){
   if(typeof fmap==="undefined"||!fmap||typeof L==="undefined") return;
   if(!csLayer){ try{ csLayer=L.layerGroup().addTo(fmap); }catch(e){ return; } }
   csLayer.clearLayers(); if(!mapDetail_()&&!_csEd) return;      // v399
-  const t=_csEd?_csEd.tract:propActiveTract_(); if(!t) return;
-  const pcs=csOf_(t);
-  pcs.forEach(c=>{ const cls=(propComp_(t,c.name)||{}).cls||"", pick=_csEd&&_csEd.pick===c.id;
+  /* v436 — zoomed in, every property's compartments are drawn alike (Chris, 2026-10-15: "I don't want anything highlighted when
+     selected" — only the chosen property's showed, so choosing one lit its compartments up). Names only for those in view.
+     The editor still shows the property being edited, in its own colours. One property shown alone (Find) keeps to it. */
+  const t=_csEd?_csEd.tract:propActiveTract_(); if(_csEd&&!t) return;
+  const only=(typeof mapOnly!=="undefined"&&mapOnly)?propK_(mapOnly):"";
+  const pcs=_csEd?csOf_(t):csAll_().filter(c=>!only||propK_(c.tract)===only);
+  let vb=null; try{ vb=fmap.getBounds(); }catch(e){} let nLbl=0;
+  pcs.forEach(c=>{ const ct=c.tract||t, cls=(propComp_(ct,c.name)||{}).cls||"", pick=_csEd&&_csEd.pick===c.id;
     /* v422: outside the editor a piece looks like a file's compartment (green, the map style) — choosing a property no longer recolours it (Chris, 2026-10-14) */
     L.polygon(c.rings,_csEd?{color:pick?"#ff3b30":"#fff", weight:pick?4:2, fillColor:CS_FILL[cls]||"#ffd24a", fillOpacity:.35, interactive:false}
       :{color:MAP_STYLE.compColor, weight:MAP_STYLE.compWidth, fillColor:MAP_STYLE.compFill, fillOpacity:(typeof MAP_ALPHA!=="undefined"?MAP_ALPHA.fill:10)/100, smoothFactor:2, interactive:false}).addTo(csLayer);
     const ctr=c.rings[0].reduce((a,p)=>[a[0]+p[0]/c.rings[0].length,a[1]+p[1]/c.rings[0].length],[0,0]);
+    if(!_csEd){ try{ if(vb&&vb.contains&&!vb.contains(ctr)) return; }catch(e){} if(++nLbl>400) return; }      // v436: names in view only
     L.marker(ctr,{interactive:false,keyboard:false,icon:L.divIcon({className:"",iconSize:[120,20],iconAnchor:[60,10],
       html:`<div style="text-align:center;font:700 12px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000">${esc(c.name)}</div>`})}).addTo(csLayer); });   // v418: no " ·?" after a piece without a class (read as an error, Chris 2026-10-13)
   if(_csEd&&_csEd.mode==="move"){
