@@ -1317,7 +1317,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-15 · v443";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-10-27 · v447";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1410,6 +1410,7 @@ function pinHabitat_(list){
   return top.concat(list.filter(o=>HABITAT_TOP.indexOf(o.code)<0));
 }
 function sppSelect(s,cfg){
+  try{ sppUseFor_(); }catch(e){}      // v446: this property's counts
   const noHab = !!(cfg&&cfg.noHabitat);
   if(s) s.dataset.noHab = noHab?"1":"";   // the searchable picker reads this back
   const opts = SPECIES.filter(([c])=>c!=="" && !(noHab && HABITAT_TOP.indexOf(c)>=0))
@@ -1434,6 +1435,7 @@ function sppPickerOpen_(ev){
       .sort((a,b)=>a.toLowerCase().localeCompare(b.toLowerCase()))   // added shrubs file in alphabetically, not at the bottom
       .map(n=>({code:"",name:n,val:n}));
   } else {
+    try{ sppUseFor_(); }catch(e){}      // v446
     const noHab = el.dataset.noHab==="1";
     const opts=SPECIES.filter(([c])=>c!=="" && !(noHab && HABITAT_TOP.indexOf(c)>=0)).map(([c,l])=>({code:c,name:l.slice(c.length+1)})).concat(customTree.map(o=>({code:o.code,name:o.name})));
     const used=opts.filter(o=>(speciesUse[o.code]||0)>0).sort((a,b)=>(speciesUse[b.code]-speciesUse[a.code]));
@@ -1851,8 +1853,19 @@ function accountPanel_(){
 // shared sheet so every device gets them, and queue if added offline.
 let customTree=[], customShrub=[], pendingSpecies=[], customGround=[];
 let speciesUse={};   // {code: times chosen} — floats most-used species to the top of dropdowns, persisted
-try{ speciesUse=JSON.parse(STORE&&STORE.getItem("fi_sppuse"))||{}; }catch(e){ speciesUse={}; }
-function bumpSpeciesUse_(code){ if(!code||code===ADD_SENTINEL) return; speciesUse[code]=(speciesUse[code]||0)+1; try{ STORE&&STORE.setItem("fi_sppuse",JSON.stringify(speciesUse)); }catch(e){} }
+/* v446 — species lists start in alphabetical order on each new property (Android user, 2026-10-27). The counts that float
+   the most-used species to the top are kept per property (fi_sppuse_t {tractKey: {code: n}}); speciesUse is the form's
+   property's. Before v446 they were one set for the whole phone (fi_sppuse): that set is given once to the property on the
+   form when v446 first runs, if this phone has plots of it, so a property under way keeps its order. */
+let sppUseAll={}; try{ sppUseAll=JSON.parse(STORE&&STORE.getItem("fi_sppuse_t"))||{}; }catch(e){ sppUseAll={}; }
+function sppUseKey_(){ try{ const t=$("TRACT").value; return (t&&t!==ADD_TRACT)?propK_(t):""; }catch(e){ return ""; } }
+function sppUseFor_(){ const k=sppUseKey_();
+  if(!sppUseAll["\u0000seeded"] && k){ sppUseAll["\u0000seeded"]=1; let old=null; try{ old=JSON.parse(STORE&&STORE.getItem("fi_sppuse")); }catch(e){}
+    if(old&&Object.keys(old).length&&!sppUseAll[k]&&(typeof saved!=="undefined")&&(saved||[]).some(p=>propK_(p.TRACT)===k)) sppUseAll[k]=Object.assign({},old);
+    try{ STORE&&STORE.setItem("fi_sppuse_t",JSON.stringify(sppUseAll)); }catch(e){} }
+  speciesUse=sppUseAll[k]||{}; return speciesUse; }
+function bumpSpeciesUse_(code){ if(!code||code===ADD_SENTINEL) return; sppUseFor_(); const k=sppUseKey_(); const m=sppUseAll[k]||(sppUseAll[k]={}); m[code]=(m[code]||0)+1; speciesUse=m;
+  try{ STORE&&STORE.setItem("fi_sppuse_t",JSON.stringify(sppUseAll)); }catch(e){} }
 if(STORE){
   try{ customTree=JSON.parse(STORE.getItem("fi_ctree"))||[]; }catch(e){}
   try{ customShrub=JSON.parse(STORE.getItem("fi_cshrub"))||[]; }catch(e){}
@@ -2386,7 +2399,7 @@ function confirmAddSpecies(){
   if(name){
     if(pendingAddable){ addableAdd(pendingAddable,name); addableBuild(pendingAddable); setSel($(pendingAddable),name); toast(`Added ${name}`); }
     else if(pendingStand){ addStand(name); standSelect(); setSel($("STANDID"),name); standChanged_(); toast(`Added ${name}`); }
-    else if(pendingTract){ addTract(name); queueTract(name); tractSelect(); setSel($("TRACT"),name); toast(`Added ${name}`); }
+    else if(pendingTract){ addTract(name); queueTract(name); tractSelect(); setSel($("TRACT"),name); toast(`Added ${name}`); tractChanged_(); }
     else {
       const code = pendingShrub ? "" : ($("addModalCode").value.trim().replace(/[^A-Za-z]/g,"") || suggestCode(name));
       // Don't add a duplicate: if this species/shrub already exists (by name, or by code for trees), just select it.
@@ -3546,9 +3559,13 @@ function clearAuditPlots(){
 }
 /* v371: plots cleared off the phone still count — the next plot in a stand must not start again at 1. */
 function plotMaxRead_(){ try{ return JSON.parse(_ls("fi_plotmax")||"{}")||{}; }catch(e){ return {}; } }
+/* v445: kept per property + compartment ("tract\u0001stand"); the stand-only key is still written for older builds */
+function plotMaxKey_(tract,stand){ return propK_(tract===ADD_TRACT?"":tract)+"\u0001"+(stand||""); }
 function plotMaxNote_(plots){
   const m=plotMaxRead_(); let ch=false;
-  (plots||[]).forEach(p=>{ const s=p.STANDID||"", n=parseInt(p.PLOTNUM,10); if(!isNaN(n) && n>(Object.prototype.hasOwnProperty.call(m,s)?m[s]:0)){ m[s]=n; ch=true; } });
+  (plots||[]).forEach(p=>{ const s=p.STANDID||"", n=parseInt(p.PLOTNUM,10); if(isNaN(n)) return;
+    if(n>(Object.prototype.hasOwnProperty.call(m,s)?m[s]:0)){ m[s]=n; ch=true; }
+    const k=plotMaxKey_(p.TRACT||"",s); if(n>(Object.prototype.hasOwnProperty.call(m,k)?m[k]:0)){ m[k]=n; ch=true; } });
   if(ch) _lsSet("fi_plotmax", JSON.stringify(m));
 }
 /* Anything that remembers a plot by its POSITION in the list: an open edit, a plot being moved on the
@@ -3559,12 +3576,30 @@ function editingNow_(){
   try{ const d=JSON.parse((STORE&&STORE.getItem("fi_draft"))||"null"); if(d && d.editingIndex!=null) return true; }catch(e){}
   return false;
 }
-function nextPlotFor(stand){
-  const s=stand||""; const hw=plotMaxRead_();
-  let max=Object.prototype.hasOwnProperty.call(hw,s) ? (parseInt(hw[s],10)||0) : 0;
-  saved.forEach(p=>{ if((p.STANDID||"")===s){ const n=parseInt(p.PLOTNUM,10); if(!isNaN(n)&&n>max) max=n; } });
+/* v445 — plot numbers restart for each property (Android user, 2026-10-27: a plot with no compartment under it, on a new
+   property, carried on from the previous property's numbers). Numbered within property + compartment; plots with no
+   compartment are numbered per property. The tract is the form's unless given. A stand-only mark from before v445
+   (plots cleared off the phone) still counts when that compartment belongs to this property, so a number is never reused. */
+function nextPlotFor(stand, tract){
+  const s=stand||""; let t=tract; if(t===undefined){ try{ t=$("TRACT").value||""; }catch(e){ t=""; } } if(t===ADD_TRACT) t="";
+  const tk=propK_(t), hw=plotMaxRead_(), has=k=>Object.prototype.hasOwnProperty.call(hw,k);
+  let max=has(plotMaxKey_(t,s)) ? (parseInt(hw[plotMaxKey_(t,s)],10)||0) : 0;
+  if(has(s) && (!tk || (s && standKnownFor_(t,s)))) max=Math.max(max, parseInt(hw[s],10)||0);
+  saved.forEach(p=>{ if((p.STANDID||"")===s && (!tk || propK_(p.TRACT)===tk)){ const n=parseInt(p.PLOTNUM,10); if(!isNaN(n)&&n>max) max=n; } });
   return max+1;
 }
+/* is this compartment one of this property's? (its pieces, its Sheet records, a loaded file's compartments, or its plots) */
+function standKnownFor_(t,s){ const tk=propK_(t), sk=propK_(s); if(!tk||!sk) return true;
+  try{ if(csOf_(t).some(c=>propK_(c.name)===sk)) return true; }catch(e){}
+  try{ if(((PROPS.comps||{})[tk]||{})[sk]) return true; }catch(e){}
+  try{ if(BOUND&&standField&&(BOUND.features||[]).some(f=>propK_(featTract_(f))===tk&&propK_((f.properties||{})[standField])===sk)) return true; }catch(e){}
+  return (saved||[]).some(p=>propK_(p.TRACT)===tk&&propK_(p.STANDID)===sk); }
+/* v445: the property on the form changed — a compartment carried over from another property goes, and the number is worked out again */
+function tractChanged_(){
+  try{ if(typeof editingIndex!=="undefined" && editingIndex!=null) return; const t=$("TRACT").value; if(t===ADD_TRACT) return;
+    const st=$("STANDID").value; if(st && st!==ADD_STAND && t && !standKnownFor_(t,st)){ setSel($("STANDID"),""); }
+    standChanged_(); }catch(e){}
+  try{ refreshSpeciesSelects(); }catch(e){} }      // v446: this property's species order (A–Z on a new one)
 function nextPlot(){
   const stand=$("STANDID").value, tract=$("TRACT").value;
   const carryStand = stand===ADD_STAND?"":stand;
@@ -6568,7 +6603,7 @@ treeRows.addEventListener("change",e=>{ if(e.target.classList.contains("t_s")||e
 saved.forEach(p=>{ if(p.TRACT) addTract(p.TRACT); if(p.STANDID) addStand(p.STANDID); for(const id in ADDABLE){ if(p[id]) addableAdd(id,p[id]); } });   // seed lists from saved plots
 tractSelect(); standSelect(); addableBuildAll(); defaultNoneFields_();
 document.addEventListener("change", e=>{ const el=e.target, a=el&&el.id&&ADDABLE[el.id]; if(a && el.value===a.sentinel) openAddable(el.id); });
-$("TRACT").addEventListener("change", ()=>{ if($("TRACT").value===ADD_TRACT) openAddTract(); });
+$("TRACT").addEventListener("change", ()=>{ if($("TRACT").value===ADD_TRACT) openAddTract(); else tractChanged_(); });
 $("STANDID").addEventListener("change", ()=>{
   if($("STANDID").value===ADD_STAND){ openAddStand(); return; }
   standChanged_();   // same side effects as every programmatic stand change — see standChanged_()
@@ -7570,7 +7605,9 @@ function setStandLabelMode(v){ standLabelMode=(v==="analysis")?"analysis":"attr"
   renderLabels();
   toast(standLabelMode==="analysis"?"Compartments labelled by analysis":"Compartments labelled by the layer's own field"); }
 function renderLabels(){
-  if(!flabelLayer) return; flabelLayer.clearLayers();
+  if(!flabelLayer) return; const _it=[];
+  try{ renderLabels0_(_it); }finally{ lblSync_(flabelLayer,_it); } }      /* v444: changed only where it differs */
+function renderLabels0_(_it){
   if((typeof labelVis!=="undefined"&&labelVis.bound===false)) return;   // labels turned off
   if(!boundLabels.length || !fmap || fmap.getZoom()<LABEL_MIN_ZOOM) return;
   const b=fmap.getBounds(); let n=0;
@@ -7583,7 +7620,7 @@ function renderLabels(){
       const v=standAnVal_(a,standAnField);
       txt = v==="" ? L0.name : L0.name+" · "+v;   // v417: no plots analysed there yet → just the name (the dash came out as "?" on Android)
     }
-    L.marker([L0.lat,L0.lng],{interactive:false,icon:L.divIcon({className:"",html:`<div class="standlabel" style="font-size:${MAP_STYLE.labelSize||11}px">${esc(txt)}</div>`,iconSize:[90,16],iconAnchor:[45,8]})}).addTo(flabelLayer);
+    { const ll=[L0.lat,L0.lng], h=`<div class="standlabel" style="font-size:${MAP_STYLE.labelSize||11}px">${esc(txt)}</div>`; _it.push({k:ll.join(",")+"|"+h, make:()=>L.marker(ll,{interactive:false,icon:L.divIcon({className:"",html:h,iconSize:[90,16],iconAnchor:[45,8]})})}); }
     n++;
   }
 }
@@ -8137,6 +8174,24 @@ function plotFill_(p){
   if(!who) return myColor_();          // collected here before a name was set
   try{ return crewColorFor(shortEmail_(who)); }catch(e){ return myColor_(); }
 }
+/* ============ v444 — Android: labels flickered and taps went nowhere (2026-10-27) ============
+   Every pan or zoom cleared and rebuilt every label, pin and — since v436 — every property's compartment outlines on the
+   map. With a full account (thousands of compartments) on a mid-range Android phone that was close to a second of work
+   per pan: labels blinked out and back, and taps waited behind it. Now a layer is changed only where it differs:
+   lblSync_ keeps the markers that are still wanted (same key = same place, same look, same action), adds the new ones
+   and removes the rest; the compartment outlines are built once and kept until the compartments or the style change. */
+function iconHtml_(ic){ return (ic&&ic.options&&ic.options.html)||(ic&&ic.html)||""; }
+function lblSync_(g, items){
+  if(!g) return [];
+  if(typeof g.removeLayer!=="function"||typeof g.hasLayer!=="function"){ g.clearLayers(); return items.map(it=>{ const l=it.make(); l.addTo(g); return l; }); }      // a stand-in map (tests): as before
+  const old=g.__keep||new Map(), next=new Map(), out=[];
+  items.forEach((it,j)=>{ let k=it.k; if(next.has(k)) k=k+"\u0002"+j;
+    let l=old.get(k); if(l&&g.hasLayer(l)) old.delete(k); else { l=it.make(); l.addTo(g); }
+    next.set(k,l); out.push(l); });
+  old.forEach(l=>{ try{ g.removeLayer(l); }catch(e){} });
+  g.__keep=next; return out; }
+function canvasDotMk_(lat,lon,fill,stroke,onClick,r){
+  return L.circleMarker([lat,lon],{renderer:pinCanvas_(),radius:(r||5),weight:2.5,color:stroke,fillColor:fill,fillOpacity:1}).on("click",onClick); }
 function canvasDot_(lat,lon,layer,fill,stroke,onClick,r){
   L.circleMarker([lat,lon],{renderer:pinCanvas_(),radius:(r||5),weight:2.5,color:stroke,fillColor:fill,fillOpacity:1})
     .addTo(layer).on("click",onClick);
@@ -8144,7 +8199,8 @@ function canvasDot_(lat,lon,layer,fill,stroke,onClick,r){
 function renderMapPins(){
   try{ rebuildCrewColors_(); renderWhoLegend_(); applyLegendPref_(); }catch(e){}
   // redrawing the pins puts them above the highlight, so lift it again afterwards
-  try{ if(pfLayer_) setTimeout(()=>{ try{ pfLayer_.eachLayer(l=>l.bringToFront&&l.bringToFront()); }catch(e){} },0); }catch(e){} if(!fpins) return; fpins.clearLayers(); if(fauditpins) fauditpins.clearLayers(); _pinEls=[];
+  try{ if(pfLayer_) setTimeout(()=>{ try{ pfLayer_.eachLayer(l=>l.bringToFront&&l.bringToFront()); }catch(e){} },0); }catch(e){} if(!fpins) return; _pinEls=[];
+  const _pi=new Map([[fpins,[]]]); if(fauditpins) _pi.set(fauditpins,[]); const put=(g,k,make,pin)=>{ if(!_pi.has(g)) _pi.set(g,[]); _pi.get(g).push({k,make,pin}); };      // v444: kept where unchanged
   const z = fmap ? fmap.getZoom() : 0;
   const detail = z >= LABEL_ZOOM_MIN;                      // labels and full markers only up close
   const view = (detail && fmap) ? fmap.getBounds().pad(0.25) : null;
@@ -8156,15 +8212,14 @@ function renderMapPins(){
        it all in one amber told you nothing about who did what — the same information the Crew layer
        has always shown for live plots. Your own stay amber, so your work still reads as yours. */
     const fill = plotFill_(p);
-    if(!detail){ canvasDot_(lat,lon,fpins,fill,hit?"#ff36c0":(needs?"#ff8c1a":"#ffffff"),()=>plotCard(i,false),PLOT_DOT_R); return; }
+    if(!detail){ const st=hit?"#ff36c0":(needs?"#ff8c1a":"#ffffff"); put(fpins,"c"+i+"|"+lat+","+lon+"|"+fill+"|"+st,()=>canvasDotMk_(lat,lon,fill,st,()=>plotCard(i,false),PLOT_DOT_R)); return; }
     if(view && !view.contains([lat,lon])) return;          // off screen — don't build it
     const lbl=myDotLabel_(p);   // both label states are built now; declutterLabels_ picks which shows
     const ring=hit?"border:3px solid #ff36c0;box-shadow:0 0 0 3px rgba(255,54,192,.45),0 2px 6px rgba(0,0,0,.6)"
               :(needs?"border:3px dashed #ff8c1a;box-shadow:0 0 0 3px rgba(255,140,26,.4),0 2px 6px rgba(0,0,0,.6)"
               :"border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.6)");
     const icon=L.divIcon({className:"",html:`<div class="pdot min" style="background:${fill};${ring}"><span class="lf">${lbl}</span><span class="lm">${esc(p.PLOTNUM||"?")}</span></div>`,iconSize:null,iconAnchor:[12,12]});
-    const mk=L.marker([lat,lon],{icon}).addTo(fpins).on("click",()=>plotCard(i,false));
-    _pinEls.push({mk:mk,lat:lat,lon:lon});
+    put(fpins,"m"+i+"|"+lat+","+lon+"|"+iconHtml_(icon),()=>L.marker([lat,lon],{icon}).on("click",()=>plotCard(i,false)),{lat,lon});
   });
   // Imported reference plots. Blue = not yet visited; GREEN with a ✓ = edited/completed in the field,
   // so the whole crew can see progress at a glance. Amber = possible duplicate of an existing plot.
@@ -8172,7 +8227,7 @@ function renderMapPins(){
     const done=!!p._done;
     const col = done ? "#37c26b" : (p._dup ? "#e8b84b" : "#4aa3e0");
     const hit=_findHit_(p); const needs=plotNeedsWork_(p,true);
-    if(!detail){ canvasDot_(lat,lon,fauditpins||fpins,col,hit?"#ff36c0":(needs?"#ff8c1a":(done?"#eafff0":"#ffffff")),()=>plotCard(i,true),PLOT_DOT_R); return; }
+    if(!detail){ const st=hit?"#ff36c0":(needs?"#ff8c1a":(done?"#eafff0":"#ffffff")); put(fauditpins||fpins,"C"+i+"|"+lat+","+lon+"|"+col+"|"+st,()=>canvasDotMk_(lat,lon,col,st,()=>plotCard(i,true),PLOT_DOT_R)); return; }
     if(view && !view.contains([lat,lon])) return;
     const lbl = auditDotLabel_(p);
     const ring = hit ? "border:3px solid #ff36c0;box-shadow:0 0 0 3px rgba(255,54,192,.45),0 2px 7px rgba(0,0,0,.6)"
@@ -8182,9 +8237,9 @@ function renderMapPins(){
     const check = done ? `<span style="position:absolute;top:-6px;right:-6px;width:13px;height:13px;border-radius:50%;background:#1f8f4a;border:1.5px solid #fff;color:#fff;font:700 9px/13px system-ui;text-align:center">✓</span>` : "";
     const icon=L.divIcon({className:"",html:`<div style="position:relative;min-width:22px;height:22px;padding:0 5px;border-radius:11px;background:${col};${ring};display:flex;align-items:center;justify-content:center;font:700 9px/1 'Courier New',monospace;color:${done?"#04220f":"#0a1a28"};white-space:nowrap">${esc(lbl)}${check}</div>`,iconSize:null,iconAnchor:[11,11]});
     const doneLine = done ? `<br><span style="color:#1f8f4a">✓ completed${p._doneBy?` · ${esc(p._doneBy)}`:""}${p._doneAt?` · ${esc(String(p._doneAt).slice(0,16))}`:""}</span>` : "";
-    L.marker([lat,lon],{icon}).addTo(fauditpins||fpins)
-      .on("click",()=>plotCard(i,true));
+    put(fauditpins||fpins,"A"+i+"|"+lat+","+lon+"|"+iconHtml_(icon),()=>L.marker([lat,lon],{icon}).on("click",()=>plotCard(i,true)));
   });
+  _pi.forEach((items,g)=>{ const ls=lblSync_(g,items); items.forEach((it,j)=>{ if(it.pin) _pinEls.push({mk:ls[j],lat:it.pin.lat,lon:it.pin.lon}); }); });
   // Show the imported / done legend entries only when there are imported plots to explain.
   try{ const li=$("legImported"), ld=$("legDone"), lt=$("legTodo");
     const hasImp=auditPlots.length>0, hasDone=auditPlots.some(p=>p._done);
@@ -9392,13 +9447,19 @@ function pointInRing_(lat,lon,pts){ let inside=false; for(let i=0,j=pts.length-1
   if(((yi>lat)!==(yj>lat)) && (lon < (xj-xi)*(lat-yi)/(yj-yi)+xi)) inside=!inside; } return inside; }
 function pointInPolys_(lat,lon){ let best=null; polys.forEach(pg=>{ if(pg.pts.length>=3 && pointInRing_(lat,lon,pg.pts)){ const a=polyAreaOf_(pg.pts)/10000; if(!best||a<best.areaHa) best={name:pg.name,tract:pg.tract||"",areaHa:a}; } }); return best; }
 // Tract for a point: a drawn compartment's tract wins, else the boundary tract field / manual tract.
-function tractOrPolyAt_(lat,lon){ const h=pointInPolys_(lat,lon); if(h && h.tract) return h.tract; const t=tractAt_(lat,lon); if(t) return t; const pc=standAt(lon,lat)?null:csPieceInner_(lat,lon); return pc&&pc.tract?pc.tract:null; }
+function tractOrPolyAt_(lat,lon){ const h=pointInPolys_(lat,lon); if(h && h.tract) return h.tract; const t=tractAt_(lat,lon); if(t) return t; const pc=standAt(lon,lat)?null:csPieceInner_(lat,lon); return pc&&pc.tract?pc.tract:propOutlineAt_(lat,lon); }
+/* v445: no compartment under the point — the property whose outline it is in (its saved outline, else the one drawn from its compartments); the smallest wins */
+function propOutlineAt_(lat,lon){ let best=null, bestA=1/0;
+  try{ propTracts_().forEach(t=>{ const p=propGet_(t)||{}; let rings=(Array.isArray(p.boundary)&&p.boundary.length)?p.boundary:[]; if(!rings.length){ try{ rings=ovAutoOutline_(t)||[]; }catch(e){ rings=[]; } }
+    let inn=false, a=0; rings.forEach(r=>{ if(!r||r.length<3) return; if(pointInRing_(lat,lon,r)) inn=!inn; let s=0; for(let i=0,j=r.length-1;i<r.length;j=i++) s+=(r[j][1]+r[i][1])*(r[j][0]-r[i][0]); a+=Math.abs(s); });
+    if(inn&&a<bestA){ best=p.tract||t; bestA=a; } }); }catch(e){}
+  return best; }
 // Fill Stand ID, Tract and Age on the form from whatever compartment (loaded boundary OR drawn polygon) the point falls in.
 function autoStandTract_(lat,lon){
-  const stand=standOrPolyAt_(lat,lon);
+  const stand=standOrPolyAt_(lat,lon), tr=tractOrPolyAt_(lat,lon);
+  if(tr){ const was=$("TRACT").value; addTract(tr); tractSelect(); setSel($("TRACT"),tr); if(propK_(was)!==propK_(tr)) try{ refreshSpeciesSelects(); }catch(e){} }      // v445: the property first, so the number is this property's; v446: and its species order
   if(stand){ addStand(stand); standSelect(); setSel($("STANDID"),stand); standChanged_(); }
-  const tr=tractOrPolyAt_(lat,lon);
-  if(tr){ addTract(tr); tractSelect(); setSel($("TRACT"),tr); }
+  else if(tr) tractChanged_();      // v445: no compartment here — one carried over from another property goes
   const age=ageAt_(lat,lon);
   if(age!=null && $("AGE") && String($("AGE").value||"").trim()===""){ setField($("AGE"),String(age)); }
   return stand;
@@ -10863,7 +10924,9 @@ function refLabelText_(pr){
   return "";
 }
 function renderRefLabels(){
-  if(!freflabelLayer) return; freflabelLayer.clearLayers();
+  if(!freflabelLayer) return; const _it=[];
+  try{ renderRefLabels0_(_it); }finally{ lblSync_(freflabelLayer,_it); } }      /* v444 */
+function renderRefLabels0_(_it){
   if((typeof labelVis!=="undefined"&&labelVis.ref===false)) return;   // labels turned off
   if(!refLabels.length || !fmap || fmap.getZoom()<REF_LABEL_MIN_ZOOM) return;
   const bb=fmap.getBounds(); let n=0;
@@ -10871,7 +10934,7 @@ function renderRefLabels(){
     if(n>=REF_LABEL_MAX) break;
     if(!bb.contains([R.lat,R.lng])) continue;
     const name=refLabelText_(R.props); if(name==="") continue;
-    L.marker([R.lat,R.lng],{interactive:false,icon:L.divIcon({className:"",html:`<div class="ptlabel">${esc(name)}</div>`,iconSize:[80,14],iconAnchor:[-7,7]})}).addTo(freflabelLayer);
+    { const ll=[R.lat,R.lng], h=`<div class="ptlabel">${esc(name)}</div>`; _it.push({k:ll.join(",")+"|"+h, make:()=>L.marker(ll,{interactive:false,icon:L.divIcon({className:"",html:h,iconSize:[80,14],iconAnchor:[-7,7]})})}); }
     n++;
   }
 }
@@ -12049,7 +12112,9 @@ function ovRender_(){
 /* names of the properties on screen — all of them when zoomed out, the others when zoomed in (the chosen one has its compartments labelled) */
 /* v400: property names only on the zoomed-out overview, and only while the Layers switch is on */
 function ovLabels_(){
-  if(!ovLabelLayer||!fmap) return; ovLabelLayer.clearLayers();
+  if(!ovLabelLayer||!fmap) return; const _it=[];
+  try{ ovLabels0_(_it); }finally{ lblSync_(ovLabelLayer,_it); } }      /* v444 */
+function ovLabels0_(_it){
   if(typeof labelVis!=="undefined"&&labelVis.ov===false) return;
   /* v416: zoomed in, a property drawn as a dot keeps its name (the dot alone said nothing — Chris, 2026-10-13); only the
      property shown in detail, whose compartments carry their own labels, drops its name */
@@ -12058,7 +12123,7 @@ function ovLabels_(){
   propTracts_().forEach(t=>{ if(n>=OV_LABEL_MAX||!mapOnlyIs_(t)) return; const p=propGet_(t)||{}, hasOutline=(Array.isArray(p.boundary)&&p.boundary.length>0)||ovAutoOutline_(t).length>0;
     if(detail && hasOutline && propK_(t)===active) return;
     const e=ovExtOf_(t); if(!e) return; const c=[(e[1]+e[3])/2,(e[0]+e[2])/2]; if(!b.contains(c)) return; n++;
-    L.marker(c,{interactive:false,keyboard:false,icon:L.divIcon({className:"ov-lbl",html:`<span style="font:700 11px system-ui;color:#fff;background:rgba(198,40,40,.85);padding:2px 6px;border-radius:9px;white-space:nowrap;position:relative;left:-50%">${esc(t)}</span>`,iconSize:[0,0]})}).addTo(ovLabelLayer); });
+    { const h=`<span style="font:700 11px system-ui;color:#fff;background:rgba(198,40,40,.85);padding:2px 6px;border-radius:9px;white-space:nowrap;position:relative;left:-50%">${esc(t)}</span>`; _it.push({k:c.join(",")+"|"+h, make:()=>L.marker(c,{interactive:false,keyboard:false,icon:L.divIcon({className:"ov-lbl",html:h,iconSize:[0,0]})})}); } });
 }
 /* crossing the detail zoom redraws the chosen property's layers (they draw nothing below it) */
 function mapZoomDetail_(){ const d=mapDetail_(); if(_ovDetail===d) return; _ovDetail=d;
@@ -12119,10 +12184,9 @@ function twMapRender_(fromFetch){
   if(!twMapLayer){ try{ if(!fmap.getPane("twPane")){ fmap.createPane("twPane"); fmap.getPane("twPane").style.zIndex=590; fmap.getPane("twPane").style.pointerEvents="none"; }
       twMapLayer=L.layerGroup().addTo(fmap); }catch(e){ return; }
     twLoad_().then(()=>{ _twReady=true; twMapRender_(); }); }
-  twMapLayer.clearLayers(); twBtn_();
-  twMapPick_().forEach(t=>{ const big=t.kind!=="place";
-    L.marker([t.lat,t.lon],{pane:"twPane",interactive:false,keyboard:false,icon:L.divIcon({className:"tw-lbl",iconSize:[0,0],
-      html:`<span class="tw-dot${big?"":" sm"}"></span><span class="tw-nm${big?"":" sm"}">${esc(t.name)}</span>`})}).addTo(twMapLayer); });
+  twBtn_();
+  lblSync_(twMapLayer, twMapPick_().map(t=>{ const big=t.kind!=="place", h=`<span class="tw-dot${big?"":" sm"}"></span><span class="tw-nm${big?"":" sm"}">${esc(t.name)}</span>`;      /* v444: only what changed */
+    return {k:t.lat+","+t.lon+"|"+h, make:()=>L.marker([t.lat,t.lon],{pane:"twPane",interactive:false,keyboard:false,icon:L.divIcon({className:"tw-lbl",iconSize:[0,0],html:h})})}; }));
   if(!fromFetch&&_twReady) twWant_(); }      /* not before the phone's copy is read, or cells already kept would be fetched again */
 function lioLayerVis_(){ if(!lioLayer||!fmap) return; const d=mapDetail_(); try{ const pane=fmap.getPane("lioPane"); if(pane) pane.style.display=d?"":"none"; }catch(e){} }
 function lioRender_(){
@@ -12156,7 +12220,9 @@ function lioRender_(){
 }
 /* Lot and concession numbers, only when zoomed in enough to read them. */
 function lioLabels_(){
-  if(!lioLabelLayer||!fmap) return; lioLabelLayer.clearLayers();
+  if(!lioLabelLayer||!fmap) return; const _it=[];
+  try{ lioLabels0_(_it); }finally{ lblSync_(lioLabelLayer,_it); } }      /* v444 */
+function lioLabels0_(_it){
   if(!lioCache||!lioVis.lots||propK_(lioCacheTract)!==propK_(propActiveTract_())||fmap.getZoom()<15) return;
   const d=lioCache.layers.lots; if(!d||!d.fc) return;
   const view=fmap.getBounds(); let n=0;
@@ -12164,7 +12230,7 @@ function lioLabels_(){
     let w=1/0,s=1/0,e=-1/0,nn=-1/0; ps.forEach(pg=>(pg[0]||[]).forEach(q=>{ if(q[1]<w)w=q[1]; if(q[1]>e)e=q[1]; if(q[0]<s)s=q[0]; if(q[0]>nn)nn=q[0]; }));
     const c=[(s+nn)/2,(w+e)/2]; if(!view.contains(c)) return;
     const pr=f.properties||{}, txt=[pr.LOT_IDENT,pr.CONCESSION_IDENT].filter(Boolean).join(" · "); if(!txt) return;
-    n++; L.marker(c,{interactive:false,keyboard:false,icon:L.divIcon({className:"lio-lbl",html:`<span style="font:600 10px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000;white-space:nowrap">${esc(txt)}</span>`,iconSize:[0,0]})}).addTo(lioLabelLayer); });
+    n++; { const h=`<span style="font:600 10px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000;white-space:nowrap">${esc(txt)}</span>`; _it.push({k:c.join(",")+"|"+h, make:()=>L.marker(c,{interactive:false,keyboard:false,icon:L.divIcon({className:"lio-lbl",html:h,iconSize:[0,0]})})}); } void (0); });
 }
 /* When the map opens: the chosen property's layers, fetched if this phone has none yet. */
 let _propAutoAll=false, _areaPushOnce=false;
@@ -15286,11 +15352,16 @@ function csRemove_(id){ const c=(PROPS.shapes||{})[id]; if(!c) return; const ha=
   if(!confirm("Remove the piece "+c.name+" ("+ha.toFixed(2)+" ha) from "+c.tract+"? Its neighbours keep their shape, so the property outline will have a gap there until it is redrawn or they are joined. Undo is on the compartment layer bar.")) return;
   csCommit_(c.tract, csOf_(c.tract).filter(x=>x.id!==id), "removed "+c.name); closeDataSheet_(); csRender_(); toast("Removed "+c.name); }
 const CS_FILL={MFTIP:"#4caf50", CLTIP:"#1e8a3c", INELIGIBLE:"#9e9e9e", "":"#ffd24a"};
+/* v444: what the compartment outlines on the map were drawn from — the pieces (by identity of their shapes) and the style */
+let _csSig=null; const _csRid=new WeakMap(); let _csRn=0;
+function csSig_(pcs){ const rid=r=>{ if(!r||typeof r!=="object") return 0; let v=_csRid.get(r); if(!v){ v=++_csRn; _csRid.set(r,v); } return v; };
+  return [MAP_STYLE.compColor,MAP_STYLE.compWidth,MAP_STYLE.compFill,(typeof MAP_ALPHA!=="undefined"?MAP_ALPHA.fill:10)].join(",")+"|"+pcs.map(c=>(c.id||"")+":"+rid(c.rings)+":"+((c.rings&&c.rings[0]&&c.rings[0].length)||0)).join(","); }
+const _csCtrC=new WeakMap(); function csCtr_(c){ const r0=c.rings[0]; let v=_csCtrC.get(r0); if(!v){ v=r0.reduce((a,p)=>[a[0]+p[0]/r0.length,a[1]+p[1]/r0.length],[0,0]); _csCtrC.set(r0,v); } return v; }
 var _ovPickAt=0; let _csRT=null; function csRenderSoon_(){ if(_csRT) clearTimeout(_csRT); _csRT=setTimeout(()=>{ _csRT=null; try{ csRender_(); }catch(e){} },120); }
 function csRender_(){
   if(typeof fmap==="undefined"||!fmap||typeof L==="undefined") return;
   if(!csLayer){ try{ csLayer=L.layerGroup().addTo(fmap); }catch(e){ return; } }
-  csLayer.clearLayers(); if(!mapDetail_()&&!_csEd) return;      // v399
+  if(!mapDetail_()&&!_csEd){ csLayer.clearLayers(); _csSig=null; return; }      // v399
   /* v436 — zoomed in, every property's compartments are drawn alike (Chris, 2026-10-15: "I don't want anything highlighted when
      selected" — only the chosen property's showed, so choosing one lit its compartments up). Names only for those in view.
      The editor still shows the property being edited, in its own colours. One property shown alone (Find) keeps to it. */
@@ -15298,6 +15369,17 @@ function csRender_(){
   const only=(typeof mapOnly!=="undefined"&&mapOnly)?propK_(mapOnly):"";
   const pcs=_csEd?csOf_(t):csAll_().filter(c=>!only||propK_(c.tract)===only);
   let vb=null; try{ vb=fmap.getBounds(); }catch(e){} let nLbl=0;
+  /* v444 — outside the editor, the outlines are built once and kept while the compartments and the style are the same; on a
+     pan only the names in view change (they were all thrown away and rebuilt on every pan — Android flicker, 2026-10-27) */
+  if(!_csEd && typeof csLayer.removeLayer==="function" && typeof csLayer.hasLayer==="function"){
+    const sig=csSig_(pcs);
+    if(sig!==_csSig){ csLayer.clearLayers(); _csSig=sig;
+      pcs.forEach(c=>L.polygon(c.rings,{color:MAP_STYLE.compColor, weight:MAP_STYLE.compWidth, fillColor:MAP_STYLE.compFill, fillOpacity:(typeof MAP_ALPHA!=="undefined"?MAP_ALPHA.fill:10)/100, smoothFactor:2, interactive:false}).addTo(csLayer)); }
+    const items=[]; pcs.forEach(c=>{ if(nLbl>=400) return; const ctr=csCtr_(c); try{ if(vb&&vb.contains&&!vb.contains(ctr)) return; }catch(e){} nLbl++;
+      const h=`<div style="text-align:center;font:700 12px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000">${esc(c.name)}</div>`;
+      items.push({k:(c.id||"")+"|"+ctr.join(",")+"|"+h, make:()=>L.marker(ctr,{interactive:false,keyboard:false,icon:L.divIcon({className:"",iconSize:[120,20],iconAnchor:[60,10],html:h})})}); });
+    lblSync_(csLayer, items); return; }
+  csLayer.clearLayers(); _csSig=null;
   pcs.forEach(c=>{ const ct=c.tract||t, cls=(propComp_(ct,c.name)||{}).cls||"", pick=_csEd&&_csEd.pick===c.id;
     /* v422: outside the editor a piece looks like a file's compartment (green, the map style) — choosing a property no longer recolours it (Chris, 2026-10-14) */
     L.polygon(c.rings,_csEd?{color:pick?"#ff3b30":"#fff", weight:pick?4:2, fillColor:CS_FILL[cls]||"#ffd24a", fillOpacity:.35, interactive:false}
