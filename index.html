@@ -6,6 +6,43 @@
   Proprietary and confidential. No license is granted; not for redistribution, reuse, or derivative works.
 -->
 <meta charset="UTF-8">
+<script id="friBootGuard">
+/* v448 — a start-up guard (Juniper Archer, 2026-11-01: Chrome showed a blank screen; the iPhone was fine). Written in old
+   JavaScript on purpose, so it runs on any browser. It notes any error while the app loads; if the app has not finished
+   starting a few seconds after the page loads, it shows what went wrong, the browser and Android versions, and two ways out:
+   reload, or throw away the app's saved copy of itself (service worker + its cache) and reload. Plots, settings and maps
+   stored on the phone are NOT touched by either. */
+try{ (function(){
+  var errs=[]; window.__friBootErrs=errs;
+  function note(m){ try{ if(errs.length<5) errs.push(String(m).slice(0,300)); }catch(e){} }
+  window.addEventListener("error",function(e){ if(window.__friBooted) return; var t=e&&e.target; if(t&&t!==window&&(t.src||t.href)){ note("Could not load "+(t.src||t.href)); return; }
+    note((e&&e.message||"error")+(e&&e.lineno?" (line "+e.lineno+(e.colno?":"+e.colno:"")+")":"")); },true);
+  window.addEventListener("unhandledrejection",function(e){ if(!window.__friBooted) note("Promise: "+(e&&e.reason&&(e.reason.message||e.reason))); });
+  function esc(x){ return String(x).replace(/[&<>"]/g,function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]; }); }
+  function info(){ var ua=navigator.userAgent||"", c=/Chrome\/([\d.]+)/.exec(ua), a=/Android ([\d.]+)/.exec(ua), sw="none";
+    try{ sw=navigator.serviceWorker?(navigator.serviceWorker.controller?"active":"not in control"):"not supported"; }catch(e){}
+    return {chrome:c?c[1]:"", android:a?a[1]:"", ua:ua, sw:sw}; }
+  window.__friClearShell=function(then){ var done=function(){ if(typeof then==="function"){ then(); return; } try{ location.reload(); }catch(e){} };
+    var jobs=[]; try{ if(navigator.serviceWorker&&navigator.serviceWorker.getRegistrations) jobs.push(navigator.serviceWorker.getRegistrations().then(function(rs){ return Promise.all(rs.map(function(r){ return r.unregister(); })); })); }catch(e){}
+    try{ if(window.caches&&caches.keys) jobs.push(caches.keys().then(function(ks){ return Promise.all(ks.filter(function(k){ return k!=="fi-plotcard-tiles"; }).map(function(k){ return caches.delete(k); }));      /* the offline imagery stays */ })); }catch(e){}
+    if(jobs.length&&window.Promise) Promise.all(jobs).then(done,done); else done(); };
+  window.__friBootPanel=function(why){ if(document.getElementById("friBootPanel")) return; var i=info(), d=document.createElement("div"); d.id="friBootPanel";
+    d.setAttribute("style","position:fixed;left:0;top:0;right:0;bottom:0;z-index:2147483647;background:#0e1311;color:#e7ebe6;font:15px/1.45 sans-serif;padding:18px;overflow:auto");
+    var old=i.chrome&&parseInt(i.chrome,10)<80;
+    d.innerHTML='<div style="font-size:19px;font-weight:bold;margin-bottom:8px">The Plot Card did not start on this device</div>'+
+      '<div style="margin-bottom:10px;color:#cfe3d2">'+esc(why||"")+'</div>'+
+      (old?'<div style="margin-bottom:10px;color:#ffd24a">This Chrome is old (version '+esc(i.chrome)+'). Update Chrome and Android System WebView in the Play Store, then reopen the app.</div>':'')+
+      '<div style="font-size:13px;background:#16271a;border:1px solid #33623a;border-radius:8px;padding:10px;margin-bottom:12px;word-break:break-word">'+
+        'Chrome: <b>'+esc(i.chrome||"?")+'</b> · Android: <b>'+esc(i.android||"?")+'</b> · offline copy: '+esc(i.sw)+'<br>'+
+        (errs.length?'Errors:<br>'+errs.map(function(x){ return '• '+esc(x); }).join('<br>'):'No error was reported.')+'<br><span style="color:#8fae95">'+esc(i.ua)+'</span></div>'+
+      '<button type="button" onclick="location.reload()" style="display:block;width:100%;padding:12px;margin-bottom:8px;border-radius:9px;border:1px solid #2f7a44;background:#1f5130;color:#fff;font-size:15px">⟳ Reload</button>'+
+      '<button type="button" onclick="window.__friClearShell()" style="display:block;width:100%;padding:12px;margin-bottom:8px;border-radius:9px;border:1px solid #7a5a2f;background:#3a2a12;color:#fff;font-size:15px">Clear the app\'s saved copy of itself and reload</button>'+
+      '<div style="font-size:12px;color:#8fae95">Neither button deletes plots, settings, maps or downloaded imagery kept on this phone. Please send a screenshot of this screen to Chris.</div>';
+    (document.body||document.documentElement).appendChild(d); };
+  function check(){ if(!window.__friBooted) window.__friBootPanel(errs.length?"An error stopped it while loading.":"It did not finish loading."); }
+  window.addEventListener("load",function(){ setTimeout(check,6000); });
+})(); }catch(e){}
+</script>
 <meta name="robots" content="noindex, nofollow">
 <meta name="googlebot" content="noindex, nofollow">
 <meta name="author" content="Silv-Econ Ltd.">
@@ -1317,7 +1354,7 @@
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-10-27 · v447";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-01 · v448";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -15487,6 +15524,7 @@ function mvMake_(i){
     mmMake_(v.kind, v.tract, o, v);
   }, 90000);
 }
+window.__friBooted=1;      /* v448: the whole app script ran — the start-up guard stands down */
 </script>
 </body>
 </html>
