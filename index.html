@@ -870,6 +870,10 @@ try{ (function(){
           <label>Compartment for plots placed inside a polygon (e.g. a sub-compartment ID)</label><select id="refStandSel" onchange="setRefStandField_(this.value)"></select>
         </div>
         <div class="ls-muted" id="refStandNote" style="font-size:11px;line-height:1.4;padding:0 2px 6px"></div>
+        <div class="map-field" id="refTapRow" style="display:none">
+          <label>Tapping where a polygon overlaps a compartment shows first</label>
+          <select id="refTapSel" onchange="setRefTapPref_(this.value)"><option value="ref">The reference polygon</option><option value="comp">The compartment</option></select>
+        </div>
         <button type="button" id="clearRefBtn" class="ls-clear" style="display:none" onclick="clearRef()">✕ Remove reference points, lines &amp; polygons</button>
       </div>
     </details>
@@ -1367,7 +1371,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-01 · v450";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-01 · v451";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -6889,6 +6893,7 @@ function initMap(){
     if(selectMode){ addSelPoint(ll); return; } if(polyMode){ addPolyPoint(ll); return; } if(routeMode){ addRoutePoint(ll); return; } if(measureMode){ addMeasurePoint(ll); return; } if(moveMode_) return;   // the crosshair is the target;
     if(placeMode){ placeAt(ll.lat,ll.lng); return; }
     if(nearbyPlotPopup_(ll)) return;                    // a plot pin near the tap wins over the boundary
+    if(typeof refTapChoose_==="function" && refTapChoose_(ll)) return;      // v451: a reference polygon here — it, or the compartment, as chosen
     /* v419: a compartment of the property shown opens its sheet — name, class, property, cut, remove */
     try{ if(typeof csPieceAtAny_==="function" && mapDetail_()){ const pc=csPieceAtAny_(ll.lat,ll.lng); if(pc){ showBoundPopup(ll, csFeature_(pc)); return; } } }catch(e){}   // v420: the popup (Layer · Analysis · Species · Marking), with ✎ Edit in it; v421: a piece of any property
     { const bf=boundaryFeatureAt(ll.lat,ll.lng); if(bf) showBoundPopup(ll,bf); }
@@ -7985,7 +7990,7 @@ function renderBoundPopup_(){
   /* The species table is five columns and the marking table is four bands plus a removed/kept
      split — both need more room than the two-column Layer view. */
   const wide=(_bpView==="species"||_bpView==="marking");
-  const body=`<div style="max-height:${wide?"52vh":"38vh"};overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${table}${ageMsg}${note}${rpt}${edit}</div>`;
+  const body=`<div style="max-height:${wide?"52vh":"38vh"};overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${table}${ageMsg}${note}${rpt}${edit}${(typeof refAltHtml_==="function")?refAltHtml_():""}</div>`;
   _bpPopup=L.popup({maxWidth:wide?340:280,autoPan:true,className:"bpop"+(wide?" bpop-wide":"")}).setLatLng(_bpLatLng)
     .setContent(`<div style="font-family:'Courier New',monospace;color:#16271a;line-height:1.4">`+
       `<b style="font-size:13px">${esc(title)}</b>`+
@@ -10968,6 +10973,7 @@ function refPolyFields_(){ const keys=[]; refPolys.slice(0,500).forEach(P=>Objec
   const has=refPolys.length>0, opt=(cur,none)=>`<option value="">${none}</option>`+keys.map(k=>`<option value="${esc(k)}"${k===cur?" selected":""}>${esc(k)}</option>`).join("");
   const r1=$("refPolyLblRow"), r2=$("refStandRow"), s1=$("refPolyLblSel"), s2=$("refStandSel"), hint=$("refLayersHint");
   if(r1) r1.style.display=has?"flex":"none"; if(r2) r2.style.display=has?"flex":"none";
+  { const r3=$("refTapRow"), s3=$("refTapSel"); if(r3) r3.style.display=has?"flex":"none"; if(s3) s3.value=refTapPref; }      // v451
   if(s1){ s1.innerHTML=opt(refPolyLblField,"(no labels)"); s1.value=refPolyLblField; } if(s2){ s2.innerHTML=opt(refStandField,"(not used — plots take the compartment layer's)"); s2.value=refStandField; }
   if(hint) hint.style.display=(has||(refLabels&&refLabels.length)||refFeatCount)?"none":"block";
   const st=$("refStandNote"); if(st) st.textContent=refStandField&&has?`Plots placed inside these polygons take their “${refStandField}” as their compartment, instead of the compartment layer's. To put plots back on the larger compartment later: map ☒ Select → Set compartment from the compartment layer.`:"";
@@ -10984,6 +10990,33 @@ function compSelected_(fromRef){ const n=selected.length; if(!n) return; let ch=
   if(ch){ persist(); persistAudit(); renderSaved(); if(fmap) renderMapPins(); }
   const synced=ch?syncEditedSelected_():0; closeInfoSheet_();
   toast((ch?`${ch} plot${ch===1?"":"s"} set to ${fromRef?"their sub-compartment":"the compartment layer's compartment"}`:"Nothing to change")+(none?` · ${none} not inside ${fromRef?"a sub-compartment":"a compartment"}, left as they were`:"")+(synced?` · updating ${synced} in the Sheet`:"")); }
+/* ============ v451 — a tap where a reference polygon overlaps a compartment (Chris, 2026-11-01) ============
+   The reference polygon's own popup opened and the compartment's replaced it at once. Now one tap opens one popup: the
+   reference polygon or the compartment, whichever is chosen under Layers → 📍 Reference layers ("Tap shows first"), and that
+   popup has a link to the other. */
+var refTapPref="ref"; try{ if(typeof STORE!=="undefined"&&STORE) refTapPref=STORE.getItem("fi_reftap")||"ref"; }catch(e){}
+var _refTapCtx=null;
+function refPolyAt_(lat,lon){ if(!refPolys.length) return null; try{ if(typeof layerVis!=="undefined"&&layerVis.ref===false) return null; }catch(e){}
+  let best=null; refPolys.forEach(P=>{ if(refPolyIn_(P,lat,lon)&&(!best||P.a<best.a)) best=P; }); return best; }
+/* what the compartment layer has at the point: a piece's feature, or a loaded file's feature */
+function refTapComp_(ll){ try{ if(typeof csPieceAtAny_==="function"&&mapDetail_()){ const pc=csPieceAtAny_(ll.lat,ll.lng); if(pc) return csFeature_(pc); } }catch(e){}
+  try{ return boundaryFeatureAt(ll.lat,ll.lng)||null; }catch(e){ return null; } }
+function refTapName_(f){ try{ return bpStandName_(f)||""; }catch(e){ return ""; } }
+function refTapChoose_(ll){ const P=refPolyAt_(ll.lat,ll.lng); if(!P){ _refTapCtx=null; return false; }
+  const comp=refTapComp_(ll); _refTapCtx={ll, P, comp};
+  if(comp && refTapPref==="comp"){ showBoundPopup(ll, comp); return true; }
+  refPopupShow_(); return true; }
+function refPopupShow_(){ const c=_refTapCtx; if(!c) return; const nm=c.comp?refTapName_(c.comp):"";
+  const alt=c.comp?`<div onclick="refTapSwitch_('comp')" style="cursor:pointer;margin-top:6px;font-size:11px;color:#2f6b3c;text-decoration:underline">🗂 Show the compartment${nm?" "+esc(nm):""} instead</div>`:"";
+  try{ fmap.closePopup(); }catch(e){}
+  L.popup({maxWidth:280,autoPan:true,className:"bpop"}).setLatLng(c.ll).setContent(`<div style="font-family:'Courier New',monospace;color:#16271a;line-height:1.4"><b style="font-size:12px">📍 Reference polygon</b><div style="margin-top:3px">${refPolyPopup_(c.P.props)}</div>${alt}</div>`).openOn(fmap); }
+function refTapSwitch_(to){ const c=_refTapCtx; if(!c) return; try{ fmap.closePopup(); }catch(e){}
+  if(to==="comp"&&c.comp) showBoundPopup(c.ll, c.comp); else refPopupShow_(); }
+/* the link in the compartment's popup, when the tap was also on a reference polygon */
+function refAltHtml_(){ const c=_refTapCtx; if(!c||!c.P||!_bpLatLng||c.ll!==_bpLatLng) return "";
+  const v=refStandField?refPolyVal_(c.P,refStandField):(refPolyLblField?refPolyVal_(c.P,refPolyLblField):"");
+  return `<div onclick="refTapSwitch_('ref')" style="cursor:pointer;margin-top:8px;font-size:11px;color:#2f6b3c;text-decoration:underline">📍 Show the reference polygon${v?" "+esc(v):""} instead</div>`; }
+function setRefTapPref_(v){ refTapPref=v==="comp"?"comp":"ref"; try{ STORE&&STORE.setItem("fi_reftap",refTapPref); }catch(e){} }
 function renderRef(gj){
   if(!refLayer) return 0; const cols=Array.isArray(gj)?gj:[gj]; let n=0; const b=[];
   const pal=["#ff7043","#80cbc4","#ffe082","#ce93d8","#a5d6a7","#90caf9"]; let ci=0;
@@ -11008,7 +11041,7 @@ function renderRef(gj){
       else if(g.type==="MultiLineString") g.coordinates.forEach(l=>{ const co=l.map(c=>[c[1],c[0]]); L.polyline(co,{color:col,weight:3,opacity:.9}).addTo(refLayer); co.forEach(c=>b.push(c)); n++; });
       else if(g.type==="Polygon"||g.type==="MultiPolygon"){ const parts=(g.type==="Polygon"?[g.coordinates]:g.coordinates).map(p=>p.map(r=>r.map(c=>[c[1],c[0]]))).filter(p=>p[0]&&p[0].length>=3);
         if(!parts.length) return; refPolyAdd_(pr, parts);      // v450: kept, so plots inside can take their compartment from it
-        parts.forEach(co=>{ L.polygon(co,{color:col,weight:2,fillOpacity:.12,smoothFactor:2}).addTo(refLayer).bindPopup(()=>refPolyPopup_(pr)); co[0].forEach(c=>b.push(c)); }); n++; }
+        parts.forEach(co=>{ L.polygon(co,{color:col,weight:2,fillOpacity:.12,smoothFactor:2,interactive:false}).addTo(refLayer); co[0].forEach(c=>b.push(c)); }); n++; }      // v451: a tap on it goes through mapTapHandle_, which chooses between it and the compartment under it
     }); });
   pickRefField(); try{ refPolyFields_(); }catch(e){}
   refFeatCount+=n; updateLayerStatus();
