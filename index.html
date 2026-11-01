@@ -802,15 +802,15 @@ try{ (function(){
         <button type="button" onclick="closeLayersMenu();openImportPlots()">📥 Import plots (another device / source)</button>
         <button type="button" onclick="closeLayersMenu();restoreFromSheet()">☁ Restore plots from the Sheet</button>
         <button type="button" onclick="closeLayersMenu();$('boundInput').click()">⬇ Stand boundaries (polygons)</button>
-        <button type="button" onclick="closeLayersMenu();$('pointsInput').click()">⬇ Reference points / lines</button>
-        <button type="button" id="refClearBtn" onclick="closeLayersMenu();clearRefFiles()" style="display:none">✕ Remove reference points / lines</button>
+        <button type="button" onclick="closeLayersMenu();$('pointsInput').click()">⬇ Reference points, lines &amp; polygons</button>
+        <button type="button" id="refClearBtn" onclick="closeLayersMenu();clearRefFiles()" style="display:none">✕ Remove reference points, lines &amp; polygons</button>
         <button type="button" onclick="closeLayersMenu();$('pdfInput').click()">🗺 Georeferenced PDF map</button>
         <button type="button" id="pdfUnloadBtn" onclick="closeLayersMenu();unloadPDF()" style="display:none">✕ Unload PDF map</button>
         <button type="button" onclick="closeLayersMenu();openDriveLayers()">☁ From Drive — plots, boundaries, points &amp; PDF maps</button>
       </div>
     </details>
 
-    <details class="lgroup" id="lgroupFields"><summary>🗂 Boundary fields &amp; areas</summary>
+    <details class="lgroup" id="lgroupFields"><summary>🗂 Compartment file — fields &amp; areas</summary>
       <div class="lgroup-body">
         <div id="boundFileList" class="layer-list" style="display:none"></div>
         <div class="map-field" id="mapFieldRow" style="display:none">
@@ -854,10 +854,23 @@ try{ (function(){
           <label>Tap-a-stand popup fields</label>
           <div id="popupFieldList" class="popupfield-list"></div>
         </div>
+      </div>
+    </details>
+
+    <details class="lgroup" id="lgroupRef"><summary>📍 Reference layers — points, lines &amp; polygons</summary>
+      <div class="lgroup-body">
+        <div class="ls-muted" id="refLayersHint" style="font-size:12px;line-height:1.4;padding:2px">None loaded. Load them under Load &amp; import layers → ⬇ Reference points, lines &amp; polygons.</div>
         <div class="map-field" id="refFieldRow" style="display:none">
           <label>Point label field</label><select id="refFieldSel" onchange="setRefField(this.value)"></select>
         </div>
-        <button type="button" id="clearRefBtn" class="ls-clear" style="display:none" onclick="clearRef()">✕ Remove imported points / lines</button>
+        <div class="map-field" id="refPolyLblRow" style="display:none">
+          <label>Polygon label field</label><select id="refPolyLblSel" onchange="setRefPolyLblField_(this.value)"></select>
+        </div>
+        <div class="map-field" id="refStandRow" style="display:none">
+          <label>Compartment for plots placed inside a polygon (e.g. a sub-compartment ID)</label><select id="refStandSel" onchange="setRefStandField_(this.value)"></select>
+        </div>
+        <div class="ls-muted" id="refStandNote" style="font-size:11px;line-height:1.4;padding:0 2px 6px"></div>
+        <button type="button" id="clearRefBtn" class="ls-clear" style="display:none" onclick="clearRef()">✕ Remove reference points, lines &amp; polygons</button>
       </div>
     </details>
 
@@ -1354,7 +1367,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-01 · v448";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-01 · v450";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3627,6 +3640,7 @@ function nextPlotFor(stand, tract){
 }
 /* is this compartment one of this property's? (its pieces, its Sheet records, a loaded file's compartments, or its plots) */
 function standKnownFor_(t,s){ const tk=propK_(t), sk=propK_(s); if(!tk||!sk) return true;
+  try{ if(refStandValues_().has(sk)) return true; }catch(e){}      // v450: a sub-compartment from the reference polygons
   try{ if(csOf_(t).some(c=>propK_(c.name)===sk)) return true; }catch(e){}
   try{ if(((PROPS.comps||{})[tk]||{})[sk]) return true; }catch(e){}
   try{ if(BOUND&&standField&&(BOUND.features||[]).some(f=>propK_(featTract_(f))===tk&&propK_((f.properties||{})[standField])===sk)) return true; }catch(e){}
@@ -7218,7 +7232,7 @@ function removeBoundFile(id){
 function renderLayerList(){
   const c=$("boundFileList"); if(!c) return;
   renderLayerVis_();
-  { const rb=$("refClearBtn"); if(rb) rb.style.display=((refLabels&&refLabels.length)||refFeatCount)?"block":"none"; }      // v430: lines too
+  { const rb=$("refClearBtn"); if(rb) rb.style.display=((refLabels&&refLabels.length)||refFeatCount||refPolys.length)?"block":"none"; }      // v430: lines too
   { const ub=$("pdfUnloadBtn"); if(ub) ub.style.display=pdfOverlay?"block":"none"; }
   if(!boundFiles.length){ c.innerHTML=""; c.style.display="none"; return; }
   c.style.display="block";
@@ -7995,7 +8009,10 @@ function standAt(lon,lat){
   return null;
 }
 // Stand ID for a point: the loaded boundary file wins; then the compartments on the Sheet (v433); then a hand-drawn area polygon.
-function standOrPolyAt_(lat,lon){ let s=standAt(lon,lat); if(!s){ const pc=csPieceInner_(lat,lon); if(pc) s=pc.name; } if(!s){ const h=pointInPolys_(lat,lon); if(h) s=h.name; } return s||null; }
+function standOrPolyAt_(lat,lon){ const rs=refStandAt_(lat,lon); if(rs) return rs;      // v450: a sub-compartment polygon, when chosen, wins
+  return standOrPolyAt0_(lat,lon); }
+/* the compartment from the compartment layer / file / drawn areas only — never the sub-compartment polygons */
+function standOrPolyAt0_(lat,lon){ let s=standAt(lon,lat); if(!s){ const pc=csPieceInner_(lat,lon); if(pc) s=pc.name; } if(!s){ const h=pointInPolys_(lat,lon); if(h) s=h.name; } return s||null; }
 const _csBoxC=new WeakMap(); function csBox_(c){ let b=_csBoxC.get(c); if(b&&b.r===c.rings) return b.b; let a=1/0,z=-1/0,w=1/0,e=-1/0; (c.rings[0]||[]).forEach(p=>{ if(p[0]<a)a=p[0]; if(p[0]>z)z=p[0]; if(p[1]<w)w=p[1]; if(p[1]>e)e=p[1]; }); b=[a,z,w,e]; _csBoxC.set(c,{r:c.rings,b}); return b; }
 /* v433: the smallest compartment piece (any property's, the chosen one's first) the point is in */
 function csPieceInner_(lat,lon,list){ try{ const P=cgProj_(lat,lon), a=propK_(propActiveTract_()); let best=null, bestA=1/0, bestMine=false;
@@ -8927,6 +8944,11 @@ if(_origRenderSaved){ renderSaved=function(){ _origRenderSaved.apply(this,argume
 /* ====================== MAP TOOLS: layers · place · measure · GeoPDF · import ====================== */
 let refLayer=null, placeMode=false, placeMarker=null;
 let freflabelLayer=null, refLabels=[], refLabelField=null, refFeatCount=0;   // point labels (virtualized like stand labels)
+/* v450 — reference POLYGONS (Chris, 2026-11-01: a client's sub-compartment file for a regeneration assessment). Kept with their
+   attributes; one field can give the plots placed inside them their compartment (it wins over the compartment layer), another
+   labels them on the map. Both choices are kept on the phone. */
+let refPolys=[], refPolyLblField="", refStandField="";
+try{ if(typeof STORE!=="undefined"&&STORE){ refPolyLblField=STORE.getItem("fi_refpolylbl")||""; refStandField=STORE.getItem("fi_refstand")||""; } }catch(e){}
 let measureMode=false, measurePts=[], measureLine=null, measureMarks=[];
 let pdfOverlay=null, pdfBounds=null, pdfVisible=true, pdfName="", pdfCorners=null;
 // A Leaflet layer that pins an image to four geographic corners [TL,TR,BR,BL] via a CSS affine
@@ -9076,9 +9098,10 @@ function updateLayerStatus(){
     +`<div class="ls-row ls-muted" style="margin-top:2px"><span>Saved offline ~${usedK} KB${near}</span><span style="flex:1"></span><span>${pct}%</span></div>`
     +`<div class="ls-bar"><i style="width:${pct}%;background:${barCol}"></i></div>`;
   const cb=$("clearRefBtn"); if(cb) cb.style.display = refFeatCount>0 ? "block" : "none";
+  try{ refPolyFields_(); }catch(e){}
 }
 function clearRef(){      // v430: removed from this phone too — it only cleared the map, and the lines came back at the next start
-  if(!refFeatCount && !(refLabels&&refLabels.length)){ toast("No imported points or lines loaded"); return; }
+  if(!refFeatCount && !(refLabels&&refLabels.length) && !refPolys.length){ toast("No reference points, lines or polygons loaded"); return; }
   clearRefFiles();
   const row=$("refFieldRow"); if(row) row.style.display="none";
   const sel=$("refFieldSel"); if(sel) sel.innerHTML="";
@@ -9610,6 +9633,8 @@ function showSelectionActions_(){
     `<div style="display:flex;flex-direction:column;gap:8px">`+
     `<button class="btn ghost" type="button" onclick="nameSelected()">🏷 Assign Stand / name to selected</button>`+
     `<button class="btn ghost" type="button" onclick="tractSelected()">🏷 Assign Tract / property to selected</button>`+
+    `<button class="btn ghost" type="button" onclick="compSelected_(false)">🗂 Set compartment from the compartment layer</button>`+
+    (refStandField&&refPolys.length?`<button class="btn ghost" type="button" onclick="compSelected_(true)">🔖 Set sub-compartment from the reference polygons (${esc(refStandField)})</button>`:"")+
     `<button class="btn ghost" type="button" onclick="numberSelected()">🔢 Auto-number plots (1,2,3… per compartment)</button>`+
     `<button class="btn ghost" type="button" onclick="ageSelected()">🌲 Fill AGE from compartment</button>`+
     `<button class="btn ghost" type="button" onclick="exportSelected('shp')">⬇ Export selected as shapefile (.zip)</button>`+
@@ -10865,6 +10890,7 @@ function trimRefFc_(fc){
     features: fc.features.map(f=>{
       const pr={};
       if(keep && f.properties && f.properties[keep]!=null) pr[keep]=f.properties[keep];
+      if(f.geometry && /Polygon/.test(f.geometry.type||"") && f.properties){ Object.keys(f.properties).slice(0,40).forEach(k=>{ const v=f.properties[k]; if(v!=null && typeof v!=="object") pr[k]=v; }); }      // v450: a polygon keeps its fields (they are few; points stay trimmed)
       let g=f.geometry;
       if(g && g.coordinates) g={ type:g.type, coordinates:round(g.coordinates) };
       return { type:"Feature", properties:pr, geometry:g };
@@ -10906,9 +10932,9 @@ function loadCachedRefFiles_(){
   }); }).catch(()=>{}); }catch(e){}
 }
 function clearRefFiles(){
-  if((refLabels.length||refFeatCount) && !confirm("Remove all "+(refFeatCount||refLabels.length)+" imported reference points / lines from the map and this phone?")) return;
+  if((refLabels.length||refFeatCount||refPolys.length) && !confirm("Remove all "+(refFeatCount||refLabels.length)+" imported reference points, lines and polygons from the map and this phone?"+(refStandField&&refPolys.length?"\n\nPlots already given a sub-compartment from them keep it.":""))) return;
   if(refLayer) refLayer.clearLayers(); if(freflabelLayer) freflabelLayer.clearLayers();
-  refLabels=[]; refFeatCount=0; refLabelField=null;
+  refLabels=[]; refFeatCount=0; refLabelField=null; refPolys=[]; try{ refPolyFields_(); }catch(e){}
   try{ STORE&&STORE.removeItem("fi_reffiles"); }catch(e){}
   try{ ldbPut("reffiles",[]).catch(()=>{}); }catch(e){}
   updateLayerStatus(); renderLayerVis_(); toast("Reference layers removed");
@@ -10923,6 +10949,41 @@ function refPlotNum_(pr){
   if(k && pr[k]!=null && String(pr[k]).trim()!=="") return String(pr[k]).trim();
   return "";
 }
+/* ============ v450 — reference polygons: sub-compartments for the plots inside them ============ */
+function refPolyAdd_(pr, parts){ let w=1/0,s_=1/0,e=-1/0,n=-1/0, a=0;
+  parts.forEach(p=>(p[0]||[]).forEach(q=>{ if(q[1]<w)w=q[1]; if(q[1]>e)e=q[1]; if(q[0]<s_)s_=q[0]; if(q[0]>n)n=q[0]; }));
+  parts.forEach(p=>p.forEach((r,ri)=>{ let t=0; for(let i=0,j=r.length-1;i<r.length;j=i++) t+=(r[j][1]+r[i][1])*(r[j][0]-r[i][0]); a+=(ri?-1:1)*Math.abs(t); }));
+  refPolys.push({props:pr||{}, parts, box:[w,s_,e,n], a}); }
+function refPolyIn_(P,lat,lon){ const b=P.box; if(lon<b[0]||lon>b[2]||lat<b[1]||lat>b[3]) return false; let inn=false;
+  P.parts.forEach(p=>{ let inPart=false; p.forEach(r=>{ if(pointInRing_(lat,lon,r)) inPart=!inPart; }); if(inPart) inn=true; }); return inn; }
+function refPolyVal_(P,k){ const v=(P.props||{})[k]; return v==null?"":String(v).trim(); }
+/* the sub-compartment at a point: the smallest reference polygon there with a value in the chosen field */
+function refStandAt_(lat,lon){ if(!refStandField||!refPolys.length||!isFinite(lat)||!isFinite(lon)) return null; let best=null;
+  refPolys.forEach(P=>{ const v=refPolyVal_(P,refStandField); if(v&&refPolyIn_(P,lat,lon)&&(!best||P.a<best.a)) best={v,a:P.a}; }); return best?best.v:null; }
+function refStandValues_(){ const set=new Set(); if(refStandField) refPolys.forEach(P=>{ const v=refPolyVal_(P,refStandField); if(v) set.add(propK_(v)); }); return set; }
+function refPolyPopup_(pr){ const keys=Object.keys(pr||{}).filter(k=>pr[k]!=null&&pr[k]!=="").slice(0,12);
+  return `<div style="font-family:monospace;font-size:11px;color:#16271a">`+(refStandField&&pr[refStandField]!=null?`<b>Sub-compartment ${esc(pr[refStandField])}</b><br>`:"")+keys.map(k=>`${esc(k)}: ${esc(pr[k])}`).join("<br>")+`</div>`; }
+/* Layers → Reference layers: the polygon label field and the sub-compartment field */
+function refPolyFields_(){ const keys=[]; refPolys.slice(0,500).forEach(P=>Object.keys(P.props||{}).forEach(k=>{ if(keys.indexOf(k)<0) keys.push(k); }));
+  const has=refPolys.length>0, opt=(cur,none)=>`<option value="">${none}</option>`+keys.map(k=>`<option value="${esc(k)}"${k===cur?" selected":""}>${esc(k)}</option>`).join("");
+  const r1=$("refPolyLblRow"), r2=$("refStandRow"), s1=$("refPolyLblSel"), s2=$("refStandSel"), hint=$("refLayersHint");
+  if(r1) r1.style.display=has?"flex":"none"; if(r2) r2.style.display=has?"flex":"none";
+  if(s1){ s1.innerHTML=opt(refPolyLblField,"(no labels)"); s1.value=refPolyLblField; } if(s2){ s2.innerHTML=opt(refStandField,"(not used — plots take the compartment layer's)"); s2.value=refStandField; }
+  if(hint) hint.style.display=(has||(refLabels&&refLabels.length)||refFeatCount)?"none":"block";
+  const st=$("refStandNote"); if(st) st.textContent=refStandField&&has?`Plots placed inside these polygons take their “${refStandField}” as their compartment, instead of the compartment layer's. To put plots back on the larger compartment later: map ☒ Select → Set compartment from the compartment layer.`:"";
+  const rb=$("clearRefBtn"); if(rb) rb.style.display=(refFeatCount>0||has)?"block":"none"; }
+function setRefPolyLblField_(k){ refPolyLblField=k||""; try{ STORE&&STORE.setItem("fi_refpolylbl",refPolyLblField); }catch(e){} renderRefLabels(); }
+function setRefStandField_(k){ refStandField=k||""; try{ STORE&&STORE.setItem("fi_refstand",refStandField); }catch(e){} refPolyFields_();
+  try{ updateInStand(); }catch(e){}
+  toast(refStandField?`Plots placed inside the reference polygons now take “${refStandField}” as their compartment`:"Plots take their compartment from the compartment layer again"); }
+/* map ☒ Select: put the selected plots on the compartment layer's compartment, or on their sub-compartment */
+function compSelected_(fromRef){ const n=selected.length; if(!n) return; let ch=0, none=0;
+  selected.forEach(sx=>{ const p=sx.p, la=parseFloat(p.Y), lo=parseFloat(p.X); if(!isFinite(la)||!isFinite(lo)){ none++; return; }
+    const v=fromRef?refStandAt_(la,lo):standOrPolyAt0_(la,lo); if(!v){ none++; return; }
+    if(String(p.STANDID||"")===String(v)) return; p.STANDID=String(v); ch++; if(sx.set==="mine"&&p._sent) p._sent=false; });
+  if(ch){ persist(); persistAudit(); renderSaved(); if(fmap) renderMapPins(); }
+  const synced=ch?syncEditedSelected_():0; closeInfoSheet_();
+  toast((ch?`${ch} plot${ch===1?"":"s"} set to ${fromRef?"their sub-compartment":"the compartment layer's compartment"}`:"Nothing to change")+(none?` · ${none} not inside ${fromRef?"a sub-compartment":"a compartment"}, left as they were`:"")+(synced?` · updating ${synced} in the Sheet`:"")); }
 function renderRef(gj){
   if(!refLayer) return 0; const cols=Array.isArray(gj)?gj:[gj]; let n=0; const b=[];
   const pal=["#ff7043","#80cbc4","#ffe082","#ce93d8","#a5d6a7","#90caf9"]; let ci=0;
@@ -10945,10 +11006,11 @@ function renderRef(gj){
       else if(g.type==="MultiPoint") g.coordinates.forEach(c=>addPt(c[0],c[1]));
       else if(g.type==="LineString"){ const co=g.coordinates.map(c=>[c[1],c[0]]); L.polyline(co,{color:col,weight:3,opacity:.9}).addTo(refLayer).bindPopup(esc(label)); co.forEach(c=>b.push(c)); n++; }
       else if(g.type==="MultiLineString") g.coordinates.forEach(l=>{ const co=l.map(c=>[c[1],c[0]]); L.polyline(co,{color:col,weight:3,opacity:.9}).addTo(refLayer); co.forEach(c=>b.push(c)); n++; });
-      else if(g.type==="Polygon"){ const co=g.coordinates.map(r=>r.map(c=>[c[1],c[0]])); L.polygon(co,{color:col,weight:2,fillOpacity:.12,smoothFactor:2}).addTo(refLayer).bindPopup(esc(label)); co[0].forEach(c=>b.push(c)); n++; }
-      else if(g.type==="MultiPolygon") g.coordinates.forEach(p=>{ const co=p.map(r=>r.map(c=>[c[1],c[0]])); L.polygon(co,{color:col,weight:2,fillOpacity:.12,smoothFactor:2}).addTo(refLayer); co[0].forEach(c=>b.push(c)); n++; });
+      else if(g.type==="Polygon"||g.type==="MultiPolygon"){ const parts=(g.type==="Polygon"?[g.coordinates]:g.coordinates).map(p=>p.map(r=>r.map(c=>[c[1],c[0]]))).filter(p=>p[0]&&p[0].length>=3);
+        if(!parts.length) return; refPolyAdd_(pr, parts);      // v450: kept, so plots inside can take their compartment from it
+        parts.forEach(co=>{ L.polygon(co,{color:col,weight:2,fillOpacity:.12,smoothFactor:2}).addTo(refLayer).bindPopup(()=>refPolyPopup_(pr)); co[0].forEach(c=>b.push(c)); }); n++; }
     }); });
-  pickRefField();
+  pickRefField(); try{ refPolyFields_(); }catch(e){}
   refFeatCount+=n; updateLayerStatus();
   if(b.length) fmap.fitBounds(b,{padding:[36,36]});
   return n;
@@ -10965,6 +11027,12 @@ function renderRefLabels(){
   try{ renderRefLabels0_(_it); }finally{ lblSync_(freflabelLayer,_it); } }      /* v444 */
 function renderRefLabels0_(_it){
   if((typeof labelVis!=="undefined"&&labelVis.ref===false)) return;   // labels turned off
+  /* v450: the reference polygons' labels, in the chosen field, from zoom 14 */
+  if(refPolyLblField && refPolys.length && fmap && fmap.getZoom()>=14){ const bb=fmap.getBounds(); let m=0;
+    refPolys.forEach(P=>{ if(m>=200) return; const v=refPolyVal_(P,refPolyLblField); if(!v) return; const big=P.parts.slice().sort((x,y)=>y[0].length-x[0].length)[0][0];
+      let la=0,lo=0; big.forEach(q=>{ la+=q[0]; lo+=q[1]; }); const ll=[la/big.length, lo/big.length]; if(!bb.contains(ll)) return; m++;
+      const h=`<div class="refpoly-lbl" style="background:rgba(255,112,67,.88);color:#fff;font:700 11px system-ui;padding:1px 5px;border-radius:6px;white-space:nowrap;transform:translateX(-50%);display:inline-block">${esc(v)}</div>`;
+      _it.push({k:"rp|"+ll.join(",")+"|"+h, make:()=>L.marker(ll,{interactive:false,keyboard:false,icon:L.divIcon({className:"",html:h,iconSize:[0,0],iconAnchor:[0,8]})})}); }); }
   if(!refLabels.length || !fmap || fmap.getZoom()<REF_LABEL_MIN_ZOOM) return;
   const bb=fmap.getBounds(); let n=0;
   for(const R of refLabels){
@@ -12093,7 +12161,9 @@ let ovLayer=null, ovLabelLayer=null, _ovDetail=null, _ovExt={};
 function mapDetail_(){ try{ return !fmap || fmap.getZoom()>=MAP_DETAIL_ZOOM; }catch(e){ return true; } }
 /* where a property is: its outline or compartments; failing those (v400), where its plots are */
 function ovPlotExt_(t){ const k=propK_(t); let w=1/0,s_=1/0,e=-1/0,n=-1/0, any=false;
-  (saved||[]).concat(auditPlots||[]).forEach(q=>{ if(!q||propK_(q.TRACT)!==k) return; const la=parseFloat(q.Y), lo=parseFloat(q.X); if(!isFinite(la)||!isFinite(lo)||(la===0&&lo===0)) return; any=true; if(lo<w)w=lo; if(lo>e)e=lo; if(la<s_)s_=la; if(la>n)n=la; });
+  const add=(la,lo)=>{ if(!isFinite(la)||!isFinite(lo)||(la===0&&lo===0)) return; any=true; if(lo<w)w=lo; if(lo>e)e=lo; if(la<s_)s_=la; if(la>n)n=la; };
+  (saved||[]).concat(auditPlots||[]).forEach(q=>{ if(!q||propK_(q.TRACT)!==k) return; add(parseFloat(q.Y), parseFloat(q.X)); });
+  try{ (typeof crewData!=="undefined"&&crewData||[]).forEach(r=>{ if(r&&propK_(r.tract)===k) add(parseFloat(r.lat), parseFloat(r.lon)); }); }catch(e){}      // v449: the crew's plots on the Sheet too
   return any?[w,s_,e,n]:null; }
 function ovExtOf_(t){ const p=propGet_(t)||{}; const key=t+"|"+(Array.isArray(p.boundary)?p.boundary.length:0); if(_ovExt[key]===undefined) _ovExt[key]=propExtent_(t)||ovPlotExt_(t); return _ovExt[key]; }
 /* v406 — one property only (Chris, 2026-10-12): a property found through the Find bar is the only one on the map —
@@ -12288,8 +12358,17 @@ function lioOnMapOpen_(){
 /* v421 — zoom to every property (their outlines, else their compartments) */
 function propZoomAll_(){ let b=null; propTracts_().forEach(t=>{ const e=propExtent_(t); if(!e) return; b=b?[Math.min(b[0],e[0]),Math.min(b[1],e[1]),Math.max(b[2],e[2]),Math.max(b[3],e[3])]:e.slice(); });
   if(!b) return false; try{ if(typeof fmap!=="undefined"&&fmap&&window.L){ fmap.fitBounds(L.latLngBounds([[b[1],b[0]],[b[3],b[2]]]),{padding:[30,30],maxZoom:16}); return true; } }catch(e){} return false; }
-function propZoomTo_(tract, quiet){ const t=tract||propActiveTract_(); if(!t) return false; const e=propExtent_(t);
-  if(!e){ if(!quiet) toast("No outline or compartments for "+t+" yet — nothing to zoom to",true); return false; }
+/* v449 — a property with plots but no outline or compartments yet zooms to its plots (Chris, 2026-11-01): this phone's, the
+   imported ones, and the crew's on the Sheet. If none are on the phone yet, the crew's plots are fetched once and it tries again. */
+let _pzRetry={};
+function propZoomTo_(tract, quiet){ const t=tract||propActiveTract_(); if(!t) return false; let e=propExtent_(t), byPlots=false;
+  if(!e){ e=ovPlotExt_(t); byPlots=!!e; }
+  if(!e){ const k=propK_(t);
+    if(!_pzRetry[k] && typeof connected!=="undefined" && connected && !isOffline() && typeof fetchCrew==="function" && typeof crewLayer!=="undefined" && crewLayer){
+      _pzRetry[k]=1; try{ fetchCrew(true); }catch(err){} let n=0; const iv=setInterval(()=>{ n++; if(ovPlotExt_(t)||n>40){ clearInterval(iv); delete _pzRetry[k]; if(ovPlotExt_(t)){ propZoomTo_(t,quiet); try{ ovRender_(); }catch(err){} } else if(!quiet) toast("No outline, compartments or plots for "+t+" yet — nothing to zoom to",true); } },250);
+      if(!quiet) toast("Looking for "+t+"'s plots on the Sheet…"); return true; }
+    if(!quiet) toast("No outline, compartments or plots for "+t+" yet — nothing to zoom to",true); return false; }
+  if(byPlots){ const pad=0.0015; e=[e[0]-pad,e[1]-pad,e[2]+pad,e[3]+pad]; if(!quiet) toast(t+" has no outline or compartments yet — showing its plots"); }
   try{ if(typeof fmap!=="undefined"&&fmap&&window.L){ fmap.fitBounds(L.latLngBounds([[e[1],e[0]],[e[3],e[2]]]),{padding:[30,30],maxZoom:17}); return true; } }catch(err){}
   return false; }
 function propPickActive_(v){ propSetActive_(v);
@@ -12350,7 +12429,7 @@ function findClearAll_(){ try{ mapOnlyClear_(); }catch(e){} try{ propSetActive_(
   try{ propZoomAll_(); }catch(e){} try{ if(typeof findPinClear_==="function") findPinClear_(); else if(findPin&&fmap){ fmap.removeLayer(findPin); findPin=null; } }catch(e){} const i=$("findInput"); if(i) i.value=""; try{ findRender_([]); }catch(e){} findClose_(); }
 function findPickProp_(t){ propSetActive_(t); mapOnly=String(t||""); try{ STORE&&STORE.setItem("fi_maponly",mapOnly); }catch(e){}      // v406: only this one
   try{ renderBoundaries(); renderMapPins(); if(crewShown&&crewData.length) renderCrewPlots(crewData,true); }catch(e){} try{ lioCache=null; lioRender_(); lioOnMapOpen_(); }catch(e){} try{ const b=$("findShowAll"); if(b) b.style.display=""; }catch(e){}
-  const z=propZoomTo_(t); findMsg_(z?"Showing only "+t+" — tap Show all for the rest":t+" has no outline or compartments to zoom to yet"); if(z) setTimeout(findClose_,900); }
+  const z=propZoomTo_(t,true); findMsg_(z?"Showing only "+t+" — tap Show all for the rest":t+" has no outline, compartments or plots to zoom to yet"); if(z) setTimeout(findClose_,900); }
 function findGo_(){
   const i=$("findInput"), q=String((i&&i.value)||"").trim();
   const props=findProps_(q);
@@ -14874,7 +14953,7 @@ function propFollowPush_(){ const F=propDirty.follow||{}, keys=Object.keys(F); i
   if((propDirty.shapeDel||[]).length) return Promise.resolve();      // deletions still to go: the Sheet's layer is not the phone's yet
   const jobs=[]; keys.forEach(k=>{ const f=F[k]; if(!f) return;
     if(Object.keys(propDirty.shapes||{}).some(id=>{ const c=(PROPS.shapes||{})[id]; return c&&propK_(c.tract)===k; })) return;      // pieces still unsent
-    const stamp=f; jobs.push(sheetPost_({_action:"compfollow", email:String(cruiserEmail||""), tract:f.tract, before:f.before}).then(j=>{
+    const stamp=f; jobs.push(sheetPost_({_action:"compfollow", email:String(cruiserEmail||""), tract:f.tract, before:f.before, keep:(()=>{ try{ return [...refStandValues_()].slice(0,2000); }catch(e){ return []; } })()}).then(j=>{
       if(j&&j.ok){ if(propDirty.follow&&propDirty.follow[k]===stamp) delete propDirty.follow[k]; propPersist_();
         if(j.moved) toast("The Sheet moved "+j.moved+" plot"+(j.moved===1?"":"s")+" of "+f.tract+" to the compartment"+(j.moved===1?"":"s")+" they lie in — every phone gets it on its next sync"); }
       else if(j&&j.ok===false&&/unknown|not allowed|action/i.test(String(j.error||""))){ /* an older backend: drop it rather than retry forever */ delete propDirty.follow[k]; propPersist_(); } }).catch(()=>{})); });
@@ -14894,7 +14973,9 @@ function csPlotsFollow_(tract, before, after, quiet){
   const ren={}; Object.keys(oldIds).forEach(k=>{ if(afterNames.has(k)) return; const nn=[...new Set(oldIds[k].map(id=>byId[id]&&byId[id].name).filter(Boolean))]; if(nn.length===1) ren[k]=nn[0]; });
   const changed=[], by={}; let kept=0;
   const setTo=(p,n)=>{ p.STANDID=String(n); if(!quiet) p._sent=false; changed.push(p); by[n]=(by[n]||0)+1; };      // v427 quiet: the Sheet already has it
+  const keepRef=(()=>{ try{ return refStandValues_(); }catch(e){ return new Set(); } })();      // v450: a sub-compartment ID (from the reference polygons) is never overwritten by a layer edit
   saved.forEach(p=>{ if(!p) return; const s0=String(p.STANDID||"").trim(), pt=propK_(p.TRACT||""); if(pt&&pt!==tk) return;
+    if(s0&&keepRef.has(propK_(s0))){ kept++; return; }
     const lat=parseFloat(p.Y), lon=parseFloat(p.X);
     if(isFinite(lat)&&isFinite(lon)){ const o=at(before||[],lat,lon), n=at(after||[],lat,lon);
       if(!pt&&!o&&!n) return;                                   // no tract and nowhere near this property
@@ -14905,7 +14986,7 @@ function csPlotsFollow_(tract, before, after, quiet){
     if(!quiet) try{ if(connected&&!isOffline()) changed.forEach(p=>send(p,true)); }catch(e){} }
   const parts=Object.keys(by).map(n=>n+(by[n]>1?" ×"+by[n]:""));
   const msg=(changed.length?"Plots moved with their compartment: "+(parts.length>4?changed.length+" plots, "+parts.length+" compartments":parts.join(", "))+(connected&&!isOffline()?" — sent to the Sheet":" — sent when online"):"")
-    +(kept?(changed.length?" · ":"")+kept+" plot"+(kept===1?"":"s")+" typed by hand as another compartment left as typed":"");
+    +(kept?(changed.length?" · ":"")+kept+" plot"+(kept===1?"":"s")+" with a sub-compartment ID left as they were":"");
   return {changed:changed.length, kept, by, msg};
 }
 function csUndo_(){ const t=_csEd?_csEd.tract:propActiveTract_(); let i=_csUndo.length-1; while(i>=0 && propK_(_csUndo[i].tract)!==propK_(t)) i--;
