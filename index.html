@@ -1371,7 +1371,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-01 · v451";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-02 · v452";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2915,7 +2915,47 @@ function plotSamePlace_(p,row){
   return isFinite(ta) && isFinite(tb) && Math.abs(ta-tb)<1000;
 }
 let _confirmBusy=0;
+/* v452: a list of plots is confirmed with one read per 25 (plotrows); any it does not find — and a backend before v452 — go
+   through the one-by-one check below, which also finds a plot the Sheet filed under another PlotID. */
+let _plotrowsOk=null;
+function plotrowsGet_(ids, cb){
+  const name="__pcs"+Date.now()+Math.random().toString(36).slice(2,6);
+  const sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
+  let settled=false;
+  const fin=r=>{ if(settled) return; settled=true; try{ delete window[name]; }catch(e){} if(sc.parentNode) sc.parentNode.removeChild(sc);
+    if(r && r.error==="auth") authCheck_(); cb(r||null); };
+  window[name]=fin; sc.onerror=()=>fin(null); setTimeout(()=>fin(null), 30000);
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=plotrows&ids="+encodeURIComponent(ids.join(","))+"&callback="+name;
+  document.body.appendChild(sc);
+}
+function plotJudge_(p, r){
+  if(!(r && r.ok && r.plot)) return false;
+  const mm=plotMismatch_(p, r.plot, r.hasDateText ? String(r.dateText||"") : undefined);
+  if(!mm.length){ p._sent=true; p._base=baseOf_(p); delete p._mismatch; delete p._mmN; delete p._mmSig; delete p._batchRetry; return true; }
+  const sig=plotSig_(p);
+  if(p._mmSig!==sig){ p._mmSig=sig; p._mmN=0; }
+  p._mmN=(p._mmN||0)+1;
+  if(p._mmN>=PLOT_MISMATCH_MAX){ p._sent=true; p._mismatch=mm.slice(0,12); delete p._batchRetry; }
+  return false; }
 function plotConfirm_(list, then){
+  const want=(list||[]).filter(p=>p && p._id && !p._sent);
+  if(want.length<2 || _plotrowsOk===false || !connected || isOffline()) return plotConfirm1_(list, then);
+  _confirmBusy++;
+  let okN=0, i=0; const rest=[];
+  const next=()=>{
+    if(i>=want.length){ _confirmBusy=Math.max(0,_confirmBusy-1); persist();
+      if(rest.length) plotConfirm1_(rest, n=>{ if(then) then(okN+n); }); else if(then) then(okN); return; }
+    const chunk=want.slice(i,i+25); i+=25;
+    plotrowsGet_(chunk.map(p=>String(p._id)), r=>{
+      if(!(r && r.ok===true && r.rows && typeof r.rows==="object")){ if(r && !r.rows && r.error!=="auth") _plotrowsOk=false;      // an older backend: one by one from now on
+        chunk.forEach(p=>rest.push(p)); next(); return; }
+      _plotrowsOk=true;
+      chunk.forEach(p=>{ const x=r.rows[String(p._id)]; if(x){ if(plotJudge_(p,x)) okN++; } else rest.push(p); });      // found but different: it waits for the next pass, as before
+      next(); });
+  };
+  next();
+}
+function plotConfirm1_(list, then){
   const want=(list||[]).filter(p=>p && p._id && !p._sent);
   if(!want.length || !connected || isOffline()){ if(then) then(0); return; }
   _confirmBusy++;
@@ -3800,40 +3840,48 @@ function undoDelete_OLD_REMOVED(){}
 function netDot(){ const q=saved.filter(p=>!p._sent).length; const d=$("netDot"); d.className="dot "+((!connected||isOffline()||q)?"off":"on"); }
 
 /* ---------- offline queue: auto-send when signal returns ---------- */
+/* v452 — a backlog goes up in batches (Chris, 2026-11-02: 228 queued, "no change", no plots reaching the Sheet). Every queued
+   plot used to be posted at once, one request each, and again every minute while unconfirmed — hundreds of requests per
+   device queued on the Sheet's one lock. Now: batches of FLUSH_BATCH plots (one plotbatch request), one batch at a time, each
+   confirmed (plotrows, one read per batch) before the next goes; never a second pass while one is running; a running count. */
+const FLUSH_BATCH=25;
+let _flushBusy=false, _flushProg=null;
+function flushOut_(p){ const q=Object.assign({},p); delete q._audit; delete q._dup; delete q._src; delete q._mismatch; delete q._mmN; delete q._mmSig; delete q._batchRetry; return q; }
 function flushQueue(manual){
   if(authBlocked){ if(manual) loginOpen_(); return; }
   /* Plots from an edit batch are retried as a batch (flushEditBatch_), not one post each. */
   if(saved.some(p=>p._batchRetry && !p._sent)) flushEditBatch_();
+  if(!connected){ if(manual) toast("Set SCRIPT_URL first",true); return; }
+  if(_flushBusy){ if(manual&&_flushProg) toast(`Already sending — ${_flushProg.done} of ${_flushProg.total} confirmed so far, the rest are on their way`); return; }
   if(_confirmBusy && !manual) return;   // the last pass is still reading plots back
   const q=saved.filter(p=>!p._sent && !p._batchRetry);
-  if(!connected){ if(manual) toast("Set SCRIPT_URL first",true); return; }
   if(!q.length){ if(manual){ const b=saved.filter(p=>p._batchRetry && !p._sent).length;
       toast(b?`Re-sending ${b} edited plot${b===1?"":"s"} as one batch…`:"Nothing queued"); } return; }
   if(isOffline()){ if(manual) toast("Still offline — will send when back in signal",true); return; }
-  if(manual) toast(`Sending ${q.length} queued plot${q.length===1?"":"s"}…`);
-  /* Post them all, then ask the Sheet which ones actually arrived. Same reasoning as send(): the
-     opaque response cannot tell success from a request that died in the air, and marking them sent
-     on it is precisely what stopped this queue retrying the plots that were lost. Anything not
-     confirmed stays queued and comes round again on the 60-second timer. */
-  let posted=0, tried=0; const refused=new Set();
-  q.forEach(d=>{
-    sheetPost_(d)
-      .then(()=>{ d._posted=true; posted++; })
-      .catch(e=>{ if(postWhy_(e)) refused.add(d); })
-      .then(()=>{ if(++tried<q.length) return;
-        persist(); renderSaved(); netDot();
-        /* A plot the Sheet REFUSED this pass was not written; reading the old row back would count
-           against it as a mismatch, and five of those would call it done. It just waits its turn. */
-        setTimeout(()=>plotConfirm_(q.filter(p=>!refused.has(p)), n=>{
-          renderSaved(); netDot();
-          const still=saved.filter(p=>!p._sent).length;
-          const flagged=q.filter(p=>p._sent && p._mismatch);
-          if(flagged.length) toast(mismatchMsg_(flagged),true);
-          else if(manual || n) toast(n?`✓ ${n} plot${n===1?"":"s"} confirmed in the Sheet`+(still?` · ${still} still to send`:"")
-                                  :`Sent ${posted}, but none confirmed yet — will keep trying`, !n);
-        }), 1200);
-      });
-  });
+  const total=q.length; let done=0, posted=0, stopWhy="";
+  _flushBusy=true; _flushProg={done:0,total};
+  if(manual||total>FLUSH_BATCH) toast(`Sending ${total} queued plot${total===1?"":"s"}${total>FLUSH_BATCH?` in batches of ${FLUSH_BATCH}`:""}…`);
+  const chunks=[]; for(let i=0;i<q.length;i+=FLUSH_BATCH) chunks.push(q.slice(i,i+FLUSH_BATCH));
+  const finish=()=>{ _flushBusy=false; persist(); renderSaved(); netDot();
+    const still=saved.filter(p=>!p._sent).length, flagged=q.filter(p=>p._sent && p._mismatch);
+    if(flagged.length) toast(mismatchMsg_(flagged),true);
+    else if(stopWhy) toast(`✓ ${done} of ${total} confirmed — ${stopWhy}; the rest go again in a minute`,!done);
+    else if(manual || done) toast(done?`✓ ${done} plot${done===1?"":"s"} confirmed in the Sheet`+(still?` · ${still} still to send`:"")
+                               :`Sent ${posted}, but none confirmed yet — will keep trying`, !done);
+    if(done) try{ scheduleAnalysisRefresh_(); }catch(e){} };
+  const step=k=>{
+    if(k>=chunks.length) return finish();
+    if(isOffline()){ stopWhy="the phone went offline"; return finish(); }
+    if(authBlocked){ stopWhy="please log in"; return finish(); }
+    const c=chunks[k].filter(p=>!p._sent); if(!c.length) return step(k+1);
+    (c.length===1?sheetPost_(c[0]):sheetPost_({_action:"plotbatch", plots:c.map(flushOut_)}))      // a lone plot goes as before (its notification e-mail, its photo link)
+      .then(()=>{ c.forEach(p=>{ p._posted=true; }); posted+=c.length; persist();
+        setTimeout(()=>plotConfirm_(c, n=>{ done+=n; _flushProg.done=done; renderSaved(); netDot();
+          if(chunks.length>1 && k<chunks.length-1) toast(`✓ ${done} of ${total} confirmed — sending the next ${Math.min(FLUSH_BATCH,total-(k+1)*FLUSH_BATCH)}…`);
+          step(k+1); }), 600); })
+      .catch(e=>{ const why=postWhy_(e); stopWhy=why==="retry"?"the Sheet is busy":why==="cap"?"the account is at its plot limit":why==="auth"?"please log in":"no answer from the Sheet"; finish(); });
+  };
+  step(0);
 }
 window.addEventListener("online", ()=>{ toast("Back online — sending queued plots"); netDot(); renderSaved(); authCheck_(); try{ setTimeout(sharedFieldsFetch_, 4000); }catch(e){} flushQueue(); flushEditBatch_(); flushSpecies(); fetchSpecies(); flushTracts(); fetchTracts(); flushPhotos(); flushDeletes_(); try{ if(propHasWaiting_()) setTimeout(()=>propSync_(),6000); }catch(e){} });
 window.addEventListener("offline", ()=>{ netDot(); renderSaved(); });
