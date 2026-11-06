@@ -1373,7 +1373,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-05 · v458";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-06 · v459";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -13073,7 +13073,10 @@ function mmOpts_(kind){ const d=MM_DEF[kind], saved=(function(){ try{ return JSO
   const myTitle=String(saved.title==null?"":saved.title).trim();
   return {kind:kind, title:myTitle||d.title, titleDef:d.title, pad:d.pad, aerial:kind===8?(saved.aerial!=null?!!saved.aerial:d.aerial):d.aerial,
     plotSize:(MM_PLOT_SIZES.some(x=>x[0]===String(saved.plotSize))?String(saved.plotSize):"2.8"), plotNums:saved.plotNums!=null?!!saved.plotNums:true,
-    plotColor:(MM_PLOT_COLS.some(x=>x[0]===saved.plotColor)?saved.plotColor:"#ffd400"), plotComps:String(saved.plotComps||""), layers:Object.assign({},d.layers,saved.layers||{}), hatch:saved.hatch||d.hatch, plots:saved.plots!=null?!!saved.plots:d.plots, scale:saved.scale||"auto",
+    plotColor:(MM_PLOT_COLS.some(x=>x[0]===saved.plotColor)?saved.plotColor:"#ffd400"), plotComps:String(saved.plotComps||""),
+    /* v459: what the title block shows (custom map only — the MFTIP maps always show all of it) */
+    tbLoc:kind===8&&saved.tbLoc===false?false:true, tbOwner:kind===8&&saved.tbOwner===false?false:true,
+    tbTotal:kind===8&&saved.tbTotal===false?false:true, tbProg:kind===8&&saved.tbProg===false?false:true, layers:Object.assign({},d.layers,saved.layers||{}), hatch:saved.hatch||d.hatch, plots:saved.plots!=null?!!saved.plots:d.plots, scale:saved.scale||"auto",
     feats:saved.feats!=null?!!saved.feats:true, sensitive:false, lines:saved.lines!=null?!!saved.lines:true, names:saved.names!=null?!!saved.names:(kind===6||kind===8),   /* v393: point and line names — Map 6 yes, Map 4 symbols only (Chris, 2026-10-09) */      // v388: points on by default; sensitive ones asked for each time, never remembered
     page:MM_PAGES[saved.page]?saved.page:"letter", extent:saved.extent==="view"?"view":"fit", viewBox:null,
     inset:saved.inset!=null?!!saved.inset:kind===4,      /* v394: the locator inset — Map 4 yes, Map 6 no */
@@ -13090,7 +13093,7 @@ function mmOpts_(kind){ const d=MM_DEF[kind], saved=(function(){ try{ return JSO
 function mmPhotoYear_(saved){ let src=null; try{ src=imgSource_(); }catch(e){} const id=src?src.id:"", typed=(saved&&saved.photoYears&&saved.photoYears[id])||""; if(typed) return String(typed);
   const m=String(src?src.name:"").match(/\b(19|20)\d\d\b/); return m?m[0]:""; }
 function mmSaveOpts_(o){ try{ const old=JSON.parse((STORE&&STORE.getItem("fi_mmopts"+o.kind))||"null")||{}, py=Object.assign({},old.photoYears||{}); try{ py[imgSource_().id]=String(o.photoYear||""); }catch(e){}
-  STORE&&STORE.setItem("fi_mmopts"+o.kind,JSON.stringify({title:(o.title&&o.title!==o.titleDef)?o.title:"",aerial:o.aerial,plotSize:o.plotSize,plotNums:o.plotNums,plotColor:o.plotColor,plotComps:o.plotComps,layers:o.layers,hatch:o.hatch,plots:o.plots,feats:o.feats,lines:o.lines,names:o.names,inset:o.inset,standLabels:o.standLabels,proj:o.proj,actFrom:o.actFrom,actTo:o.actTo,fillAlpha:o.fillAlpha,labelScale:o.labelScale,insetNames:o.insetNames,townArrow:o.townArrow,photoYears:py,scale:o.scale,page:o.page,extent:o.extent})); STORE&&STORE.setItem("fi_mmfirm",o.firm||""); }catch(e){} }
+  STORE&&STORE.setItem("fi_mmopts"+o.kind,JSON.stringify({title:(o.title&&o.title!==o.titleDef)?o.title:"",tbLoc:o.tbLoc!==false,tbOwner:o.tbOwner!==false,tbTotal:o.tbTotal!==false,tbProg:o.tbProg!==false,aerial:o.aerial,plotSize:o.plotSize,plotNums:o.plotNums,plotColor:o.plotColor,plotComps:o.plotComps,layers:o.layers,hatch:o.hatch,plots:o.plots,feats:o.feats,lines:o.lines,names:o.names,inset:o.inset,standLabels:o.standLabels,proj:o.proj,actFrom:o.actFrom,actTo:o.actTo,fillAlpha:o.fillAlpha,labelScale:o.labelScale,insetNames:o.insetNames,townArrow:o.townArrow,photoYears:py,scale:o.scale,page:o.page,extent:o.extent})); STORE&&STORE.setItem("fi_mmfirm",o.firm||""); }catch(e){} }
 /* ---- projection ---- */
 /* v396: UTM, zone from the longitude (17 for most of southern Ontario, 18 east of 78°W), forward and inverse.
    The GPS positions are WGS 84; NAD83 (CSRS) differs by under a metre here, so the map is labelled NAD83 / UTM. */
@@ -13644,16 +13647,25 @@ function mmTitleBlock_(ctx, d, o, V, present, hc, photo){
   // location and owner
   const p=d.p, L=[];
   if(p.roll) L.push("Roll: "+p.roll); if(p.address) L.push(p.address); if(p.lotcon) L.push(p.lotcon); if(p.township) L.push(p.township); if(p.municipality) L.push(p.municipality);
-  ctx.font="bold 28px "+F; ctx.fillText("Location of Property", T.x+24, yRow1+40);
-  ctx.font="27px "+F; (L.length?L:["(property details not entered)"]).slice(0,6).forEach((t,i)=>ctx.fillText(mmFit_(ctx,t,470), T.x+24, yRow1+76+i*33));
-  const x2=T.x+490;
-  ctx.font="bold 28px "+F; ctx.fillText("Owner", x2, yRow1+40); ctx.font="27px "+F; ctx.fillText(mmFit_(ctx,p.owner||"",xMid-x2-120), x2+100, yRow1+40);
+  /* v459 — each part can be left off a custom map (Chris, 2026-11-06: "an option to include or exclude the area summary for
+     the total property or the managed forest area and conservation land area … and the ownership information"). What
+     is left closes up to the top of the block; nothing at all leaves it clear. A custom map never prints
+     "(property details not entered)": a part with nothing in it is simply not there. */
+  const custom=o.kind===8, wantLoc=!custom||o.tbLoc!==false, wantOwn=!custom||o.tbOwner!==false, wantTot=!custom||o.tbTotal!==false, wantProg=!custom||o.tbProg!==false;
+  if(wantLoc && (L.length || !custom)){
+    ctx.font="bold 28px "+F; ctx.fillText("Location of Property", T.x+24, yRow1+40);
+    ctx.font="27px "+F; (L.length?L:["(property details not entered)"]).slice(0,6).forEach((t,i)=>ctx.fillText(mmFit_(ctx,t,470), T.x+24, yRow1+76+i*33)); }
+  const x2=(wantLoc && (L.length || !custom)) ? T.x+490 : T.x+24;
+  let yy=yRow1+40;
+  if(wantOwn && (p.owner || !custom)){ ctx.font="bold 28px "+F; ctx.fillText("Owner", x2, yy); ctx.font="27px "+F; ctx.fillText(mmFit_(ctx,p.owner||"",xMid-x2-120), x2+100, yy); yy+=70; }
   const s=d.sum, f2=v=>(Math.round(v*100)/100).toFixed(2);
-  ctx.font="bold 28px "+F; ctx.fillText("Area of Property", x2, yRow1+110);
-  const aw=xMid-x2-16;
   const A=b=>(b.adj!=null?b.adj:b.ac);      // adjusted acres (v386); a version saved before v386 has only acres
-  [["Total Area: "+f2(A(s.total))+" ac",146],["Eligible MFTIP Area: "+f2(A(s.byClass.MFTIP))+" ac",179],["CLTIP Area: "+f2(A(s.byClass.CLTIP))+" ac",212]]
-    .forEach(a=>{ mmFitFont_(ctx,a[0],27,18,aw,F); ctx.fillText(a[0], x2, yRow1+a[1]); });
+  const arows=[]; if(wantTot) arows.push("Total Area: "+f2(A(s.total))+" ac");
+  if(wantProg){ arows.push("Eligible MFTIP Area: "+f2(A(s.byClass.MFTIP))+" ac"); arows.push("CLTIP Area: "+f2(A(s.byClass.CLTIP))+" ac"); }
+  if(arows.length){
+    ctx.font="bold 28px "+F; ctx.fillText("Area of Property", x2, yy);
+    const aw=xMid-x2-16;
+    arows.forEach((t,i)=>{ mmFitFont_(ctx,t,27,18,aw,F); ctx.fillText(t, x2, yy+36+i*33); }); }
   // credits
   ctx.font="22px "+F;
   const cr=["Base mapping: Land Information Ontario, contains information licensed under the Open Government Licence – Ontario."];
@@ -13825,6 +13837,9 @@ function mmOpen_(kind){
   showDataSheet_(mmName_(kind)+" — "+t,
     `<div style="font-size:13px;color:#a9c9b0;line-height:1.5;margin-bottom:10px">${kind===8?"Choose the background, the layers and the plots below.":esc(o.titleDef.replace(/\s{2,}/," "))+"."} ${kind===8?"":kind===6?"On the aerial photo chosen under Layers ("+esc(imgSource_().name)+").":kind===7?"Plain background; each compartment coloured by the first activity planned for it in the window, the schedule in the legend.":"Plain background, with woodland shaded and the smaller MFTIP class hatched."}</div>`+
     `<div style="font-size:12px;color:#a9c9b0;margin:6px 0 3px">Map title (printed in the title block — clear it to go back to "${esc(o.titleDef.replace(/\s{2,}/," "))}")</div>`+inp("mmTitle",o.title.replace(/\s{2,}/," "),o.titleDef.replace(/\s{2,}/," "))+
+    (kind===8?`<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Under the title (untick what this map does not need)</div>`+
+      [["mmTbOwner","Owner",o.tbOwner],["mmTbLoc","Location of property — roll number, address, lot &amp; concession",o.tbLoc],["mmTbTotal","Total area of the property",o.tbTotal],["mmTbProg","Managed forest (MFTIP) and conservation land (CLTIP) areas",o.tbProg]]
+        .map(x=>`<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:14px;color:#e8f0e6"><input type="checkbox" id="${x[0]}" ${x[2]!==false?"checked":""} style="width:20px;height:20px"> ${x[1]}</label>`).join(""):"")+
     (kind===8?`<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Background</div>`+sel("mmBase",[["aerial","Aerial photo (the one chosen under Layers)"],["plain","Plain — white ground, woodland shading if ticked"]],o.aerial?"aerial":"plain"):"")+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Page</div>`+sel("mmPage",Object.keys(MM_PAGES).map(k=>[k,MM_PAGES[k].name]),o.page)+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Area shown</div>`+sel("mmExtent",[["fit","Fit the property"],["view","The view on the phone's map now"]],o.extent)+
@@ -13867,6 +13882,7 @@ function mmGo_(kind){
   const pl=v("mmPlots"); if(pl) o.plots=!!pl.checked;
   const tt=v("mmTitle"); if(tt){ const x=String(tt.value||"").replace(/\s+/g," ").trim().slice(0,90); o.title=x||o.titleDef; }
   const bs=v("mmBase"); if(bs && kind===8) o.aerial=bs.value!=="plain";
+  if(kind===8) [["mmTbOwner","tbOwner"],["mmTbLoc","tbLoc"],["mmTbTotal","tbTotal"],["mmTbProg","tbProg"]].forEach(x=>{ const e=v(x[0]); if(e) o[x[1]]=!!e.checked; });
   const ps=v("mmPlotSize"); if(ps && MM_PLOT_SIZES.some(x=>x[0]===ps.value)) o.plotSize=ps.value;
   const pcl=v("mmPlotColor"); if(pcl && MM_PLOT_COLS.some(x=>x[0]===pcl.value)) o.plotColor=pcl.value;
   const pn=v("mmPlotNums"); if(pn) o.plotNums=!!pn.checked;
@@ -15992,7 +16008,7 @@ function mvSave_(){
   const name=prompt("A name for this version:",def); if(name===null) return;
   const v={v:1, id:"V"+Date.now().toString(36).toUpperCase()+"-"+Math.floor(Math.random()*46656).toString(36).toUpperCase().padStart(3,"0"),
     name:String(name).trim().slice(0,120)||def, tract:m.tract, kind:m.kind, at:new Date().toISOString(), by:String(cruiserEmail||""), app:APP_BUILD,
-    opts:{kind:m.o.kind, title:m.o.title, pad:m.o.pad, aerial:m.o.aerial, layers:m.o.layers, hatch:m.o.hatch, plots:m.o.plots, plotSize:m.o.plotSize, plotNums:m.o.plotNums!==false, plotColor:m.o.plotColor, plotComps:m.o.plotComps||"", feats:m.o.feats, sensitive:m.o.sensitive==="general"?"general":!!m.o.sensitive, lines:m.o.lines, names:m.o.names!==false, inset:!!m.o.inset, standLabels:!!m.o.standLabels, proj:m.o.proj||"utm", acts:!!m.o.acts, actFrom:m.o.actFrom||"", actTo:m.o.actTo||"", fillAlpha:m.o.fillAlpha||100, labelScale:m.o.labelScale||100, insetNames:m.o.insetNames||"auto", townArrow:m.o.townArrow!==false, photoYear:m.o.photoYear||"", scale:m.o.scale, page:m.page, extent:m.o.extent, firm:m.o.firm},
+    opts:{kind:m.o.kind, title:m.o.title, pad:m.o.pad, aerial:m.o.aerial, layers:m.o.layers, hatch:m.o.hatch, plots:m.o.plots, plotSize:m.o.plotSize, plotNums:m.o.plotNums!==false, plotColor:m.o.plotColor, plotComps:m.o.plotComps||"", tbLoc:m.o.tbLoc!==false, tbOwner:m.o.tbOwner!==false, tbTotal:m.o.tbTotal!==false, tbProg:m.o.tbProg!==false, feats:m.o.feats, sensitive:m.o.sensitive==="general"?"general":!!m.o.sensitive, lines:m.o.lines, names:m.o.names!==false, inset:!!m.o.inset, standLabels:!!m.o.standLabels, proj:m.o.proj||"utm", acts:!!m.o.acts, actFrom:m.o.actFrom||"", actTo:m.o.actTo||"", fillAlpha:m.o.fillAlpha||100, labelScale:m.o.labelScale||100, insetNames:m.o.insetNames||"auto", townArrow:m.o.townArrow!==false, photoYear:m.o.photoYear||"", scale:m.o.scale, page:m.page, extent:m.o.extent, firm:m.o.firm},
     view:m.view, imagery:m.imagery, data:m.data};
   const text=JSON.stringify(v);
   toast("Saving the version…");
