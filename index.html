@@ -1371,7 +1371,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-02 · v452";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-05 · v456";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1574,8 +1574,21 @@ function dateForInput(v){
    (no error) where it is blocked. */
 const STORE=(()=>{ try{ const s=window["local"+"Storage"]; s.setItem("__fi_t","1"); s.removeItem("__fi_t"); return s; }catch(e){ return null; } })();
 const PKEY="fi_plots";
-let saved=[];
-if(STORE){ try{ const raw=STORE.getItem(PKEY); if(raw) saved=JSON.parse(raw)||[]; }catch(e){ saved=[]; } }
+/* v454 — plots beyond the ordinary storage (Chris, 2026-11-03: regeneration surveys put 2,000 or more plots on one
+   phone in a few days; the ordinary storage holds roughly 1,300–1,500 on Chrome, fewer on an iPhone). While the plots
+   fit in PLOT_LS_BUDGET characters they are kept in both stores, as before. Past it, they live in the phone's larger
+   store (IndexedDB) only, and the ordinary store keeps just a note saying so ("fi_plots_idb"). A counter
+   ("fi_plotgen", beside the plots in both stores) says which copy is newer at the next start, so an edit that only
+   reached the larger store is not undone by an older copy in the ordinary one.
+   Until the larger store has been read at startup, nothing is written (persist() waits), so a half-loaded list can
+   never be saved over the full one. */
+const PLOT_LS_BUDGET=1500000;
+const PLOT_DB="fi_plotsdb", PLOT_STORE="plots", PLOT_KEY="saved", PLOT_GEN_KEY="gen";
+let saved=[], _plotGen=0, _plotsInIdb=false, _idbAtN=0, _plotsLoading=false, _persistWanted=false, _pdbReadFailed=false, _startIds=new Set();
+if(STORE){ try{ _plotsInIdb=STORE.getItem("fi_plots_idb")==="1"; _plotGen=parseInt(STORE.getItem("fi_plotgen")||"0",10)||0; }catch(e){} }
+if(STORE && !_plotsInIdb){ try{ const raw=STORE.getItem(PKEY); if(raw) saved=JSON.parse(raw)||[]; }catch(e){ saved=[]; } }
+saved.forEach(p=>{ const id=String((p&&p._id)||""); if(id) _startIds.add(id); });
+try{ if(window.indexedDB){ _plotsLoading=true; plotsLoad_(0); } }catch(e){ _plotsLoading=false; }
 const connected = SCRIPT_URL && !SCRIPT_URL.startsWith("PASTE_");
 
 /* ---------- login (v366 — Phase 1, step 4a) ----------
@@ -3154,10 +3167,28 @@ function setEditMode(on,audit){
 let _lsFailed=false, _lsWarned=false;
 let _pdbFailed=false, _pdbWarned=false, _pdbWarnedBoth=false;   // the second (IndexedDB) copy; declared here, beside the first, so neither message can run before it exists
 function persist(){
-  const json=JSON.stringify(saved);
+  if(_plotsLoading){ _persistWanted=true; return; }        // v454: not before the larger store has been read
+  _plotGen++;
+  const idbOk=!!window.indexedDB && !_pdbReadFailed;
+  /* Already in the larger store: the whole list is not turned into text on every save (a phone holding 2,000+
+     plots would pause each time) — only once it has shrunk well below where it outgrew the ordinary store. */
+  const skipLs=idbOk && _plotsInIdb && saved.length>0.8*_idbAtN;
+  const json=skipLs ? null : JSON.stringify(saved);
   let ok=false;
-  if(STORE){ try{ STORE.setItem(PKEY,json); ok=(STORE.getItem(PKEY)||"").length===json.length; }catch(e){ ok=false; } }
-  plotBackupSave_(saved);                        // durable second copy, always
+  if(STORE && skipLs){ ok=true; try{ STORE.setItem("fi_plotgen", String(_plotGen)); }catch(e){} }
+  else if(STORE){
+    const big=idbOk && json.length>PLOT_LS_BUDGET;
+    if(!big){ try{ STORE.setItem(PKEY,json); ok=(STORE.getItem(PKEY)||"").length===json.length; }catch(e){ ok=false; } }
+    if(idbOk && (big || !ok)){
+      /* Too many for the ordinary store: they live in the larger one, and the ordinary one says so. */
+      try{ STORE.removeItem(PKEY); }catch(e){}
+      try{ STORE.setItem("fi_plots_idb","1"); }catch(e){}
+      _plotsInIdb=(function(){ try{ return STORE.getItem("fi_plots_idb")==="1"; }catch(e){ return false; } })();
+      ok=_plotsInIdb; if(ok) _idbAtN=saved.length;
+    } else if(ok && _plotsInIdb){ try{ STORE.removeItem("fi_plots_idb"); }catch(e){} _plotsInIdb=false; }
+    try{ STORE.setItem("fi_plotgen", String(_plotGen)); }catch(e){}
+  }
+  if(idbOk) plotBackupSave_(saved, json);       // the larger store: always (the only copy once the plots outgrow the ordinary one)
   if(!ok && (STORE||!_lsWarned)) storageFailed_();
   else if(ok) _lsFailed=false;
 }
@@ -3712,6 +3743,14 @@ function nextPlot(){
 
 /* ---------- saved list ---------- */
 function isOffline(){ return navigator.onLine===false; }
+/* v453: why an "in Sheet" plot is still on this phone. */
+function keepTag_(p){
+  if(!autoPruneOn || !p || !p._sent || p._mismatch) return "";
+  const sub=t=>`<div style="font-size:10px;color:#8fae95;margin-top:2px;line-height:1.3">${esc(t)}</div>`;
+  if(plotRecent_(p)) return sub("last "+KEEP_DAYS+" days");
+  const h=p._id && _holdWhy[p._id];
+  return h ? sub("kept: "+h.why) : "";
+}
 function renderSaved(){
   const sent=saved.filter(p=>p._sent).length, q=saved.length-sent;
   $("savedChip").textContent=`${saved.length} saved`; $("liveSaved").textContent=saved.length;
@@ -3720,13 +3759,14 @@ function renderSaved(){
   const undoBar = lastDeleted ? `<button class="btn-mini" type="button" onclick="undoDelete()" style="margin-bottom:10px">↩ Undo delete (${esc(lastDeleted.plot.STANDID||"—")} / ${esc(lastDeleted.plot.PLOTNUM||"—")})</button>` : "";
   if(!saved.length){ c.innerHTML=undoBar+`<div class="saved-empty">No plots yet. Fill the card and tap <b>Submit plot</b>.</div>`; return; }
   const sendAll = q ? `<button class="btn-mini" type="button" onclick="flushQueue(true)" style="margin-bottom:10px">Send all queued (${q})</button>` : "";
-  c.innerHTML=undoBar+sendAll+`<table class="saved"><thead><tr><th>Stand</th><th>Plot</th><th>Trees</th><th>Status</th><th></th></tr></thead><tbody>`+
+  const keepNote = autoPruneOn ? `<div class="saved-keep" style="font-size:11px;line-height:1.4;color:#8fae95;margin:0 0 8px">This phone keeps plots not yet in the Sheet, plots changed here, and the last ${KEEP_DAYS} days. Older plots are removed after each sync — they stay in the Sheet and on the map.</div>` : "";
+  c.innerHTML=undoBar+sendAll+keepNote+`<table class="saved"><thead><tr><th>Stand</th><th>Plot</th><th>Trees</th><th>Status</th><th></th></tr></thead><tbody>`+
     saved.map((p,i)=>`<tr><td class="num">${esc(p.STANDID||"—")}</td><td class="num">${esc(p.PLOTNUM||"—")}</td>
       <td class="num">${p._trees||0}</td>
       <!-- Three states, not two. "sent" now means the Sheet has confirmed it; a plot we posted but
            could not confirm says so rather than claiming to be safe. -->
       <td>${p._sent&&p._mismatch?`<span class="st queued" title="The Sheet still holds a different ${esc((p._mismatch||[]).join(", "))}. Open the plot and save it again, or correct the Sheet.">check in Sheet</span>`
-          :p._sent?`<span class="st sent">in Sheet</span>`
+          :p._sent?`<span class="st sent">in Sheet</span>${keepTag_(p)}`
             :(p._posted?`<span class="st queued" title="Posted, but the Sheet has not confirmed it yet — it will be sent again">confirming</span>`
                        :`<span class="st queued">queued</span>`)}</td>
       <td style="text-align:right"><button class="tbtn" onclick="editPlot(${i})">Edit</button>${p._sent?"":`<button class="tbtn" onclick="resend(${i})">Send</button>`}<button class="tbtn del" onclick="delPlot(${i})" title="Delete this plot">🗑 Delete</button></td></tr>`).join("")+
@@ -3848,6 +3888,7 @@ const FLUSH_BATCH=25;
 let _flushBusy=false, _flushProg=null;
 function flushOut_(p){ const q=Object.assign({},p); delete q._audit; delete q._dup; delete q._src; delete q._mismatch; delete q._mmN; delete q._mmSig; delete q._batchRetry; return q; }
 function flushQueue(manual){
+  if(_plotsLoading){ if(manual) toast("Opening this phone's plots — try again in a moment"); return; }
   if(authBlocked){ if(manual) loginOpen_(); return; }
   /* Plots from an edit batch are retried as a batch (flushEditBatch_), not one post each. */
   if(saved.some(p=>p._batchRetry && !p._sent)) flushEditBatch_();
@@ -3868,7 +3909,8 @@ function flushQueue(manual){
     else if(stopWhy) toast(`✓ ${done} of ${total} confirmed — ${stopWhy}; the rest go again in a minute`,!done);
     else if(manual || done) toast(done?`✓ ${done} plot${done===1?"":"s"} confirmed in the Sheet`+(still?` · ${still} still to send`:"")
                                :`Sent ${posted}, but none confirmed yet — will keep trying`, !done);
-    if(done) try{ scheduleAnalysisRefresh_(); }catch(e){} };
+    if(done) try{ scheduleAnalysisRefresh_(); }catch(e){}
+    if(!still) setTimeout(()=>{ try{ autoPrune_(); }catch(e){} }, 4000); };   // v453: synced — drop what the phone no longer needs
   const step=k=>{
     if(k>=chunks.length) return finish();
     if(isOffline()){ stopWhy="the phone went offline"; return finish(); }
@@ -3891,7 +3933,8 @@ window.addEventListener("offline", ()=>{ netDot(); renderSaved(); });
 let _authTick=0;
 setInterval(()=>{ if(++_authTick%5===0 || authBlocked) authCheck_(); }, 60000);   // every 5 minutes, or every minute while shut out
 setInterval(()=>{ if(!capHold_()){ if(saved.some(p=>!p._sent)) flushQueue(); flushEditBatch_(); } if(pendingDeletes.length) flushDeletes_();
-  if(pendingSpecies.length) flushSpecies(); if(typeof pendingTracts!=="undefined" && pendingTracts.length) flushTracts(); }, 60000); // safety retry every 60s
+  if(pendingSpecies.length) flushSpecies(); if(typeof pendingTracts!=="undefined" && pendingTracts.length) flushTracts();
+  try{ if(!saved.some(p=>!p._sent)) autoPrune_(); }catch(e){} }, 60000); // safety retry every 60s; v453: and, once nothing is waiting, the after-sync tidy (at most every 20 min)
 setInterval(()=>{ try{ flushPhotos(); }catch(e){} }, 90000);            // retry any unconfirmed photo uploads
 setTimeout(()=>{ try{ versionCheck_(true, true); }catch(e){} }, 8000);          // v373: a newer build? (then at most every half hour, when the app comes back to the front)
 try{ document.addEventListener("visibilitychange", ()=>{ try{ if(!document.hidden) versionCheck_(false, false); }catch(e){} }); }catch(e){}     // back to the front: it only SAYS a newer build is ready
@@ -3927,7 +3970,6 @@ function idbOpen(){ return new Promise((res,rej)=>{ const r=indexedDB.open(PHOTO
    this time for the data that cannot be re-created by reloading a file. Written on every persist(),
    read back at startup, and used to restore anything localStorage has lost. Deliberately uses
    window.indexedDB directly rather than HAS_IDB, which is declared after the first persist() runs. */
-const PLOT_DB="fi_plotsdb", PLOT_STORE="plots", PLOT_KEY="saved";
 function pdbOpen_(){ return new Promise((res,rej)=>{
   try{
     const r=indexedDB.open(PLOT_DB,1);
@@ -3936,7 +3978,7 @@ function pdbOpen_(){ return new Promise((res,rej)=>{
   }catch(e){ rej(e); } }); }
 /* Coalesced: a burst of saves writes once. The copy is a snapshot of the whole array, so the last
    write wins and a dropped intermediate one costs nothing. */
-let _pdbTimer=null, _pdbPending=null;
+let _pdbTimer=null, _pdbPending=null, _pdbPendingGen=0;
 /* v371 — the second copy of the plots (the one that survives the ordinary storage filling up) used to
    fail without a word. Say so, once, where it will be read. */
 /* Write the second copy NOW and say whether it took — for the moments (clearing plots) when the
@@ -3947,30 +3989,33 @@ function plotBackupNow_(arr){ return new Promise(res=>{
   let snap; try{ snap=JSON.parse(JSON.stringify(arr)); }catch(e){ snap=arr; }
   let settled=false; const fin=v=>{ if(settled) return; settled=true; if(!v) backupFailed_(); res(v); };
   setTimeout(()=>fin(false), 4000);
-  try{ pdbOpen_().then(db=>{ const tx=db.transaction(PLOT_STORE,"readwrite"); tx.objectStore(PLOT_STORE).put(snap,PLOT_KEY);
+  try{ pdbOpen_().then(db=>{ const tx=db.transaction(PLOT_STORE,"readwrite"); tx.objectStore(PLOT_STORE).put(snap,PLOT_KEY); tx.objectStore(PLOT_STORE).put(_plotGen,PLOT_GEN_KEY);
     tx.oncomplete=()=>{ db.close(); _pdbFailed=false; fin(true); }; tx.onerror=()=>{ db.close(); fin(false); }; tx.onabort=()=>{ try{ db.close(); }catch(e){} fin(false); };
   }).catch(()=>fin(false)); }catch(e){ fin(false); }
 }); }
 function backupFailed_(){
   _pdbFailed=true;
-  if(_pdbWarned && !( _lsFailed && !_pdbWarnedBoth)) return;       // said once — and once more if BOTH stores are now failing
-  _pdbWarned=true; if(_lsFailed) _pdbWarnedBoth=true;
+  const both=_lsFailed || _plotsInIdb;              // v454: with the plots in the larger store only, it failing leaves memory alone
+  if(_pdbWarned && !( both && !_pdbWarnedBoth)) return;       // said once — and once more if BOTH stores are now failing
+  _pdbWarned=true; if(both) _pdbWarnedBoth=true;
   try{ showInfoSheet_("This phone's backup store is not working",
-    `<div style="font-size:13px;line-height:1.55;color:#e8f0e6">Your plots are normally kept twice on this phone. The second copy could not be written just now`+
-    (_lsFailed?` — and the ordinary storage is full as well, so <b>new plots are held in memory only and will be lost if the app closes</b>. Keep the app open and get to signal.`
+    `<div style="font-size:13px;line-height:1.55;color:#e8f0e6">`+(_plotsInIdb?`This phone has more plots than its ordinary storage holds, so they are kept in its larger store — and that could not be written just now`:`Your plots are normally kept twice on this phone. The second copy could not be written just now`)+
+    (both?(_plotsInIdb?`, so <b>new plots and changes are held in memory only and will be lost if the app closes</b>. Keep the app open and get to signal.`:` — and the ordinary storage is full as well, so <b>new plots are held in memory only and will be lost if the app closes</b>. Keep the app open and get to signal.`)
               :`. They are still saved in the ordinary storage, and nothing is lost — but get them into the Sheet when you next have signal.`)+
     `</div><div style="font-size:12px;line-height:1.5;color:#8fae95;margin-top:10px">This usually means the phone is very low on space, or the browser is in private mode. Tools &rsaquo; This device &rsaquo; Clear synced data frees space safely.</div>`); }catch(e){}
 }
-function plotBackupSave_(arr){
+function plotBackupSave_(arr, json){
   if(!window.indexedDB) return;
-  try{ _pdbPending=JSON.parse(JSON.stringify(arr)); }catch(e){ _pdbPending=arr; }
+  if(_plotsInIdb) _pdbPending=arr;              // v454: written on the next turn, as it then stands — no second copy of 2,000+ plots
+  else { try{ _pdbPending=JSON.parse(json || JSON.stringify(arr)); }catch(e){ _pdbPending=arr; } }
+  _pdbPendingGen=_plotGen;
   if(_pdbTimer) return;
-  _pdbTimer=setTimeout(()=>{ const snap=_pdbPending; _pdbTimer=null; _pdbPending=null;
+  _pdbTimer=setTimeout(()=>{ const snap=_pdbPending, gen=_pdbPendingGen; _pdbTimer=null; _pdbPending=null;
     pdbOpen_().then(db=>{ const tx=db.transaction(PLOT_STORE,"readwrite");
-      tx.objectStore(PLOT_STORE).put(snap,PLOT_KEY);
+      tx.objectStore(PLOT_STORE).put(snap,PLOT_KEY); tx.objectStore(PLOT_STORE).put(gen,PLOT_GEN_KEY);
       tx.oncomplete=()=>{ db.close(); _pdbFailed=false; }; tx.onerror=()=>{ db.close(); backupFailed_(); };
       tx.onabort=()=>{ try{ db.close(); }catch(e){} backupFailed_(); };
-    }).catch(()=>backupFailed_()); }, 400);
+    }).catch(()=>backupFailed_()); }, _plotsInIdb?0:400);      // v454: no delay when this is the only copy
 }
 /* Start over has to be able to erase this too, or the backup would quietly put every plot back on
    the next load — which is exactly what v354 would have done to "Start over" if this were missing. */
@@ -3987,22 +4032,65 @@ function plotBackupAll_(){ return new Promise(res=>{
     rq.onsuccess=()=>{ db.close(); res(rq.result||null); };
     rq.onerror=()=>{ db.close(); res(null); };
   }).catch(()=>res(null)); }); }
-/* At startup, put back anything the backup has that localStorage does not. This is what turns a
-   flat battery from "the day's work is gone" into "the app picks up where it was". */
-function plotBackupRestore_(){
-  plotBackupAll_().then(backup=>{
-    if(!backup || !backup.length) return;
-    const have=new Set(saved.map(p=>String((p&&p._id)||"")).filter(Boolean));
-    const back=[];
-    backup.forEach(p=>{ const id=String((p&&p._id)||""); if(id && !have.has(id)) back.push(p); });
-    if(!back.length) return;
-    saved=saved.concat(back);
-    persist(); renderSaved(); netDot();
-    try{ if(fmap) renderMapPins(); }catch(e){}
+/* v454 — startup. Read the larger store, then settle which copy is the newer:
+     - the plots live there only (the note is set), or its counter is ahead of the ordinary store's: it is the list;
+     - otherwise the ordinary store's list stands, and anything only the larger store has is put back (a full quota,
+       a cleared site, a phone that died before the write landed — "Recovered N plots", as before).
+   Plots added in memory while it was being read (an imported plot moved across, say) are kept either way. */
+function plotsRead_(){ return new Promise(res=>{
+  if(!window.indexedDB) return res({ok:false});
+  let done=false; const fin=v=>{ if(!done){ done=true; res(v); } };
+  setTimeout(()=>fin({ok:false}), 8000);
+  try{ pdbOpen_().then(db=>{
+    const tx=db.transaction(PLOT_STORE,"readonly"), st=tx.objectStore(PLOT_STORE), a=st.get(PLOT_KEY), g=st.get(PLOT_GEN_KEY);
+    tx.oncomplete=()=>{ try{ db.close(); }catch(e){} fin({ok:true, plots:Array.isArray(a.result)?a.result:null, gen:parseInt(g.result,10)||0}); };
+    tx.onerror=()=>{ try{ db.close(); }catch(e){} fin({ok:false}); };
+    tx.onabort=()=>{ try{ db.close(); }catch(e){} fin({ok:false}); };
+  }).catch(()=>fin({ok:false})); }catch(e){ fin({ok:false}); }
+}); }
+function plotsLoad_(attempt){
+  plotsRead_().then(r=>{
+    if(!r.ok && _plotsInIdb && attempt<2){ setTimeout(()=>plotsLoad_(attempt+1), 1500); return; }
+    plotsLoaded_(r);
+  });
+}
+function plotsLoaded_(r){
+  const idOf=p=>String((p&&p._id)||"");
+  const gap=saved.filter(p=>{ const id=idOf(p); return !id || !_startIds.has(id); });      // added since the app opened
+  let back=[], took=false;
+  if(r && r.ok && r.plots && (_plotsInIdb || r.gen>_plotGen)){
+    const have=new Set(r.plots.map(idOf).filter(Boolean));
+    saved=r.plots.concat(gap.filter(p=>!idOf(p) || !have.has(idOf(p))));
+    took=r.plots.length>0;
+  } else if(r && r.ok && r.plots && r.plots.length){
+    const have=new Set(saved.map(idOf).filter(Boolean));
+    back=r.plots.filter(p=>{ const id=idOf(p); return id && !have.has(id); });
+    if(back.length) saved=saved.concat(back);
+  }
+  if(r && r.ok) _plotGen=Math.max(_plotGen, r.gen||0);
+  if(_plotsInIdb) _idbAtN=saved.length;
+  /* The plots live in the larger store and it could not be read: never write over it. The ordinary store
+     takes what can be saved meanwhile, and the cruiser is told. */
+  if(_plotsInIdb && !(r && r.ok)){
+    _pdbReadFailed=true;
+    try{ showInfoSheet_("This phone's plots could not be opened",
+      `<div style="font-size:13px;line-height:1.55;color:#e8f0e6">This phone keeps its plots in its larger store, and it did not open just now. Nothing has been deleted. <b>Close the app fully and open it again.</b> Plots you collect meanwhile are kept and sent to the Sheet as usual.</div>`+
+      `<div style="font-size:12px;line-height:1.5;color:#8fae95;margin-top:10px">Do not clear the browser's site data — that is where the plots are.</div>`); }catch(e){}
+  }
+  _plotsLoading=false;
+  const want=_persistWanted || took || back.length;
+  _persistWanted=false;
+  if(want){ try{ persist(); }catch(e){} }
+  if(took || back.length){
+    try{ saved.forEach(p=>{ if(p.TRACT) addTract(p.TRACT); if(p.STANDID) addStand(p.STANDID); for(const id in ADDABLE){ if(p[id]) addableAdd(id,p[id]); } }); tractSelect(); standSelect(); addableBuildAll(); }catch(e){}
+    try{ renderSaved(); netDot(); if(fmap) renderMapPins(); }catch(e){}
+    try{ if(editingIndex==null && !editingNow_()) setField($("PLOTNUM"), nextPlotFor($("STANDID").value)); }catch(e){}
+  }
+  if(back.length){
     const q=back.filter(p=>!p._sent).length;
     toast(`Recovered ${back.length} plot${back.length===1?"":"s"} from this device's backup`+(q?` · ${q} still to send`:""));
-    if(q && connected && !isOffline()) flushQueue();
-  }).catch(()=>{});
+  }
+  try{ if((took || back.length) && saved.some(p=>!p._sent) && connected && !isOffline()) flushQueue(); }catch(e){}
 }
 // Boundary layers live in their own IndexedDB store (localStorage's ~5 MB cap was too small for shapefiles).
 const LAYER_DB="fi_layers_db", LAYER_STORE="layers";
@@ -4466,25 +4554,161 @@ function sheetPlotsById_(done){
     Object.keys(twice).forEach(id=>{ delete by[id]; });        // the same PlotID on two rows: which one is "the" plot cannot be said, so it stays on the phone
     done(by); }, 60000);
 }
-function plotsClearable_(by){
-  const can=[], cannot=[];
+/* v453 — what a phone keeps (Chris, 2026-11-02: "I don't want devices to hold plots that are not worthy of holding").
+   The Sheet is the record. A phone holds a plot only while the Sheet cannot stand in for it:
+     - it is not in the Sheet yet (queued, or posted and not confirmed);
+     - it was changed here and the Sheet does not show the change;
+     - it was collected in the last KEEP_DAYS days (the crew's working set, to review in the field);
+     - the Sheet has no row for it, or the phone's copy holds something the Sheet's does not.
+   Everything else goes, automatically after a sync (autoPrune_), or with Clear synced data.
+   Before v453 a plot stayed whenever the two copies differed in any way at all — including the Sheet
+   holding MORE (the crew name and invasives filled in at the office, a comment tidied on the Sheet).
+   That kept 394 old plots on one iPhone and filled its storage. Which copy is newer is now decided:
+     - a plot with a base (v377+) knows exactly which fields were changed on the phone since it was last
+       in step with the Sheet (editedOf_). Only those can make it stay; the rest is the Sheet's newer work.
+     - an older plot (no base) cannot say, so it stays for anything that could be a correction that
+       never arrived: a tree the Sheet has and this copy doesn't (or the reverse), a tally value that
+       differs, a different date or location, or any value the Sheet has no copy of. Placeholders
+       ("0", "None", the default AGS on an empty tally row) and fields the app no longer has (an old
+       import's ID, TIME, LCR…) are not data. */
+const KEEP_DAYS=7, PRUNE_GAP_MS=20*60000, PRUNE_RECHECK_MS=6*3600000;
+let autoPruneOn=true;
+try{ if(STORE && STORE.getItem("fi_autoprune")==="0") autoPruneOn=false; }catch(e){}
+function setAutoPrune_(on){ autoPruneOn=!!on; try{ if(STORE) STORE.setItem("fi_autoprune", on?"1":"0"); }catch(e){} try{ renderSaved(); }catch(e){} if(on) setTimeout(()=>autoPrune_(true), 400); }
+const _holdWhy=Object.create(null);           // PlotID -> {why, at}: why the last check kept an older plot
+let _pruneBusy=false, _pruneLast=0;
+const PH_BLANK_=new Set(["","0","none","-","n/a","na","null","undefined"]);
+function phBlank_(v){ return v==null || (typeof v!=="object" && PH_BLANK_.has(String(v).trim().toLowerCase())); }
+const TALLY_RE_=/^T(\d+)(SP|S|Q|QL|LOGS)$/;
+function slotUsed_(o,i){ return !!o && !phBlank_(o["T"+i+"SP"]); }
+/* When the plot was collected (its DATE; the save time only if it has none). */
+function plotWhen_(p){
+  const v=p && String(p.DATE==null?"":p.DATE).trim() ? p.DATE : (p && p._ts);
+  const m=/^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d)/.exec(dateCanon_(v));
+  if(!m) return 0;
+  const t=new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5]).getTime(); return isFinite(t)?t:0;
+}
+function plotRecent_(p,now){ const t=plotWhen_(p); return !!t && (now||Date.now())-t < KEEP_DAYS*86400000; }
+/* Nothing worth holding: no compartment, no plot number, no tree, no comment. */
+function plotBlankRec_(p){
+  if(!p) return true;
+  if(String(p.STANDID||"").trim() || String(p.PLOTNUM||"").trim() || !phBlank_(p.COMMENT)) return false;
+  for(let i=1;i<=28;i++) if(slotUsed_(p,i)) return false;
+  return true;
+}
+function plotDateDiffers_(p,row){
+  const pv=String(p.DATE==null?"":p.DATE).trim();
+  if(!pv || !Object.prototype.hasOwnProperty.call(row,"DATE")) return false;
+  return !(row.__dateText ? plotDateSame_(pv,row.DATE) : plotDateInstantSame_(pv,row.DATE));
+}
+const PRUNE_SKIP_=f=>BASE_SKIP_[f] || PLOT_SERVER_COLS.has(f) || PLOT_CONFIRM_SKIP.has(f) || f==="INANALYSIS";
+/* v377+ plot: only what was changed here since it was last in step with the Sheet can keep it. */
+function plotEditedWhy_(p,row){
+  const ed=editedOf_(p)||[];
+  for(const f of ed){
+    if(PLOT_SERVER_COLS.has(f)) continue;
+    const pv=p[f];
+    if(f==="DATE"){ if(plotDateDiffers_(p,row)) return "changed here (date), not in the Sheet"; continue; }
+    if(pv!==null && typeof pv==="object") continue;
+    if(phBlank_(pv) && phBlank_(row[f])) continue;
+    if(!plotSheetSameStrict_(plotQualNorm_(f,pv), row[f])) return "changed here ("+f+"), not in the Sheet";
+  }
+  return "";
+}
+/* Pre-v377 plot: no record of what changed here, so anything that could be a lost correction keeps it. */
+function plotOldCopyWhy_(p,row){
+  const rowBlank=v=>String(v==null?"":v).trim()==="";
+  for(const f of HEADER){
+    if(PRUNE_SKIP_(f) || f==="DATE") continue;
+    const pv=p[f]; if(pv!==null && typeof pv==="object") continue;
+    const t=TALLY_RE_.exec(f);
+    if(t){
+      const i=+t[1], mine=slotUsed_(p,i), theirs=slotUsed_(row,i);
+      if(!mine && !theirs) continue;
+      if(mine!==theirs) return mine ? "a tree here is not in the Sheet" : "the Sheet has a tree this copy lacks";
+      const pb=phBlank_(pv), rb=phBlank_(row[f]);
+      if(pb && rb) continue;
+      if(pb!==rb || !plotSheetSameStrict_(plotQualNorm_(f,pv), row[f])) return "tree "+i+" differs from the Sheet";
+      continue;
+    }
+    if(!phBlank_(pv) && rowBlank(row[f])) return "holds "+f+", which the Sheet lacks";
+  }
+  if(String(p.INANALYSIS||"").trim().toUpperCase()==="N" && String(row.INANALYSIS||"").trim().toUpperCase()!=="N") return "left out of the analysis here, not in the Sheet";
+  if(plotDateDiffers_(p,row)) return "the date differs from the Sheet";
+  const la=parseFloat(p.Y), lo=parseFloat(p.X), lb=parseFloat(row.Y), ob=parseFloat(row.X);
+  if([la,lo,lb,ob].every(isFinite)){
+    const dy=(la-lb)*111320, dx=(lo-ob)*111320*Math.cos(la*Math.PI/180);
+    if(Math.sqrt(dx*dx+dy*dy)>10) return "the location differs from the Sheet";
+  } else if(isFinite(la)&&isFinite(lo) && !(isFinite(lb)&&isFinite(ob))) return "has a GPS fix the Sheet lacks";
+  return "";
+}
+/* Why this phone should keep plot p ("" = it need not). auto: the after-sync pass, which also keeps the last KEEP_DAYS days. */
+function plotHoldWhy_(p,row,auto,now){
+  if(!p._sent) return "not in the Sheet yet";
+  if(p._mismatch || p._batchRetry) return "differs from the Sheet — changed here, being re-sent";
+  if(plotBlankRec_(p)) return "";             // nothing in it to keep, however recent
+  if(auto && plotRecent_(p,now)) return "collected in the last "+KEEP_DAYS+" days";
+  if(!row) return "not found in the Sheet";
+  const w=baseOk_(p) ? plotEditedWhy_(p,row) : plotOldCopyWhy_(p,row);
+  return w ? "differs from the Sheet — "+w : "";
+}
+function plotsClearable_(by, auto){
+  const can=[], cannot=[], n=Object.create(null), now=Date.now();
+  saved.forEach(p=>{ const id=String(p&&p._id||"").trim(); if(id) n[id]=(n[id]||0)+1; });
   saved.forEach(p=>{
+    if(!p) return;
     const id=String(p._id||"").trim(), row=id && by ? by[id] : null;
-    let why="";
-    if(id && saved.filter(q=>String(q._id||"").trim()===id).length>1){ cannot.push({p,why:"listed twice on this phone"}); return; }
-    if(!p._sent) why="not in the Sheet yet";
-    else if(p._mismatch || p._batchRetry) why="differs from the Sheet";
-    else if(!row) why="not found in the Sheet";
-    else if(plotClearDiff_(p,row).length) why="differs from the Sheet";
+    if(id && n[id]>1){ cannot.push({p,why:"listed twice on this phone"}); return; }
+    const why=plotHoldWhy_(p,row,!!auto,now);
     if(why) cannot.push({p,why}); else can.push(p);
   });
   return {can, cannot};
+}
+/* Something on screen points at a plot by its position in the list — the plot card, or a pin's popup on
+   the map. Removing plots under it would make its Edit or Delete land on a different plot, so wait. */
+function pruneHeld_(){
+  try{ if(typeof _plotCardIdx!=="undefined" && _plotCardIdx!=null) return true; }catch(e){}
+  try{ if(typeof fmap!=="undefined" && fmap && fmap._popup && fmap.hasLayer && fmap.hasLayer(fmap._popup)) return true; }catch(e){}
+  return false;
+}
+/* After a sync: remove what the phone no longer needs to hold. Asks the Sheet only when there is
+   something old enough to judge, and leaves a plot it decided to keep alone for PRUNE_RECHECK_MS. */
+function autoPrune_(force){
+  if(!autoPruneOn || _pruneBusy || _plotsLoading) return;
+  if(!connected || isOffline() || authBlocked || _flushBusy || _confirmBusy || editingNow_() || pruneHeld_()) return;
+  const now=Date.now();
+  if(!force && now-_pruneLast<PRUNE_GAP_MS) return;
+  const cand=saved.filter(p=>p && p._sent && !p._mismatch && !p._batchRetry && !plotRecent_(p,now) &&
+    !(!force && p._id && _holdWhy[p._id] && now-_holdWhy[p._id].at<PRUNE_RECHECK_MS));
+  if(!cand.length) return;
+  _pruneBusy=true; _pruneLast=now;
+  const safety=setTimeout(()=>{ _pruneBusy=false; }, 120000);
+  sheetPlotsById_(by=>{
+    try{
+      if(!by || editingNow_() || pruneHeld_() || _flushBusy || !autoPruneOn) return;
+      const P=plotsClearable_(by,true), t=Date.now();
+      P.cannot.forEach(x=>{ if(x.p && x.p._id && x.p._sent) _holdWhy[x.p._id]={why:x.why, at:t}; });
+      const go=P.can;
+      if(!go.length){ renderSaved(); return; }
+      const goSet=new Set(go);
+      plotMaxNote_(go);
+      saved=saved.filter(p=>!goSet.has(p));
+      go.forEach(p=>{ if(p._id) delete _holdWhy[p._id]; });
+      try{ _plotCardIdx=null; }catch(e){}
+      persist(); plotMaxNote_(go);
+      renderSaved(); netDot(); try{ if(fmap) renderMapPins(); if(typeof updateLayerStatus==="function") updateLayerStatus(); }catch(e){}
+      plotBackupNow_(saved).then(()=>{}, ()=>{});
+      toast(`Freed ${go.length} older plot${go.length===1?"":"s"} from this phone — they are in the Sheet and still on the map`);
+      try{ if(crewShown) fetchCrew(true); }catch(e){}
+    } finally { clearTimeout(safety); _pruneBusy=false; }
+  });
 }
 let _csState=null;
 function clearSyncedPanel_(){
   const lbl=p=>`Stand ${esc(p.STANDID||"—")} plot ${esc(p.PLOTNUM||"—")}`;
   const frame=body=>showInfoSheet_("Clear synced data", `<div style="font-size:13px;line-height:1.55;color:#e8f0e6">${body}</div>`);
-  const toggle=`<label style="display:flex;gap:8px;align-items:flex-start;margin-top:14px;color:#a9c9b0;font-size:12px;line-height:1.4"><input type="checkbox" ${photoPurgeOn?"checked":""} onchange="setPhotoPurge_(this.checked)" style="margin-top:2px"> <span>Clear uploaded photos from this phone automatically once they are a day old. Plots are never cleared automatically.</span></label>`;
+  const toggle=`<label style="display:flex;gap:8px;align-items:flex-start;margin-top:14px;color:#a9c9b0;font-size:12px;line-height:1.4"><input type="checkbox" ${photoPurgeOn?"checked":""} onchange="setPhotoPurge_(this.checked)" style="margin-top:2px"> <span>Clear uploaded photos from this phone automatically once they are a day old.</span></label>`+
+    `<label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;color:#a9c9b0;font-size:12px;line-height:1.4"><input type="checkbox" ${autoPruneOn?"checked":""} onchange="setAutoPrune_(this.checked)" style="margin-top:2px"> <span>After each sync, remove older plots this phone no longer needs. It always keeps plots not yet in the Sheet, plots changed here, and plots collected in the last ${KEEP_DAYS} days. Removed plots stay in the Sheet and on the map.</span></label>`;
   if(!connected || isOffline()){ frame("This needs a connection: the phone checks each plot and photo against the Sheet before clearing anything."+toggle); return; }
   if(authBlocked){ frame("Log in first — the phone has to check with the Sheet before clearing anything."+toggle); return; }
   frame("Checking every plot and photo on this phone against the Sheet…");
@@ -4501,7 +4725,7 @@ function clearSyncedPanel_(){
       const names=P.cannot.slice(0,8).map(x=>`<div style="color:#e8c9a0">• ${lbl(x.p)} — ${esc(x.why)}</div>`).join("")+(P.cannot.length>8?`<div style="color:#e8c9a0">• …and ${P.cannot.length-8} more</div>`:"");
       frame(
         `<div style="font-weight:700;color:#eafae8">Safe to clear from this phone</div>`+
-        `<div>${P.can.length} plot${P.can.length===1?"":"s"} — in the Sheet, identical to what is here</div>`+
+        `<div>${P.can.length} plot${P.can.length===1?"":"s"} — in the Sheet, which holds everything this copy has</div>`+
         `<div>${phCan.length} photo${phCan.length===1?"":"s"} — on Drive (about ${approxMB(phCan)} MB)</div>`+
         `<div style="font-weight:700;color:#eafae8;margin-top:12px">Staying on this phone</div>`+
         (P.cannot.length?`<div>${P.cannot.length} plot${P.cannot.length===1?"":"s"}:</div>${names}`:`<div style="color:#8fae95">No plots — every plot here is in the Sheet.</div>`)+
@@ -4516,6 +4740,7 @@ function clearSyncedPanel_(){
   });
 }
 function clearSyncedGo_(withPlots){
+  if(_plotsLoading){ toast("Opening this phone's plots — try again in a moment",true); return; }
   const stt=_csState;
   if(!stt){ clearSyncedPanel_(); return; }
   /* A plot open for editing is remembered by its POSITION in the list; removing others now would
@@ -5466,12 +5691,20 @@ function pfClear_(){ if(pfLayer_) pfLayer_.clearLayers();
   const b=$("pfClearBtn"); if(b) b.style.display="none"; toast("Highlight cleared"); }
 // keep the chip hidden until there is actually something to clear
 function pfChip_(on){ const b=$("pfClearBtn"); if(b) b.style.display = on ? "" : "none"; }
+/* v453: the Sheet's plots are kept on the phone (IndexedDB) as last fetched, so plots removed from
+   this phone after a sync still show on the map — as crew plots — when the app is opened with no signal. */
+function crewCacheSave_(rows){ try{ ldbPut("crewfeed", {at:Date.now(), rows:rows}).catch(()=>{}); }catch(e){} }
+let _crewCacheTried=false;
+function crewCacheLoad_(){
+  if(_crewCacheTried) return; _crewCacheTried=true;
+  try{ ldbGet("crewfeed").then(r=>{ if(r && Array.isArray(r.rows) && !crewData.length && crewShown && crewLayer) renderCrewPlots(r.rows, true); }).catch(()=>{}); }catch(e){}
+}
 function fetchCrew(silent){
   if(!connected || isOffline()) return;
   const cb="__crew"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?";
   const sc=document.createElement("script");
   const cleanup=()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
-  window[cb]=resp=>{ try{ renderCrewPlots((resp&&resp.plots)||[], silent); }catch(e){ if(!silent) toast("Couldn't load crew plots",true); } cleanup(); };
+  window[cb]=resp=>{ try{ renderCrewPlots((resp&&resp.plots)||[], silent); if(resp && Array.isArray(resp.plots)) crewCacheSave_(resp.plots); }catch(e){ if(!silent) toast("Couldn't load crew plots",true); } cleanup(); };
   sc.onerror=()=>{ cleanup(); if(!silent) toast("Couldn't load crew plots — check connection",true); };
   sc.src=SCRIPT_URL+sep+tokQ_()+"action=plotanalysis&callback="+cb;   // analyzed per-plot feed (BA, vol, type, age, …)
   document.body.appendChild(sc);
@@ -6164,6 +6397,8 @@ function exportBackup(){
   const store={};
   if(STORE){ for(let i=0;i<STORE.length;i++){ const k=STORE.key(i); if(k && k.indexOf("fi_")===0){ try{ store[k]=STORE.getItem(k); }catch(e){} } } }
   else { store[PKEY]=JSON.stringify(saved); }
+  store[PKEY]=JSON.stringify(saved);            // v454: the plots may be in the larger store only — the file always carries them
+  delete store.fi_plots_idb; delete store.fi_plotgen;
   const backup={ app:"FRI Plot Card", version:1, exportedAt:new Date().toISOString(), plots:saved.length, store, boundFiles:(typeof boundFiles!=="undefined"?boundFiles:[]) };
   const blob=new Blob([JSON.stringify(backup)],{type:"application/json"}), url=URL.createObjectURL(blob), a=document.createElement("a");
   a.href=url; a.download=`FRI-backup_${nowStr().replace(/[: ]/g,"-")}.json`; document.body.appendChild(a); a.click(); a.remove();
@@ -6181,7 +6416,8 @@ function importBackup(file){
     const merged=saved.slice();
     incPlots.forEach(p=>{ if(!p) return; const idx=p._id?merged.findIndex(q=>q._id===p._id):-1; if(idx>=0) merged[idx]=p; else merged.push(p); });
     if(STORE){
-      STORE.setItem(PKEY,JSON.stringify(merged));
+      if(_plotsLoading){ toast("Opening this phone's plots — try the restore again in a moment",true); return; }
+      saved=merged; persist();                    // v454: through persist, so a list too big for the ordinary store goes to the larger one
       ["fi_tracts","fi_cstands","fi_cshrub","fi_pendspp","fi_pests","fi_disease","fi_harv","fi_renew","fi_tend","fi_sar","fi_invasp","fi_nest"].forEach(k=>{
         if(store[k]!==undefined){ const out=safeArr(STORE.getItem(k)); safeArr(store[k]).forEach(v=>{ if(!out.some(x=>String(x).toLowerCase()===String(v).toLowerCase())) out.push(v); }); STORE.setItem(k,JSON.stringify(out)); }
       });
@@ -6194,7 +6430,9 @@ function importBackup(file){
         else if(store.fi_boundaries){ const fc=JSON.parse(store.fi_boundaries); bfs=[{id:genId(),name:"Boundaries",features:(fc&&fc.features)||[]}]; }
         if(bfs && bfs.length){ ldbPut("boundfiles", bfs); }
       }catch(e){}
-      toast("Restored — reloading…"); setTimeout(()=>location.reload(),700);
+      toast("Restored — reloading…");
+      const reload=()=>setTimeout(()=>location.reload(),300);
+      try{ plotBackupNow_(saved).then(reload, reload); }catch(e){ reload(); }
     } else { saved=merged; renderSaved(); toast(`Restored ${merged.length} plots (not saved — storage unavailable)`,true); }
   }).catch(()=>toast("Couldn't read that file",true));
 }
@@ -6717,7 +6955,7 @@ setNow(); renderGround([]); renderSaved(); updateTally(); netDot(); autoGPS(); u
 /* Restore anything the durable backup holds that localStorage has lost — a full quota, a cleared
    site, or a phone that died before the write landed. Runs after the first render so the list is
    already on screen, then refreshes it if plots come back. */
-try{ plotBackupRestore_(); }catch(e){}
+/* (v454: the larger store is read from the start — plotsLoad_, beside the plot list.) */
 setField($("PLOTNUM"), nextPlotFor($("STANDID").value));
 // On a fresh open, go straight to the map (before first paint, so the form doesn't flash) — the user taps "＋ New plot" when ready.
 try{ requestAnimationFrame(()=>{ try{ openMap(); }catch(e){ setTimeout(()=>{ try{ openMap(); }catch(e2){} }, 200); } }); }catch(e){ setTimeout(()=>{ try{ openMap(); }catch(e2){} }, 200); }
@@ -6896,6 +7134,7 @@ async function openMap(){
    behind. */
 function resumeSharing_(){
   sharingNotice_();
+  try{ crewCacheLoad_(); }catch(e){}
   if(!connected || isOffline()){ setCrewBtn(); setCrewRouteBtn(); setLiveBtn(); return; }   // offline: carry on locally
   // Every plot already in the Sheet is pulled the moment the map opens, so nobody has to remember to
   // switch a layer on to find out what's been done. Refreshed on a timer as the crew submits.
@@ -10274,17 +10513,55 @@ function shpFromRows_(base, head, rows, latKey, lonKey, extraFiles){
   offerMailExport_(stamp);
   return keep.length;
 }
+/* v456 — which properties go in a plot shapefile (Chris, 2026-11-05: "i also want to be able to select a
+   tract or tracts and have all the plots in those tract exported as shapefile"). The plot exports read the
+   Sheet's feed and, when it holds more than one property, ask which: every property ticked by default, the
+   last choice remembered. One property is named in the file name; several are counted. */
+let _tpDone=null, _tpList=[];
+function tractOf_(v){ return String(v==null?"":v).trim() || "(no property)"; }
+function tractPick_(title, tracts, done){
+  const counts={}; tracts.forEach(t=>{ counts[t]=(counts[t]||0)+1; });
+  const NP="(no property)";
+  const ts=Object.keys(counts).sort((a,b)=>(a===NP)-(b===NP) || a.localeCompare(b,undefined,{numeric:true,sensitivity:"base"}));   // plots with no property last
+  if(ts.length<2){ done(null, ""); return; }
+  let last=null; try{ const v=STORE&&STORE.getItem("fi_exptracts"); if(v) last=new Set(JSON.parse(v)); }catch(e){}
+  if(last && !ts.some(t=>last.has(t))) last=null;
+  _tpDone=done; _tpList=ts;
+  const row=(t,i)=>`<label style="display:flex;gap:10px;align-items:center;padding:9px 4px;border-bottom:1px solid #1f3a24;color:#e8f0e6;font-size:14px">`+
+    `<input type="checkbox" id="tp_${i}" ${(!last||last.has(t))?"checked":""} style="width:18px;height:18px"> <span style="flex:1">${esc(t)}</span><span style="color:#8fae95;font-size:12px">${counts[t]} plot${counts[t]===1?"":"s"}</span></label>`;
+  showInfoSheet_(title,
+    `<div style="color:#a9c9b0;font-size:12px;margin-bottom:6px">Which properties? Every plot in the ticked properties goes in the file.</div>`+
+    `<div style="display:flex;gap:8px;margin:4px 0 6px"><button type="button" onclick="tractPickAll_(true)" style="flex:1;padding:7px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6;font:inherit;font-size:12px">Tick all</button>`+
+    `<button type="button" onclick="tractPickAll_(false)" style="flex:1;padding:7px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6;font:inherit;font-size:12px">Untick all</button></div>`+
+    ts.map(row).join("")+
+    `<button type="button" id="tpGo" onclick="tractPickGo_()" style="display:block;width:100%;margin-top:10px;padding:12px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:14px;font-weight:600">Export shapefile</button>`,
+    ()=>{ _tpDone=null; });
+}
+function tractPickAll_(on){ _tpList.forEach((t,i)=>{ const c=$("tp_"+i); if(c) c.checked=!!on; }); }
+function tractPickGo_(){
+  const sel=_tpList.filter((t,i)=>{ const c=$("tp_"+i); return c && c.checked; });
+  if(!sel.length){ toast("Tick at least one property",true); return; }
+  try{ if(STORE) STORE.setItem("fi_exptracts", JSON.stringify(sel)); }catch(e){}
+  const d=_tpDone; _tpDone=null; closeInfoSheet_();
+  const all=sel.length===_tpList.length;
+  const tag=all ? "" : (sel.length===1 ? "_"+sel[0].replace(/[^A-Za-z0-9]+/g,"").slice(0,24) : "_"+sel.length+"props");
+  if(d) d(all?null:new Set(sel), tag);
+}
 /* EVERY column of FRIPLOTS, every plot. "All the collected data", not a summary. */
 function exportPlotsRawShp(){
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   toast("Reading the whole Sheet…");
   jsonpAction_("plotsfull", r=>{
     if(!r || !r.ok || !r.head || !r.head.length){ toast("The Sheet did not return the plot data — redeploy the backend (New version)",true); return; }
-    const n=shpFromRows_("FRIplots_full", r.head, r.plots||[], "Y", "X");
-    if(!n) return;
-    const miss=r.skippedNoCoord||0;
-    toast(`${n} of ${r.total} plots · every column → shapefile`+(miss?` · ${miss} had no location`:""));
-    if(miss) setTimeout(()=>toast(`${miss} plot${miss>1?"s have":" has"} no GPS fix, so ${miss>1?"they":"it"} cannot be a map feature — fix the coordinates or use the CSV export`,true), 2600);
+    const ti=r.head.indexOf("TRACT"), all=r.plots||[];
+    tractPick_("All plot data → shapefile", ti<0?[]:all.map(p=>tractOf_(p[ti])), (want, tag)=>{
+      const rows=want ? all.filter(p=>want.has(tractOf_(p[ti]))) : all;
+      const n=shpFromRows_("FRIplots_full"+tag, r.head, rows, "Y", "X");
+      if(!n) return;
+      const miss=want ? 0 : (r.skippedNoCoord||0);
+      toast(`${n} of ${want?rows.length:r.total} plots${want?" in "+[...want].join(", "):""} · every column → shapefile`+(miss?` · ${miss} had no location`:""));
+      if(miss) setTimeout(()=>toast(`${miss} plot${miss>1?"s have":" has"} no GPS fix, so ${miss>1?"they":"it"} cannot be a map feature — fix the coordinates or use the CSV export`,true), 2600);
+    });
   });
 }
 /* The full per-plot analysis - everything the Compartment Summary reports, one row per plot. */
@@ -10293,10 +10570,14 @@ function exportPlotsFullSummaryShp(){
   toast("Analysing every plot…");
   jsonpAction_("plotsummary&set=all", r=>{
     if(!r || !r.ok || !r.head || !r.head.length){ toast("The Sheet did not return the summary — redeploy the backend (New version)",true); return; }
-    const n=shpFromRows_("FRIplots_summary", r.head, r.plots||[], "LAT", "LON");
-    if(!n) return;
-    const miss=r.skippedNoCoord||0;
-    toast(`${n} of ${r.total} plots · full summary → shapefile`+(miss?` · ${miss} had no location`:""));
+    const ti=r.head.indexOf("TRACT"), all=r.plots||[];
+    tractPick_("All plots + full summary → shapefile", ti<0?[]:all.map(p=>tractOf_(p[ti])), (want, tag)=>{
+      const rows=want ? all.filter(p=>want.has(tractOf_(p[ti]))) : all;
+      const n=shpFromRows_("FRIplots_summary"+tag, r.head, rows, "LAT", "LON");
+      if(!n) return;
+      const miss=want ? 0 : (r.skippedNoCoord||0);
+      toast(`${n} of ${want?rows.length:r.total} plots${want?" in "+[...want].join(", "):""} · full summary → shapefile`+(miss?` · ${miss} had no location`:""));
+    });
   });
 }
 // Export PLOTS as a point shapefile enriched with each plot's full analysis (forest type, BA, QMD,
@@ -10311,8 +10592,10 @@ function exportPlotsAnalysisShp(set){
   const which=(set==="audit")?"audit":"all";
   toast("Fetching plot analysis…");
   jsonpAction_("plotanalysis&set="+which, r=>{
-    const plots=(r&&r.plots)||[];
-    if(!plots.length){ toast(`No analyzed ${which==="audit"?"imported ":""}plots with coordinates in the Sheet`,true); return; }
+    const allP=(r&&r.plots)||[];
+    if(!allP.length){ toast(`No analyzed ${which==="audit"?"imported ":""}plots with coordinates in the Sheet`,true); return; }
+    tractPick_("Plots + analysis → shapefile", allP.map(p=>tractOf_(p.tract)), (want, tag)=>{
+    const plots=want ? allP.filter(p=>want.has(tractOf_(p.tract))) : allP;
     const feats=[], recs=[];
     plots.forEach(p=>{ const u=utm17n_(p.lat,p.lon); feats.push({pts:[{x:u.x,y:u.y}], box:{xmin:u.x,ymin:u.y,xmax:u.x,ymax:u.y}});
       recs.push([p.stand||"", p.plot||"", p.ft||"", p.dom||"", p.comp||"",
@@ -10328,8 +10611,9 @@ function exportPlotsAnalysisShp(set){
       {name:"VOL_M3HA",type:"N",len:10,dec:1},{name:"PLON_VOL",type:"C",len:10},{name:"STOCKING",type:"C",len:10},
       {name:"CRUISER",type:"C",len:24},{name:"DATE",type:"C",len:16}
     ], recs);
-    dlShp_((which==="audit"?"FRIimported_plots_analysis":"FRIplots_analysis"),shp,shx,dbf);
-    toast(`${plots.length} plot${plots.length===1?"":"s"} + analysis → shapefile`);
+    dlShp_((which==="audit"?"FRIimported_plots_analysis":"FRIplots_analysis")+tag,shp,shx,dbf);
+    toast(`${plots.length} plot${plots.length===1?"":"s"}${want?" in "+[...want].join(", "):""} + analysis → shapefile`);
+    });
   });
 }
 // Export COMPARTMENTS as a polygon shapefile enriched with each stand's full analysis. Uses your
