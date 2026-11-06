@@ -883,12 +883,13 @@ try{ (function(){
     <details class="lgroup" id="lgroupProp" open data-open><summary>🏠 Property &amp; provincial layers</summary>
       <div class="lgroup-body">
         <div class="map-field"><label>Property shown on the map (picking one zooms to it)</label><select id="propActiveSel" onchange="propPickActive_(this.value)"></select></div>
+        <div id="mmMenuBox"></div>
         <label style="display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:13px;color:#e8f0e6"><input type="checkbox" id="ovLblChk" checked onchange="toggleLabels('ov')" style="width:18px;height:18px"> Property names on the zoomed-out map</label>
         <label style="display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:13px;color:#e8f0e6"><input type="checkbox" id="twLblChk" checked onchange="toggleLabels('tw')" style="width:18px;height:18px"> Town &amp; city names on the zoomed-out map</label>
         <button type="button" onclick="closeLayersMenu();propZoomTo_()">🔍 Zoom to this property</button>
         <button type="button" onclick="closeLayersMenu();mapOnlyClear_()">👁 Show all properties (after a Find showed only one)</button>
         <button type="button" onclick="closeLayersMenu();toast('Fetching every property…');propSync_(function(ok,why){ toast(ok?'Every property is up to date on this phone':propSyncWhyMsg_(why),!ok); },{all:true})">⟳ Sync all properties (normally only the chosen one is fetched)</button>
-        <button type="button" onclick="closeLayersMenu();openPropSheet_()">🏠 Property details &amp; MFTIP areas</button>
+        <button type="button" onclick="closeLayersMenu();openPropSheet_()">🏠 Property details — owner, roll number, compartment areas (MFTIP)</button>
         <button type="button" onclick="closeLayersMenu();cfFromLoaded_()">📋 Save the loaded compartment file's fields (species, age…) to the Sheet</button>
         <button type="button" onclick="closeLayersMenu();cfChooseOpen_()">⚙ Fields shown in the compartment popup</button>
         <button type="button" onclick="closeLayersMenu();cltipOpen_()">🗺 Property outline from the CLTIP viewer…</button>
@@ -1116,6 +1117,7 @@ try{ (function(){
         <button type="button" onclick="closeMore();exportCompartmentsAnalysisShp('main')">⬠ Compartments + analysis → shapefile</button>
         <button type="button" onclick="closeMore();exportTractMapsPdf()">🗺 Tract maps → PDF (one page per tract)</button>
         <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:6px 2px 8px">Each of the five above downloads to this device, then offers to email it to you once it has reached Drive.</div>
+        <button type="button" onclick="closeMore();mmMenuShow_()">🖨 Make a printable map of a property (your title, layers, plot sizes)…</button>
         <!-- The wording here has now been wrong in two different directions. It began as "Email
              analysis report — Excel / PDF (by property)" and sat at the top of the group, so people
              after their shapefiles pressed it and got a spreadsheet (v347 moved and renamed it).
@@ -1371,7 +1373,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-05 · v456";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-05 · v458";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -12111,6 +12113,7 @@ function propRender_(keep){
      `<div style="font-size:11px;color:#8fae95;margin-bottom:6px">Letter-size PDF and JPEG from what is saved here — save any changes first.</div>`+
      `<div style="display:flex;gap:8px;margin-bottom:6px"><button type="button" class="btn ghost" style="flex:1" onclick="mmOpen_(4)">🗺 Map 4 — surrounding area</button><button type="button" class="btn ghost" style="flex:1" onclick="mmOpen_(6)">🛰 Map 6 — detailed, aerial</button></div>`+
      `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="mmOpen_(7)">📅 Map 7 — planned activities</button>`+
+     `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="mmOpen_(8)">🖌 Custom map — your title, the layers you choose</button>`+
      `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="pkOpen_()">📦 Map package — maps + appendices in one PDF</button>`+
      `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="closeDataSheet_();openMap();setTimeout(function(){ propZoomTo_(_ppTract); },80)">🔍 Show this property on the map</button>`+
      `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="mvOpen_()">💾 Saved map versions</button>`+
@@ -12738,9 +12741,27 @@ function propZoomTo_(tract, quiet){ const t=tract||propActiveTract_(); if(!t) re
   return false; }
 function propPickActive_(v){ propSetActive_(v);
   if(typeof mapOnly!=="undefined"&&mapOnly&&v&&propK_(v)!==propK_(mapOnly)){ mapOnly=String(v); try{ STORE&&STORE.setItem("fi_maponly",mapOnly); }catch(e){} try{ renderBoundaries(); renderMapPins(); if(crewShown&&crewData.length) renderCrewPlots(crewData,true); }catch(e){} }   // v406: the one-property view follows the chosen property
-  lioCache=null; lioRender_(); lioOnMapOpen_(); if(v){ closeLayersMenu(); propZoomTo_(v,true); try{ propSync_(null,{tract:v}); }catch(e){} } }      // v399: fetch its detail
+  lioCache=null; lioRender_(); lioOnMapOpen_(); try{ mmMenuFill_(); }catch(e){} if(v){ closeLayersMenu(); propZoomTo_(v,true); try{ propSync_(null,{tract:v}); }catch(e){} } }      // v399: fetch its detail
 function propActiveOptions_(){ const t=propActiveTract_(); return [["","— choose —"]].concat(propTracts_().map(x=>[x,x])).map(o=>`<option value="${esc(o[0])}"${o[0]===t?" selected":""}>${esc(o[1])}</option>`).join(""); }
-function propMenuOpen_(){ const s=$("propActiveSel"); if(s) s.innerHTML=propActiveOptions_(); const c=$("ovLblChk"); if(c) c.checked=labelVis.ov!==false; const c2=$("twLblChk"); if(c2) c2.checked=labelVis.tw!==false; lioRender_(); }
+/* v458 — making a map, where someone new to the app looks for it (Chris, 2026-11-05: "have the make a map button in that
+   location rather than hidden in the property details and Mfip areas … user-friendly for people who don't know anything
+   about the app"). Layers → Property, right under the property chooser: one plainly-named block, each button saying what
+   the map is. The same maps as before; only the way in is new. */
+function mmMenuFill_(){ const box=$("mmMenuBox"); if(!box) return; const t=propActiveTract_();
+  const B=(k,ic,name,what)=>`<button type="button" onclick="mmFromMenu_(${typeof k==="string"?"'"+k+"'":k})" ${t?"":"disabled"} style="display:block;width:100%;text-align:left;padding:10px 12px;margin:5px 0;border-radius:9px;border:1px solid ${t?"#2f7a44":"#2a4030"};background:${t?"#123a1c":"#14201a"};color:${t?"#e8f0e6":"#6f8a76"};font:inherit">`+
+    `<div style="font-size:14px;font-weight:600">${ic} ${name}</div><div style="font-size:11px;color:${t?"#a9c9b0":"#5d7563"};margin-top:2px;line-height:1.35">${what}</div></button>`;
+  box.innerHTML=`<div style="border:1px solid #2f7a44;border-radius:11px;padding:9px 10px 6px;margin:8px 0 10px;background:#0f2414">`+
+    `<div style="font-size:15px;font-weight:700;color:#eafae8">🖨 Make a map</div>`+
+    `<div style="font-size:12px;color:#a9c9b0;margin:2px 0 4px;line-height:1.4">`+(t?`A printable PDF map of <b>${esc(t)}</b>. Pick a kind of map, adjust its options, then tap Make.`:`Choose the property above first — then pick a kind of map here.`)+`</div>`+
+    B(8,"🖌","Custom map","Your own title; aerial photo or plain; tick the layers to show; plot symbols as small as you need")+
+    B(6,"🛰","Detailed map on the aerial photo","MFTIP Map 6 — compartments, plots, points and lines on the photo")+
+    B(4,"🗺","Property and surrounding area","MFTIP Map 4 — woodland, roads, water and lots around the property, with a locator map")+
+    B(7,"📅","Planned activities","MFTIP Map 7 — compartments coloured by the work planned in the plan period")+
+    B("pk","📦","All MFTIP maps in one PDF","Title page, Maps 4, 6 and 7, compartment and photo appendices")+`</div>`; }
+function mmMenuShow_(){ try{ const m=$("layersMenu"); if(m && m.style.display==="none") toggleLayersMenu(); layersTab_("prop"); }catch(e){} }      // the block is near the top of the tab, under the property chooser
+function mmFromMenu_(k){ const t=propActiveTract_(); if(!t){ toast("Choose the property first (the box at the top of Layers → Property)",true); return; }
+  try{ closeLayersMenu(); }catch(e){} _ppTract=t; if(k==="pk") pkOpen_(); else mmOpen_(k); }
+function propMenuOpen_(){ try{ mmMenuFill_(); }catch(e){} const s=$("propActiveSel"); if(s) s.innerHTML=propActiveOptions_(); const c=$("ovLblChk"); if(c) c.checked=labelVis.ov!==false; const c2=$("twLblChk"); if(c2) c2.checked=labelVis.tw!==false; lioRender_(); }
 /* ============ v381 — find an address ============
    Esri's World Geocoding Service (the same company as the aerial photo), used as a SEARCH — the
    result is shown on the map, never stored, which is the use Esri allows without a key. Ontario
@@ -12761,13 +12782,13 @@ function propBarFill_(){ const sel=$("propBarSel"), box=$("propBarBtns"); if(!se
   const B=(fn,label,dis)=>`<button type="button" ${dis?"disabled":""} onclick="${fn}" style="padding:9px 6px;border-radius:8px;border:1px solid ${dis?"#2a4030":"#2f7a44"};background:${dis?"#14201a":"#123a1c"};color:${dis?"#6f8a76":"#e8f0e6"};font:inherit;font-size:13px">${label}</button>`;
   const has=!!cur;
   box.innerHTML=B("propBarClose_();openPropSheet_(propActiveTract_())","🏠 Details & areas",!has)+B("propZoomTo_()","🔍 Zoom to it",!has)+
-    B("propBarClose_();_ppTract=propActiveTract_();mmOpen_(4)","🗺 Map 4",!has)+B("propBarClose_();_ppTract=propActiveTract_();mmOpen_(6)","🗺 Map 6",!has)+
+    B("propBarClose_();mmMenuShow_()","🖨 Make a map…",!has)+      /* v458: one plain way in — the Make a map block lists Custom, Map 6, Map 4, Map 7 */
     B("propBarClose_();_ppTract=propActiveTract_();pkOpen_()","📦 Map package",!has)+
     B("propBarClose_();_ppTract=propActiveTract_();csEdit_(propActiveTract_())","✂ Cut compartments",!has)+
     B("propBarClose_();_ppTract=propActiveTract_();propDelete_(propActiveTract_())","🗑 Delete property…",!has)+
     ((typeof mapOnly!=="undefined"&&mapOnly)?B("mapOnlyClear_();propBarFill_()","👁 Show all properties"):B("propBarClose_();if($('layersMenu').style.display==='none') toggleLayersMenu(); layersTab_('prop');","☰ Provincial layers & more"));
 }
-function propBarPick_(v){ if(!v) return; propPickActive_(v); propBarFill_(); setTimeout(propBarClose_,500); }
+function propBarPick_(v){ if(!v) return; propPickActive_(v); propBarFill_(); try{ mmMenuFill_(); }catch(e){} setTimeout(propBarClose_,500); }
 function findOpen_(){ const b=$("findBar"); if(!b) return; try{ propBarClose_(); }catch(e){}
   const show=b.style.display==="none"; b.style.display=show?"block":"none"; const t=$("toolFind"); if(t) t.classList.toggle("on",show);
   if(show){ findPropFill_(); try{ const sa=$("findShowAll"); if(sa) sa.style.display=mapOnly?"":"none"; }catch(e){} const i=$("findInput"); if(i) try{ i.focus(); }catch(e){} findRender_(); } }
@@ -13035,12 +13056,25 @@ const MM_DEF={
   4:{title:"Map 4  Property Map and Surrounding Area", pad:2.4, aerial:false, layers:{woodland:1,lots:1,roads:1,roadnames:1,water:1,waterbody:1,wetland:1,building:1,contour:0,towns:1}, hatch:"auto", plots:false},
   6:{title:"Map 6  Detailed Property Map",              pad:1.25, aerial:true,  layers:{woodland:0,lots:1,roads:1,roadnames:1,water:1,waterbody:1,wetland:1,building:1,contour:1,towns:1}, hatch:"none", plots:false},
   /* v396: the plan's schedule on the map — plain ground, compartments coloured by what is planned first in the window */
-  7:{title:"Map 7  Planned Activities",                 pad:1.25, aerial:false, layers:{woodland:0,lots:1,roads:1,roadnames:1,water:1,waterbody:1,wetland:0,building:1,contour:0}, hatch:"none", plots:false, acts:true}
+  7:{title:"Map 7  Planned Activities",                 pad:1.25, aerial:false, layers:{woodland:0,lots:1,roads:1,roadnames:1,water:1,waterbody:1,wetland:0,building:1,contour:0}, hatch:"none", plots:false, acts:true},
+  /* v457: a map of what you choose (Chris, 2026-11-05: "I would like the app to be able to be used to generate maps to show
+     certain features that I can select") — your title, aerial photo or plain ground, every layer a choice, plots on by default. */
+  8:{title:"Property Map",                              pad:1.25, aerial:true,  layers:{woodland:0,lots:1,roads:1,roadnames:1,water:1,waterbody:1,wetland:1,building:1,contour:0,towns:1}, hatch:"none", plots:true}
 };
+function mmName_(kind){ return kind===8 ? "Custom map" : "Map "+kind; }
+/* v457: plot symbols on every map — size (printed diameter), colour, numbers, and which compartments.
+   Chris: "some compartments have over 500 plots so they appear overlapping on the map. I need to be able to really shrink them down." */
+const MM_PLOT_SIZES=[["0.5","Tiny — 0.5 mm"],["0.8","Very small — 0.8 mm"],["1.2","Small — 1.2 mm"],["1.8","Medium — 1.8 mm"],["2.8","Standard — 2.8 mm"],["4","Large — 4 mm"]];
+const MM_PLOT_COLS=[["#ffd400","Yellow"],["#e8141c","Red"],["#ff7a00","Orange"],["#ffffff","White"],["#111111","Black"],["#1e6fd9","Blue"]];
+function mmPlotR_(o){ const d=parseFloat(o&&o.plotSize); return Math.max(1.5, (isFinite(d)&&d>0?d:2.8)/25.4*MM_DPI/2); }
+function mmPlotComps_(o){ return String((o&&o.plotComps)||"").split(/[,;]+/).map(x=>x.trim().toLowerCase()).filter(Boolean); }
 const MM_COL={boundary:"#e8141c", comp:"#3c9a1e", wood:"#b4d8b0", water:"#2f7fe0", openwater:"#a9d6f2", road:"#111", lot:"#555", contour:"#b07d3a", building:"#111"};
 function mmOpts_(kind){ const d=MM_DEF[kind], saved=(function(){ try{ return JSON.parse((STORE&&STORE.getItem("fi_mmopts"+kind))||"null"); }catch(e){ return null; } })()||{};
-  return {kind:kind, title:d.title, pad:d.pad, aerial:d.aerial, layers:Object.assign({},d.layers,saved.layers||{}), hatch:saved.hatch||d.hatch, plots:saved.plots!=null?!!saved.plots:d.plots, scale:saved.scale||"auto",
-    feats:saved.feats!=null?!!saved.feats:true, sensitive:false, lines:saved.lines!=null?!!saved.lines:true, names:saved.names!=null?!!saved.names:kind===6,   /* v393: point and line names — Map 6 yes, Map 4 symbols only (Chris, 2026-10-09) */      // v388: points on by default; sensitive ones asked for each time, never remembered
+  const myTitle=String(saved.title==null?"":saved.title).trim();
+  return {kind:kind, title:myTitle||d.title, titleDef:d.title, pad:d.pad, aerial:kind===8?(saved.aerial!=null?!!saved.aerial:d.aerial):d.aerial,
+    plotSize:(MM_PLOT_SIZES.some(x=>x[0]===String(saved.plotSize))?String(saved.plotSize):"2.8"), plotNums:saved.plotNums!=null?!!saved.plotNums:true,
+    plotColor:(MM_PLOT_COLS.some(x=>x[0]===saved.plotColor)?saved.plotColor:"#ffd400"), plotComps:String(saved.plotComps||""), layers:Object.assign({},d.layers,saved.layers||{}), hatch:saved.hatch||d.hatch, plots:saved.plots!=null?!!saved.plots:d.plots, scale:saved.scale||"auto",
+    feats:saved.feats!=null?!!saved.feats:true, sensitive:false, lines:saved.lines!=null?!!saved.lines:true, names:saved.names!=null?!!saved.names:(kind===6||kind===8),   /* v393: point and line names — Map 6 yes, Map 4 symbols only (Chris, 2026-10-09) */      // v388: points on by default; sensitive ones asked for each time, never remembered
     page:MM_PAGES[saved.page]?saved.page:"letter", extent:saved.extent==="view"?"view":"fit", viewBox:null,
     inset:saved.inset!=null?!!saved.inset:kind===4,      /* v394: the locator inset — Map 4 yes, Map 6 no */
     standLabels:saved.standLabels!=null?!!saved.standLabels:false,      /* v395: stand description under each compartment label (Map 6) */
@@ -13056,7 +13090,7 @@ function mmOpts_(kind){ const d=MM_DEF[kind], saved=(function(){ try{ return JSO
 function mmPhotoYear_(saved){ let src=null; try{ src=imgSource_(); }catch(e){} const id=src?src.id:"", typed=(saved&&saved.photoYears&&saved.photoYears[id])||""; if(typed) return String(typed);
   const m=String(src?src.name:"").match(/\b(19|20)\d\d\b/); return m?m[0]:""; }
 function mmSaveOpts_(o){ try{ const old=JSON.parse((STORE&&STORE.getItem("fi_mmopts"+o.kind))||"null")||{}, py=Object.assign({},old.photoYears||{}); try{ py[imgSource_().id]=String(o.photoYear||""); }catch(e){}
-  STORE&&STORE.setItem("fi_mmopts"+o.kind,JSON.stringify({layers:o.layers,hatch:o.hatch,plots:o.plots,feats:o.feats,lines:o.lines,names:o.names,inset:o.inset,standLabels:o.standLabels,proj:o.proj,actFrom:o.actFrom,actTo:o.actTo,fillAlpha:o.fillAlpha,labelScale:o.labelScale,insetNames:o.insetNames,townArrow:o.townArrow,photoYears:py,scale:o.scale,page:o.page,extent:o.extent})); STORE&&STORE.setItem("fi_mmfirm",o.firm||""); }catch(e){} }
+  STORE&&STORE.setItem("fi_mmopts"+o.kind,JSON.stringify({title:(o.title&&o.title!==o.titleDef)?o.title:"",aerial:o.aerial,plotSize:o.plotSize,plotNums:o.plotNums,plotColor:o.plotColor,plotComps:o.plotComps,layers:o.layers,hatch:o.hatch,plots:o.plots,feats:o.feats,lines:o.lines,names:o.names,inset:o.inset,standLabels:o.standLabels,proj:o.proj,actFrom:o.actFrom,actTo:o.actTo,fillAlpha:o.fillAlpha,labelScale:o.labelScale,insetNames:o.insetNames,townArrow:o.townArrow,photoYears:py,scale:o.scale,page:o.page,extent:o.extent})); STORE&&STORE.setItem("fi_mmfirm",o.firm||""); }catch(e){} }
 /* ---- projection ---- */
 /* v396: UTM, zone from the longitude (17 for most of southern Ontario, 18 east of 78°W), forward and inverse.
    The GPS positions are WGS 84; NAD83 (CSRS) differs by under a metre here, so the map is labelled NAD83 / UTM. */
@@ -13352,7 +13386,9 @@ async function mmGather_(tract, o, V, notes){
   let roads={auto:[],typed:[]};
   if(o.layers.roadnames){ try{ roads=rnApply_(tract, await rnRoads_(tract, V.bbox(), notes)); }catch(e){ notes.push("Road names: "+String(e.message||e)); } }
   let plots=[];
-  if(o.plots){ const g=tmapGroupByTract_(), key=Object.keys(g).find(t=>propK_(t)===propK_(tract)); plots=((key&&g[key].plots)||[]).map(q=>({lat:q.lat,lon:q.lon,num:q.num})); }
+  if(o.plots){ const g=tmapGroupByTract_(), key=Object.keys(g).find(t=>propK_(t)===propK_(tract)), only=mmPlotComps_(o);
+    plots=((key&&g[key].plots)||[]).filter(q=>!only.length||only.indexOf(String(q.stand||"").trim().toLowerCase())>=0).map(q=>({lat:q.lat,lon:q.lon,num:q.num,stand:q.stand}));
+    if(only.length && !plots.length) notes.push("No plots in compartment"+(only.length===1?" ":"s ")+only.join(", ")); }
   /* Only what touches the map is kept: a saved version should not carry the whole province. */
   const bb=V.bbox(), near=f=>{ const g=mmGeomParts_(f.geometry); let w=1/0,s=1/0,e=-1/0,n=-1/0; const add=q=>{ if(q[1]<w)w=q[1]; if(q[1]>e)e=q[1]; if(q[0]<s)s=q[0]; if(q[0]>n)n=q[0]; };
     g.polys.forEach(pg=>(pg[0]||[]).forEach(add)); g.lines.forEach(l=>l.forEach(add)); g.pts.forEach(add); return e>=bb[0]&&w<=bb[2]&&n>=bb[1]&&s<=bb[3]; };
@@ -13445,9 +13481,16 @@ async function mmRender_(tract, o, onPct, frozen){
   if(halo) D.comps.forEach(c=>c.polygons.forEach(r=>{ mmPath_(ctx,V,r); ctx.strokeStyle="rgba(255,255,255,.6)"; ctx.lineWidth=8; ctx.stroke(); }));
   if(outlineRings){ outlineRings.forEach(r=>{ mmPath_(ctx,V,[r]); if(halo){ ctx.strokeStyle="rgba(255,255,255,.7)"; ctx.lineWidth=15; ctx.stroke(); } ctx.strokeStyle=MM_COL.boundary; ctx.lineWidth=11; ctx.stroke(); }); present.boundary=1; }
   D.comps.forEach(c=>c.polygons.forEach(r=>{ mmPath_(ctx,V,r); ctx.strokeStyle=MM_COL.comp; ctx.lineWidth=5; ctx.stroke(); present.comp=1; }));
-  // plots (Map 6, if asked)
-  if(o.plots) (D.plots||[]).forEach(q=>{ const p=V.toPx(q.lat,q.lon); ctx.beginPath(); ctx.arc(p[0],p[1],11,0,Math.PI*2); ctx.fillStyle="#ffd400"; ctx.fill(); ctx.strokeStyle="#111"; ctx.lineWidth=2.5; ctx.stroke();
-      if(q.num){ ctx.font="bold 24px Arial, Helvetica, sans-serif"; ctx.textAlign="left"; ctx.textBaseline="middle"; mmHaloText_(ctx,String(q.num),p[0]+15,p[1],"#111","#fff"); } present.plots=1; });
+  // plots (if asked) — v457: the size, colour and numbers chosen; numbers that would overlap are left off
+  if(o.plots){ const pr=mmPlotR_(o), pc=o.plotColor||"#ffd400", edge=(pc==="#111111")?"#fff":"#111", lw=Math.max(0.8,pr*0.22);
+    const fs=Math.round(Math.max(13,Math.min(24,pr*2.2))); let dropped=0;
+    const nb=(D.plots||[]).map(q=>{ const p=V.toPx(q.lat,q.lon); return {x:p[0]-pr,y:p[1]-pr,w:2*pr,h:2*pr}; });   // a number never covers another plot
+    (D.plots||[]).forEach(q=>{ const p=V.toPx(q.lat,q.lon); ctx.beginPath(); ctx.arc(p[0],p[1],pr,0,Math.PI*2); ctx.fillStyle=pc; ctx.fill(); ctx.strokeStyle=edge; ctx.lineWidth=lw; ctx.stroke(); present.plots=(present.plots||0)+1; });
+    if(o.plotNums!==false) (D.plots||[]).forEach(q=>{ if(!q.num) return; const p=V.toPx(q.lat,q.lon); ctx.font="bold "+fs+"px Arial, Helvetica, sans-serif";
+      const w=ctx.measureText(String(q.num)).width, b={x:p[0]+pr+3, y:p[1]-fs/2, w:w+4, h:fs};
+      if(nb.some(c=>b.x<c.x+c.w&&b.x+b.w>c.x&&b.y<c.y+c.h&&b.y+b.h>c.y)){ dropped++; return; }
+      nb.push(b); ctx.textAlign="left"; ctx.textBaseline="middle"; mmHaloText_(ctx,String(q.num),b.x,p[1],"#111","#fff"); });
+    if(dropped) notes.push(dropped+" plot number"+(dropped===1?"":"s")+" left off where they would overlap — a smaller symbol, a larger scale or no numbers will tidy it"); }
   // labels: the notes' room is taken first (v393), then compartments, points, line names, road names, lots
   const boxes=[];
   const free=b=>b.x>MM_FRAME.x+4&&b.y>MM_FRAME.y+4&&b.x+b.w<MM_FRAME.x+MM_FRAME.w-4&&b.y+b.h<MM_FRAME.y+MM_FRAME.h-4&&!boxes.some(a=>b.x<a.x+a.w&&b.x+b.w>a.x&&b.y<a.y+a.h&&b.y+b.h>a.y);
@@ -13647,7 +13690,7 @@ function mmTitleBlock_(ctx, d, o, V, present, hc, photo){
   if(present.ft_general) items.push(["Sensitive site, 1 km cell", (x,y)=>{ ctx.save(); ctx.beginPath(); ctx.arc(x+23,y+13,11,0,Math.PI*2); ctx.strokeStyle="#d62828"; ctx.lineWidth=2; mmDash_(ctx,[4,3]); ctx.stroke(); ctx.restore(); }]);
   if(present.lots) items.push(["Lots & concessions", (x,y)=>{ ctx.strokeStyle=MM_COL.lot; ctx.lineWidth=2; mmDash_(ctx,[3,6]); ctx.strokeRect(x+3,y+4,40,18); mmDash_(ctx,[]); }]);   // v394: one symbol on both maps
   if(present.contour) items.push(["Contours"+(present.contourInt?" ("+(present.contourInt%1?present.contourInt.toFixed(1):present.contourInt)+" m)":""), (x,y)=>{ ctx.strokeStyle=MM_COL.contour; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(x,y+18); ctx.quadraticCurveTo?ctx.quadraticCurveTo(x+23,y-2,x+46,y+18):ctx.lineTo(x+46,y+18); ctx.stroke(); }]);
-  if(present.plots) items.push(["Plot locations", (x,y)=>{ ctx.beginPath(); ctx.arc(x+23,y+13,10,0,Math.PI*2); ctx.fillStyle="#ffd400"; ctx.fill(); ctx.strokeStyle="#111"; ctx.lineWidth=2; ctx.stroke(); }]);
+  if(present.plots){ const pc=o.plotColor||"#ffd400", lr=Math.max(4,Math.min(10,mmPlotR_(o))); items.push(["Plot locations ("+present.plots+")", (x,y)=>{ ctx.beginPath(); ctx.arc(x+23,y+13,lr,0,Math.PI*2); ctx.fillStyle=pc; ctx.fill(); ctx.strokeStyle=pc==="#111111"?"#888":"#111"; ctx.lineWidth=Math.max(1,lr*0.22); ctx.stroke(); }]); }
   if(present.cltip) items.push(["CLTIP area", (x,y)=>{ ctx.fillStyle=mmPatterns_(ctx).cltip||"#9fd3a8"; ctx.fillRect(x+2,y+2,42,22); ctx.strokeStyle="#1e8a3c"; ctx.lineWidth=2; ctx.strokeRect(x+2,y+2,42,22); }]);
   if(o.acts){ const win=acWindow_(o), by=acByComp_((o._acts||[]),win);      // every activity in the window, not only the one that coloured the compartment
     AC_KINDS.forEach(k=>{ const where=Object.keys(by).map(c=>({c, a:by[c].filter(a=>a.kind===k[0])})).filter(x=>x.a.length).map(x=>x.a[0].comp+" "+x.a.map(a=>a.year).join("/")); if(!where.length) return;
@@ -13705,11 +13748,11 @@ function mmPreflight_(tract, o){
 async function mmMake_(kind, tract, o, frozen){
   if(_mmBusy){ toast("A map is already being made",true); return; }
   if(o.aerial && isOffline()) toast("No signal — the aerial photo comes from the tiles saved on this phone");      // v395: Map 6 offline, from the cache
-  if(!frozen){ const pf=mmPreflight_(tract,o); if(pf.length && !confirm("Before Map "+kind+" is drawn — "+pf.length+" thing"+(pf.length===1?"":"s")+" a reviewer would notice:\n\n• "+pf.join("\n• ")+"\n\nMake the map anyway?")) return; }
+  if(!frozen){ const pf=mmPreflight_(tract,o); if(pf.length && !confirm("Before "+mmName_(kind)+" is drawn — "+pf.length+" thing"+(pf.length===1?"":"s")+" a reviewer would notice:\n\n• "+pf.join("\n• ")+"\n\nMake the map anyway?")) return; }
   _mmBusy=true; if(!frozen) mmSaveOpts_(o);
   try{
-    toast("Drawing Map "+kind+"…");
-    let r=await mmRender_(tract,o,pct=>toast("Map "+kind+" — aerial photo "+pct+"%"),frozen);
+    toast("Drawing "+mmName_(kind)+"…");
+    let r=await mmRender_(tract,o,pct=>toast(mmName_(kind)+" — aerial photo "+pct+"%"),frozen);
     let jpg=null;
     try{ jpg=r.canvas.toDataURL("image/jpeg",0.9); }
     catch(e){       // a photo server without the headers a canvas needs: draw it again on Esri
@@ -13718,19 +13761,19 @@ async function mmMake_(kind, tract, o, frozen){
       jpg=r.canvas.toDataURL("image/jpeg",0.9); }
     const pg=MM_PAGES[MM_PAGE];
     const pdf=tmapPdf_([{bytes:tmapB64ToBytes_(jpg), w:MM_W, h:MM_H}], Math.round(pg.w*72), Math.round(pg.h*72));
-    const base=("Map"+kind+"_"+tract).replace(/[^A-Za-z0-9_-]+/g,"_").slice(0,60)+"_"+nowStr().slice(0,10);
+    const base=((kind===8?"Map_"+(o.title||"Custom"):"Map"+kind)+"_"+tract).replace(/[^A-Za-z0-9_-]+/g,"_").slice(0,60)+"_"+nowStr().slice(0,10);
     const pdfBlob=new Blob([pdf],{type:"application/pdf"});
     const jpgBlob=new Blob([tmapB64ToBytes_(jpg)],{type:"image/jpeg"});
     const toDrive=connected && !isOffline();
     _mmLast={kind, tract, base, pdfBlob, jpgBlob, jpg, notes:r.notes, scale:r.scale, toDrive, page:MM_PAGE, o, view:r.view, data:r.data, imagery:r.imagery, frozen:!!frozen};
     if(toDrive){ try{ driveSave_(pdfBlob, base+".pdf", "map"); driveSave_(jpgBlob, base+".jpg", "map"); }catch(e){} }
     mmShowResult_();
-  } catch(e){ toast("Map "+kind+" could not be made: "+String(e&&e.message||e),true); }
+  } catch(e){ toast(mmName_(kind)+" could not be made: "+String(e&&e.message||e),true); }
   finally{ _mmBusy=false; }
 }
 function mmShowResult_(){
   const m=_mmLast; if(!m) return;
-  showDataSheet_("Map "+m.kind+" — "+m.tract,
+  showDataSheet_(mmName_(m.kind)+" — "+m.tract,
     `<img src="${m.jpg}" alt="Map ${m.kind}" style="display:block;width:100%;border-radius:6px;border:1px solid #33623a;background:#fff">`+
     `<div style="font-size:12px;color:#a9c9b0;margin:8px 0">${esc(MM_PAGES[m.page||"letter"].short)}, scale 1:${m.scale.toLocaleString("en-CA")} — print at 100% (not "fit to page") for the scale to hold. ${m.toDrive?"A copy is being sent to Drive with your map exports.":"No signal, so it was not sent to Drive — save it here."}</div>`+
     (m.notes.length?`<div style="font-size:12px;color:#e8c35a;margin:0 0 8px;line-height:1.5">${m.notes.map(esc).join("<br>")}</div>`:"")+
@@ -13778,9 +13821,12 @@ function mmOpen_(kind){
   const o=mmOpts_(kind), names={woodland:"Woodland (provincial)",lots:"Lots & concessions",roads:"Roads",roadnames:"Road names",water:"Watercourses",waterbody:"Water bodies",wetland:"Wetlands",building:"Buildings",contour:"Contours",towns:"Towns & places (named points)"};
   const chk=(k)=>`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmL_${k}" ${o.layers[k]?"checked":""} style="width:20px;height:20px"> ${esc(names[k])}</label>`;
   const sel=(id,opts,v)=>`<select id="${id}" style="width:100%;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+opts.map(x=>`<option value="${esc(x[0])}"${String(v)===x[0]?" selected":""}>${esc(x[1])}</option>`).join("")+`</select>`;
-  showDataSheet_("Map "+kind+" — "+t,
-    `<div style="font-size:13px;color:#a9c9b0;line-height:1.5;margin-bottom:10px">${esc(o.title.replace(/\s{2,}/," "))}. ${kind===6?"On the aerial photo chosen under Layers ("+esc(imgSource_().name)+").":kind===7?"Plain background; each compartment coloured by the first activity planned for it in the window, the schedule in the legend.":"Plain background, with woodland shaded and the smaller MFTIP class hatched."}</div>`+
-    `<div style="font-size:12px;color:#a9c9b0;margin:6px 0 3px">Page</div>`+sel("mmPage",Object.keys(MM_PAGES).map(k=>[k,MM_PAGES[k].name]),o.page)+
+  const inp=(id,v,ph)=>`<input id="${id}" type="text" value="${esc(v)}" placeholder="${esc(ph||"")}" style="width:100%;box-sizing:border-box;font-size:16px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`;
+  showDataSheet_(mmName_(kind)+" — "+t,
+    `<div style="font-size:13px;color:#a9c9b0;line-height:1.5;margin-bottom:10px">${kind===8?"Choose the background, the layers and the plots below.":esc(o.titleDef.replace(/\s{2,}/," "))+"."} ${kind===8?"":kind===6?"On the aerial photo chosen under Layers ("+esc(imgSource_().name)+").":kind===7?"Plain background; each compartment coloured by the first activity planned for it in the window, the schedule in the legend.":"Plain background, with woodland shaded and the smaller MFTIP class hatched."}</div>`+
+    `<div style="font-size:12px;color:#a9c9b0;margin:6px 0 3px">Map title (printed in the title block — clear it to go back to "${esc(o.titleDef.replace(/\s{2,}/," "))}")</div>`+inp("mmTitle",o.title.replace(/\s{2,}/," "),o.titleDef.replace(/\s{2,}/," "))+
+    (kind===8?`<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Background</div>`+sel("mmBase",[["aerial","Aerial photo (the one chosen under Layers)"],["plain","Plain — white ground, woodland shading if ticked"]],o.aerial?"aerial":"plain"):"")+
+    `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Page</div>`+sel("mmPage",Object.keys(MM_PAGES).map(k=>[k,MM_PAGES[k].name]),o.page)+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Area shown</div>`+sel("mmExtent",[["fit","Fit the property"],["view","The view on the phone's map now"]],o.extent)+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Scale</div>`+sel("mmScale",[["auto","Fit the property (automatic)"]].concat(MM_SCALES.map(s=>[String(s),"1:"+s.toLocaleString("en-CA")])),o.scale)+
     (kind===7?`<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Plan window (years shown)</div><div style="display:flex;gap:8px"><input id="mmActFrom" type="number" inputmode="numeric" placeholder="${new Date().getFullYear()}" value="${esc(o.actFrom||"")}" style="flex:1;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"><input id="mmActTo" type="number" inputmode="numeric" placeholder="${new Date().getFullYear()+9}" value="${esc(o.actTo||"")}" style="flex:1;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></div><div style="font-size:11px;color:#8fae95;margin:3px 0 6px">${acOf_(t).length} activit${acOf_(t).length===1?"y":"ies"} on record — edit them under Planned activities on the property sheet.</div>`:"")+
@@ -13790,19 +13836,23 @@ function mmOpen_(kind){
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Hatching</div>`+sel("mmHatch",[["auto","The smaller class (automatic)"],["ineligible","Not eligible"],["eligible","MFTIP eligible"],["none","None"]],o.hatch)+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Layers</div>`+Object.keys(names).map(chk).join("")+
     `<div style="font-size:11px;color:#8fae95;margin:2px 0 6px">Notes and arrows: the ✎ Text button on the map. Those set for this map are printed.</div>`+
-    (kind===6?`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmPlots" ${o.plots?"checked":""} style="width:20px;height:20px"> Numbered plot locations</label>`:"")+
-    ((kind===4||kind===6)?`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmTownArrow" ${o.townArrow?"checked":""} style="width:20px;height:20px"> Arrow to the nearest town (at the map's edge, with its name and distance — not drawn when the town is on the map)</label>`:"")+
+    `<label style="display:flex;align-items:center;gap:8px;padding:9px 0 5px;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmPlots" ${o.plots?"checked":""} style="width:20px;height:20px"> Inventory plot locations</label>`+
+    `<div style="padding-left:28px"><div style="font-size:12px;color:#a9c9b0;margin:2px 0 3px">Plot symbol size (printed diameter)</div>`+sel("mmPlotSize",MM_PLOT_SIZES,o.plotSize)+
+    `<div style="font-size:12px;color:#a9c9b0;margin:8px 0 3px">Plot colour</div>`+sel("mmPlotColor",MM_PLOT_COLS,o.plotColor)+
+    `<label style="display:flex;align-items:center;gap:8px;padding:7px 0 3px;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmPlotNums" ${o.plotNums!==false?"checked":""} style="width:20px;height:20px"> Plot numbers beside them (any that would overlap are left off)</label>`+
+    `<div style="font-size:12px;color:#a9c9b0;margin:8px 0 3px">Only the plots in these compartments (blank = every plot on the property)</div>`+inp("mmPlotComps",o.plotComps||"","e.g. 114d, 113k")+`</div>`+
+    ((kind===4||kind===6||kind===8)?`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmTownArrow" ${o.townArrow?"checked":""} style="width:20px;height:20px"> Arrow to the nearest town (at the map's edge, with its name and distance — not drawn when the town is on the map)</label>`:"")+
     `<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmFeats" ${o.feats?"checked":""} style="width:20px;height:20px"> Points (buildings, gates, features — the 📍 Points button)</label>`+
     `<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmLines" ${o.lines?"checked":""} style="width:20px;height:20px"> Lines and areas (trails, roads, streams, ponds, wetlands — the ⤳ Lines button)</label>`+
-    `<label style="display:flex;align-items:center;gap:8px;padding:5px 0 5px 28px;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmNames" ${o.names?"checked":""} style="width:20px;height:20px"> Their names (${kind===4?"off on Map 4: at this scale the names pile up — the symbols say what is there":"on Map 6 there is room for them"})</label>`+
+    `<label style="display:flex;align-items:center;gap:8px;padding:5px 0 5px 28px;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmNames" ${o.names?"checked":""} style="width:20px;height:20px"> Their names (${kind===4?"off on Map 4: at this scale the names pile up — the symbols say what is there":kind===8?"printed beside the points and lines":"on Map 6 there is room for them"})</label>`+
     (ftOf_(t).some(f=>f.sens)?`<div style="font-size:12px;color:#ffd24a;margin:8px 0 3px 28px">Sensitive points (${ftOf_(t).filter(f=>f.sens).length} species-at-risk or other sensitive location${ftOf_(t).filter(f=>f.sens).length===1?"":"s"}) — never remembered between maps</div><div style="padding-left:28px">`+sel("mmSens",[["","Leave off the map"],["general","Generalized: a 1 km cell, no name (for a map that leaves your hands)"],["exact","Exact location and name (your own copy)"]],"")+`</div>`:"")+
-    (kind===6?`<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Photo year (printed in the credit — MFTIP asks for it; the Esri photo's date is on its metadata page)</div><input id="mmPhotoYear" type="text" inputmode="numeric" value="${esc(o.photoYear||"")}" placeholder="e.g. 2025" style="width:100%;box-sizing:border-box;font-size:16px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`:"")+
-    (kind===6?`<label style="display:flex;align-items:center;gap:8px;padding:9px 0 5px;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmStand" ${o.standLabels?"checked":""} style="width:20px;height:20px"> Stand description under each compartment label (composition, age, BA, QMD — from the Sheet's compartment analysis; needs signal once)</label>`:"")+
-    (kind===4?`<label style="display:flex;align-items:center;gap:8px;padding:9px 0 5px;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmInset" ${o.inset?"checked":""} style="width:20px;height:20px"> Locator inset (1:150,000 in the corner — the property as a dot, roads and water for 8 km around)</label>`+
+    ((kind===6||kind===8)?`<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Photo year (printed in the credit — MFTIP asks for it; the Esri photo's date is on its metadata page)</div><input id="mmPhotoYear" type="text" inputmode="numeric" value="${esc(o.photoYear||"")}" placeholder="e.g. 2025" style="width:100%;box-sizing:border-box;font-size:16px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`:"")+
+    ((kind===6||kind===8)?`<label style="display:flex;align-items:center;gap:8px;padding:9px 0 5px;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmStand" ${o.standLabels?"checked":""} style="width:20px;height:20px"> Stand description under each compartment label (composition, age, BA, QMD — from the Sheet's compartment analysis; needs signal once)</label>`:"")+
+    ((kind===4||kind===8)?`<label style="display:flex;align-items:center;gap:8px;padding:9px 0 5px;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmInset" ${o.inset?"checked":""} style="width:20px;height:20px"> Locator inset (1:150,000 in the corner — the property as a dot, roads and water for 8 km around)</label>`+
      `<div style="font-size:12px;color:#a9c9b0;margin:6px 0 3px">Key map road names</div>`+sel("mmInsetNames",[["auto","Automatic — the roads nearest the property, as many as fit"],["more","More names, smaller text"],["fewer","Fewer names, larger text"],["none","No road names"]],o.insetNames||"auto"):"")+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Road names — untick one to leave it off, or type over it to correct it</div><div id="rnList"></div>`+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Prepared by (printed on the map)</div><input id="mmFirm" type="text" value="${esc(o.firm)}" placeholder="e.g. your company" style="width:100%;box-sizing:border-box;font-size:16px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
-    `<div style="display:flex;gap:8px;margin:14px 0 6px"><button type="button" class="btn submit" style="flex:1" onclick="mmGo_(${kind})">Make Map ${kind}</button><button type="button" class="btn ghost" style="flex:1" onclick="openPropSheet_(_ppTract)">◂ Back</button></div>`);
+    `<div style="display:flex;gap:8px;margin:14px 0 6px"><button type="button" class="btn submit" style="flex:1" onclick="mmGo_(${kind})">Make ${kind===8?"the map":"Map "+kind}</button><button type="button" class="btn ghost" style="flex:1" onclick="openPropSheet_(_ppTract)">◂ Back</button></div>`);
   try{ rnPanel_(kind); }catch(e){}
 }
 function mmGo_(kind){
@@ -13815,6 +13865,12 @@ function mmGo_(kind){
   if(o.extent==="view"){ try{ if(typeof fmap!=="undefined"&&fmap){ const b=fmap.getBounds(); o.viewBox=[+b.getWest().toFixed(6),+b.getSouth().toFixed(6),+b.getEast().toFixed(6),+b.getNorth().toFixed(6)]; } }catch(e){} }
   const h=v("mmHatch"); if(h) o.hatch=h.value||o.hatch;
   const pl=v("mmPlots"); if(pl) o.plots=!!pl.checked;
+  const tt=v("mmTitle"); if(tt){ const x=String(tt.value||"").replace(/\s+/g," ").trim().slice(0,90); o.title=x||o.titleDef; }
+  const bs=v("mmBase"); if(bs && kind===8) o.aerial=bs.value!=="plain";
+  const ps=v("mmPlotSize"); if(ps && MM_PLOT_SIZES.some(x=>x[0]===ps.value)) o.plotSize=ps.value;
+  const pcl=v("mmPlotColor"); if(pcl && MM_PLOT_COLS.some(x=>x[0]===pcl.value)) o.plotColor=pcl.value;
+  const pn=v("mmPlotNums"); if(pn) o.plotNums=!!pn.checked;
+  const pcs=v("mmPlotComps"); if(pcs) o.plotComps=String(pcs.value||"").trim().slice(0,200);
   const ft=v("mmFeats"); if(ft) o.feats=!!ft.checked; const ln=v("mmLines"); if(ln) o.lines=!!ln.checked; const nm=v("mmNames"); if(nm) o.names=!!nm.checked; const se=v("mmSens"); o.sensitive=se?(se.value==="exact"?true:(se.value==="general"?"general":false)):false;
   const f=v("mmFirm"); if(f) o.firm=String(f.value||"").trim().slice(0,60);
   const py=v("mmPhotoYear"); if(py) o.photoYear=String(py.value||"").trim().slice(0,20); const ins=v("mmInset"); if(ins) o.inset=!!ins.checked; const inn=v("mmInsetNames"); if(inn) o.insetNames=inn.value||"auto"; const ta=v("mmTownArrow"); if(ta) o.townArrow=!!ta.checked; const st=v("mmStand"); if(st) o.standLabels=!!st.checked; const pj=v("mmProj"); if(pj) o.proj=pj.value==="merc"?"merc":"utm"; const al=v("mmAlpha"); if(al) o.fillAlpha=+al.value||100; const ls=v("mmLabel"); if(ls) o.labelScale=+ls.value||100; const af=v("mmActFrom"), at=v("mmActTo"); if(af) o.actFrom=String(af.value||"").trim(); if(at) o.actTo=String(at.value||"").trim();
@@ -15932,11 +15988,11 @@ function mvSave_(){
   if(!connected||isOffline()){ toast("Saving a version needs signal — the PDF and JPEG are already on this phone",true); return; }
   if(!propBackendOk){ toast("The Sheet has not answered yet — try again in a moment",true); propSync_(); return; }
   if(!propNotesOk){ toast("Saving map versions needs the v385 Code.gs — ask the office to deploy it",true); return; }
-  const d=new Date(), def="Map "+m.kind+" — "+m.tract+" — "+d.toISOString().slice(0,10);
+  const d=new Date(), def=(m.kind===8?(m.o&&m.o.title||"Custom map"):"Map "+m.kind)+" — "+m.tract+" — "+d.toISOString().slice(0,10);
   const name=prompt("A name for this version:",def); if(name===null) return;
   const v={v:1, id:"V"+Date.now().toString(36).toUpperCase()+"-"+Math.floor(Math.random()*46656).toString(36).toUpperCase().padStart(3,"0"),
     name:String(name).trim().slice(0,120)||def, tract:m.tract, kind:m.kind, at:new Date().toISOString(), by:String(cruiserEmail||""), app:APP_BUILD,
-    opts:{kind:m.o.kind, title:m.o.title, pad:m.o.pad, aerial:m.o.aerial, layers:m.o.layers, hatch:m.o.hatch, plots:m.o.plots, feats:m.o.feats, sensitive:m.o.sensitive==="general"?"general":!!m.o.sensitive, lines:m.o.lines, names:m.o.names!==false, inset:!!m.o.inset, standLabels:!!m.o.standLabels, proj:m.o.proj||"utm", acts:!!m.o.acts, actFrom:m.o.actFrom||"", actTo:m.o.actTo||"", fillAlpha:m.o.fillAlpha||100, labelScale:m.o.labelScale||100, insetNames:m.o.insetNames||"auto", townArrow:m.o.townArrow!==false, photoYear:m.o.photoYear||"", scale:m.o.scale, page:m.page, extent:m.o.extent, firm:m.o.firm},
+    opts:{kind:m.o.kind, title:m.o.title, pad:m.o.pad, aerial:m.o.aerial, layers:m.o.layers, hatch:m.o.hatch, plots:m.o.plots, plotSize:m.o.plotSize, plotNums:m.o.plotNums!==false, plotColor:m.o.plotColor, plotComps:m.o.plotComps||"", feats:m.o.feats, sensitive:m.o.sensitive==="general"?"general":!!m.o.sensitive, lines:m.o.lines, names:m.o.names!==false, inset:!!m.o.inset, standLabels:!!m.o.standLabels, proj:m.o.proj||"utm", acts:!!m.o.acts, actFrom:m.o.actFrom||"", actTo:m.o.actTo||"", fillAlpha:m.o.fillAlpha||100, labelScale:m.o.labelScale||100, insetNames:m.o.insetNames||"auto", townArrow:m.o.townArrow!==false, photoYear:m.o.photoYear||"", scale:m.o.scale, page:m.page, extent:m.o.extent, firm:m.o.firm},
     view:m.view, imagery:m.imagery, data:m.data};
   const text=JSON.stringify(v);
   toast("Saving the version…");
