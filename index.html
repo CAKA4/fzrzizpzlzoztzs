@@ -1374,7 +1374,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-06 · v461";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-06 · v463";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -6295,11 +6295,11 @@ function repOptsRender_(){
   if(t && (r.stands||[]).length){
     const loc=repPrescLocal_(t), pr=Object.assign({}, loc, r.presc||{});
     h+=`<div style="margin:8px 0 2px;font-size:14px;font-weight:600;color:#eafae8">Add a survival report for:</div>`+
-      `<div class="hint" style="margin-bottom:4px">Tick a compartment and give its prescribed density. Leave all unticked for a plain inventory report.</div>`+
+      `<div class="hint" style="margin-bottom:4px">Tick a compartment and give its prescribed density. List the planted species too, and only they count toward survival — anything else that came in naturally is reported as ingress. Leave all unticked for a plain inventory report.</div>`+
       r.stands.map((x,i)=>{ const p=pr[String(x.s).toLowerCase()]||{};
         return `<div style="border-bottom:1px solid #1f3a24;padding:4px 0"><label ${lbl}><input type="checkbox" id="repS_${i}" data-s="${esc(x.s)}" onchange="repSurvTick_(${i})" ${cb}> <b>${esc(x.s)}</b> <span style="color:#8fae95;font-size:12px">· ${x.n} plot${x.n===1?"":"s"}</span></label>`+
           `<div id="repSB_${i}" style="display:none;padding:0 0 6px 28px"><div style="display:flex;gap:6px;align-items:center"><input id="repSph_${i}" inputmode="numeric" placeholder="stems/ha" value="${esc(p.sph||"")}" style="width:110px;font-size:16px;padding:7px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"> <span style="font-size:12px;color:#a9c9b0">prescribed stems/ha</span></div>`+
-          `<input id="repBy_${i}" placeholder="by species (optional) — e.g. Pw 800; Or 600" value="${esc(p.by||"")}" style="width:100%;box-sizing:border-box;margin-top:5px;font-size:14px;padding:7px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></div></div>`; }).join("");
+          `<input id="repBy_${i}" placeholder="planted species (optional) — e.g. Ce Ta Pw Sw, or Pw 800; Or 600" value="${esc(p.by||"")}" style="width:100%;box-sizing:border-box;margin-top:5px;font-size:14px;padding:7px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></div></div>`; }).join("");
   } else if(!t) h+=`<div class="hint" style="margin-top:6px">Choose one property to add a survival report.</div>`;
   box.innerHTML=h;
 }
@@ -10294,6 +10294,7 @@ function openCount_(){
   showInfoSheet_("Count points",
     `<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:10px">Counts your plots, crew plots, imported plots and reference points.</div>`+
     `<button type="button" onclick="closeInfoSheet_();countPoints()" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">#️⃣ Everything on the map<div style="color:#8fae95;font-size:11px;margin-top:2px">Totals, broken down by compartment</div></button>`+
+    `<button type="button" onclick="closeInfoSheet_();countPoints(true)" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">▢ Just what's in view<div style="color:#8fae95;font-size:11px;margin-top:2px">Only the plots on the screen now — zoom or pan first, then count</div></button>`+
     (hasPoly
       ? `<button type="button" onclick="closeInfoSheet_();countInPolygon()" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">◎ Inside an outline<div style="color:#8fae95;font-size:11px;margin-top:2px">Uses the area you have drawn, with its size in hectares</div></button>`
       : `<div style="color:#5a7a62;font-size:11px;margin-top:8px;line-height:1.4">To count inside an area, use <b>Draw</b> to outline it first — then this offers to count what falls inside.</div>`));
@@ -10320,13 +10321,22 @@ function mapToolHelp_(){
     row("🗺","PDF","Appears once a georeferenced PDF is loaded. Shows or hides it; the slider sets how see-through it is.")+
     `<div style="color:#5a7a62;font-size:11px;margin-top:10px;line-height:1.4">A tool stays on until you tap it again — the button turns amber while it is active.</div>`);
 }
-function countPoints(){
-  const layers=allPointLayers_();
+/* v462: inView — only the points inside the map as it is on the screen now. */
+function countPoints(inView){
+  let layers=allPointLayers_();
+  const all=layers.reduce((a,l)=>a+l.pts.length,0);
+  if(!all){ toast("No points on the map yet — submit a plot, show crew plots, or import points",true); return; }
+  let vb=null;
+  if(inView){ try{ vb=fmap.getBounds(); }catch(e){ vb=null; }
+    if(!vb){ toast("The map isn't showing yet",true); return; }
+    layers=layers.map(l=>({...l, pts:l.pts.filter(p=>isFinite(+p.lat)&&isFinite(+p.lon)&&vb.contains([+p.lat,+p.lon]))})).filter(l=>l.pts.length);
+    if(!layers.length){ showInfoSheet_("Points in view","<div style='color:#a9c9b0'>No points in the part of the map on screen. Zoom out or pan, then count again.</div>"); return; } }
   const total=layers.reduce((a,l)=>a+l.pts.length,0);
-  if(!total){ toast("No points on the map yet — submit a plot, show crew plots, or import points",true); return; }
   const d=distinctPts_(layers.map(l=>l.pts));
   const who=byWho_(layers.map(l=>l.pts));
-  let html=`<div style="font:600 13px system-ui;margin-bottom:6px">${d.n} plot${d.n===1?"":"s"} on the map</div>`;
+  let html=`<div style="font:600 13px system-ui;margin-bottom:6px">${d.n} plot${d.n===1?"":"s"} ${inView?"in view":"on the map"}</div>`;
+  if(inView){ const dAll=distinctPts_(allPointLayers_().map(l=>l.pts)).n;
+    html+=`<div style="margin:0 0 6px;font:11px system-ui;color:#8fae95">of ${dAll} on the whole map · only what is on the screen now</div>`; }
   { const names=Object.keys(who).sort((a,b)=>who[b]-who[a]);
     if(names.length) html+=`<div style="margin:2px 0 6px;font:12px system-ui;color:#dcefe0">Collected by: `+
       names.map(n=>`${esc(n)} <b>${who[n]}</b>`).join(" · ")+`</div>`; }
@@ -10343,7 +10353,7 @@ function countPoints(){
   if(d.dup) html+=`<div style="margin-top:6px;font:11px system-ui;color:#8fae95">`+
     `The layer rows add up to ${total}, but ${d.dup} of those are the same plot in two places — `+
     `a plot restored from the Sheet is both on this device and in the Sheet. ${d.n} is the number of real plots.</div>`;
-  showInfoSheet_("Point counts", html);
+  showInfoSheet_(inView?"Points in view":"Point counts", html);
 }
 // Count points that fall inside the last-drawn (or currently-drawn) polygon.
 function countInPolygon(){
@@ -13150,7 +13160,7 @@ function mmOpts_(kind){ const d=MM_DEF[kind], saved=(function(){ try{ return JSO
     standLabels:saved.standLabels!=null?!!saved.standLabels:false,      /* v395: stand description under each compartment label (Map 6) */
     proj:saved.proj==="merc"?"merc":"utm",      /* v396: UTM (NAD83), as the plan's other maps and shapefiles; Web Mercator kept as a choice */
     acts:!!d.acts, actFrom:saved.actFrom||"", actTo:saved.actTo||"",
-    fillAlpha:(saved.fillAlpha!=null&&isFinite(+saved.fillAlpha))?Math.max(20,Math.min(100,+saved.fillAlpha)):100,
+    fillAlpha:(saved.fillAlpha!=null&&isFinite(+saved.fillAlpha))?Math.max(10,Math.min(100,+saved.fillAlpha)):100,
     labelScale:(saved.labelScale!=null&&isFinite(+saved.labelScale))?Math.max(50,Math.min(160,+saved.labelScale)):100,
     insetNames:(["auto","more","fewer","none"].indexOf(saved.insetNames)>=0)?saved.insetNames:"auto",      /* v415: key-map road names */
     townArrow:saved.townArrow!=null?!!saved.townArrow:(kind===4||kind===6),      /* v416: an arrow to the nearest town */      /* v404: compartment label size, % of automatic */      /* v401: how solid the fills print (woodland, water, hatching, Map 7 colours) */      /* v396: Map 7's plan window (blank = this year and the nine after) */
@@ -13252,14 +13262,19 @@ function mmPtIn_(ringsPx,x,y){ let c=false; ringsPx.forEach(r=>{ for(let i=0,j=r
 function mmBoxPts_(b,m){ const x0=b.x-m,y0=b.y-m,x1=b.x+b.w+m,y1=b.y+b.h+m,xm=(x0+x1)/2,ym=(y0+y1)/2; return [[x0,y0],[x1,y0],[x1,y1],[x0,y1],[xm,y0],[xm,y1],[x0,ym],[x1,ym],[xm,ym]]; }
 function mmBoxIn_(ringsPx,b,m){ return mmBoxPts_(b,m||0).every(p=>mmPtIn_(ringsPx,p[0],p[1])); }
 function mmBoxOut_(ringsPx,b){ return !mmBoxPts_(b,0).some(p=>mmPtIn_(ringsPx,p[0],p[1])); }
+const MM_WET_WASH="rgba(225,244,215,.85)";
+function mmWetSym_(g, edge){ g.beginPath();
+  [[8,20],[28,8]].forEach(p=>{ g.moveTo(p[0]-5,p[1]); g.lineTo(p[0]+5,p[1]); g.moveTo(p[0],p[1]); g.lineTo(p[0],p[1]-7); g.moveTo(p[0],p[1]); g.lineTo(p[0]-4,p[1]-6); g.moveTo(p[0],p[1]); g.lineTo(p[0]+4,p[1]-6); });
+  if(edge){ g.lineCap="round"; g.strokeStyle="rgba(255,255,255,.5)"; g.lineWidth=3; g.stroke(); }      // v462: a light edge, so the marsh tufts show on a photo without the wash
+  g.strokeStyle="#3a9a2a"; g.lineWidth=1.6; g.stroke(); }
 function mmPatterns_(ctx){
   const mk=(w,h,draw)=>{ try{ const c=document.createElement("canvas"); c.width=w; c.height=h; const g=c.getContext("2d"); if(!g) return null; draw(g); return ctx.createPattern?ctx.createPattern(c,"repeat"):null; }catch(e){ return null; } };
   return {
     cltip: mk(20,20,g=>{ g.lineCap="square"; g.beginPath(); g.moveTo(10,0); g.lineTo(10,20); g.moveTo(0,10); g.lineTo(20,10);
       g.strokeStyle="rgba(255,255,255,.75)"; g.lineWidth=4.2; g.stroke(); g.strokeStyle="#1e8a3c"; g.lineWidth=2; g.stroke(); }),
     hatch: mk(22,22,g=>{ g.strokeStyle="#111"; g.lineWidth=1.6; g.beginPath(); g.moveTo(0,0); g.lineTo(22,22); g.moveTo(22,0); g.lineTo(0,22); g.stroke(); }),
-    wetland: mk(40,30,g=>{ g.fillStyle="rgba(225,244,215,.85)"; g.fillRect(0,0,40,30); g.strokeStyle="#3a9a2a"; g.lineWidth=1.6; g.beginPath();
-      [[8,20],[28,8]].forEach(p=>{ g.moveTo(p[0]-5,p[1]); g.lineTo(p[0]+5,p[1]); g.moveTo(p[0],p[1]); g.lineTo(p[0],p[1]-7); g.moveTo(p[0],p[1]); g.lineTo(p[0]-4,p[1]-6); g.moveTo(p[0],p[1]); g.lineTo(p[0]+4,p[1]-6); }); g.stroke(); })
+    wetland: mk(40,30,g=>{ g.fillStyle=MM_WET_WASH; g.fillRect(0,0,40,30); mmWetSym_(g); }),
+    wetlandSym: mk(40,30,g=>mmWetSym_(g,true))      // v462: the symbols alone, for a see-through wash
   };
 }
 /* ---- the data for one property ---- */
@@ -13510,7 +13525,7 @@ async function mmRender_(tract, o, onPct, frozen){
     return x1>=MM_FRAME.x && x0<=MM_FRAME.x+MM_FRAME.w && y1>=MM_FRAME.y && y0<=MM_FRAME.y+MM_FRAME.h; };
   const eachF=(k,fn)=>{ const fc=L[k]; if(!fc||!fc.features) return; fc.features.forEach(f=>{ const g=mmGeomParts_(f.geometry); if(onMap(g)) fn(g,f.properties||{}); }); };
   const halo=o.aerial;      // over a photo, lines need a light edge to be seen
-  ctx.globalAlpha=Math.max(.2,Math.min(1,(o.fillAlpha||100)/100));      // v401: the fills, as solid as asked
+  const fA=Math.max(.1,Math.min(1,(o.fillAlpha||100)/100)); ctx.globalAlpha=fA;      // v401: the fills, as solid as asked; v462: down to 10%
   if(o.layers.woodland) eachF("woodland",g=>{ g.polys.forEach(r=>{ mmPath_(ctx,V,r); ctx.fillStyle=MM_COL.wood; ctx.fill("evenodd"); present.wood=1; }); });
   /* The compartments are woodland — except the ones classed Not eligible (a house, a field), left white. */
   if(!o.aerial) D.comps.forEach(c=>{ if(c.cls==="INELIGIBLE") return; c.polygons.forEach(r=>{ mmPath_(ctx,V,r); ctx.fillStyle=MM_COL.wood; ctx.fill("evenodd"); present.wood=1; }); });
@@ -13518,7 +13533,11 @@ async function mmRender_(tract, o, onPct, frozen){
   const acWin=o.acts?acWindow_(o):null, acBy=o.acts?acByComp_(D.acts||[],acWin):null;
   if(o.acts) D.comps.forEach(c=>{ const l=acBy[propK_(c.name)]; const col=l&&l.length?acCol_(l[0].kind):"#ececec"; c.polygons.forEach(r=>{ mmPath_(ctx,V,r); ctx.fillStyle=col; ctx.fill("evenodd"); }); if(l&&l.length){ present["ac_"+l[0].kind]=1; c.act=l; } });
   if(o.layers.waterbody) eachF("waterbody",g=>g.polys.forEach(r=>{ mmPath_(ctx,V,r); ctx.fillStyle=MM_COL.openwater; ctx.fill("evenodd"); ctx.strokeStyle=MM_COL.water; ctx.lineWidth=2; ctx.stroke(); present.openwater=1; }));
-  if(o.layers.wetland) eachF("wetland",g=>g.polys.forEach(r=>{ mmPath_(ctx,V,r); ctx.fillStyle=P.wetland||"rgba(120,200,110,.35)"; ctx.fill("evenodd"); ctx.strokeStyle="#5fbf4a"; ctx.lineWidth=2; mmDash_(ctx,[6,5]); ctx.stroke(); mmDash_(ctx,[]); present.wetland=1; }));
+  /* v462: the pale wash fades with the transparency chosen; the marsh symbols, with a light edge, stay readable (never under 75%) so a light wetland is still a wetland */
+  if(o.layers.wetland) eachF("wetland",g=>g.polys.forEach(r=>{ mmPath_(ctx,V,r);
+    if(fA<1 && P.wetlandSym){ ctx.fillStyle=MM_WET_WASH; ctx.fill("evenodd"); ctx.globalAlpha=Math.max(fA,.75); ctx.fillStyle=P.wetlandSym; ctx.fill("evenodd"); ctx.globalAlpha=fA; }
+    else { ctx.fillStyle=P.wetland||"rgba(120,200,110,.35)"; ctx.fill("evenodd"); }
+    ctx.strokeStyle="#5fbf4a"; ctx.lineWidth=2; mmDash_(ctx,[6,5]); ctx.stroke(); mmDash_(ctx,[]); present.wetland=1; }));
   /* v394: the contour interval is read off the data (smallest step between elevations on the page); every
      interval that is a multiple of 5× it is an index contour — drawn heavier and labelled further down. */
   const ctIdx=[], ctElev=new Set();
@@ -13914,7 +13933,7 @@ function mmOpen_(kind){
     (kind===7?`<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Plan window (years shown)</div><div style="display:flex;gap:8px"><input id="mmActFrom" type="number" inputmode="numeric" placeholder="${new Date().getFullYear()}" value="${esc(o.actFrom||"")}" style="flex:1;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"><input id="mmActTo" type="number" inputmode="numeric" placeholder="${new Date().getFullYear()+9}" value="${esc(o.actTo||"")}" style="flex:1;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></div><div style="font-size:11px;color:#8fae95;margin:3px 0 6px">${acOf_(t).length} activit${acOf_(t).length===1?"y":"ies"} on record — edit them under Planned activities on the property sheet.</div>`:"")+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Projection</div>`+sel("mmProj",[["utm","UTM (NAD83) — zone from the property; the plan's usual grid"],["merc","Web Mercator — as the phone's map and older saved versions"]],o.proj||"utm")+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Compartment label size (automatic: 0.17 in, smaller where the compartment is tight)</div>`+sel("mmLabel",[["60","Much smaller (60%)"],["80","Smaller (80%)"],["100","Automatic"],["120","Larger (120%)"],["140","Much larger (140%)"]],String(o.labelScale||100))+
-    `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Fill transparency (woodland, water, hatching${kind===7?", activity colours":""})</div>`+sel("mmAlpha",[["100","Solid"],["80","Slightly see-through (80%)"],["60","See-through (60%)"],["40","Faint (40%)"]],String(o.fillAlpha||100))+
+    `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Fill transparency (woodland, water, hatching${kind===7?", activity colours":""})</div>`+sel("mmAlpha",[["100","Solid"],["80","Slightly see-through (80%)"],["60","See-through (60%)"],["40","Faint (40%)"],["25","Light (25%)"],["15","Very light (15%)"],["10","Barely there (10%)"]],String(o.fillAlpha||100))+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Hatching</div>`+sel("mmHatch",[["auto","The smaller class (automatic)"],["ineligible","Not eligible"],["eligible","MFTIP eligible"],["none","None"]],o.hatch)+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Layers</div>`+Object.keys(names).map(chk).join("")+
     `<div style="font-size:11px;color:#8fae95;margin:2px 0 6px">Notes and arrows: the ✎ Text button on the map. Those set for this map are printed.</div>`+
