@@ -1374,7 +1374,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-06 · v463";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-07 · v464";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -5720,12 +5720,17 @@ function crewCacheLoad_(){
   if(_crewCacheTried) return; _crewCacheTried=true;
   try{ ldbGet("crewfeed").then(r=>{ if(r && Array.isArray(r.rows) && !crewData.length && crewShown && crewLayer) renderCrewPlots(r.rows, true); }).catch(()=>{}); }catch(e){}
 }
-function fetchCrew(silent){
+/* v464 — "your touch wins": the crew plots arrive from the Sheet a few seconds after the map opens, and on a phone with no saved
+   copy yet that first load zoomed the map to them — undoing whatever the user had just panned or zoomed to. A touch anywhere on
+   the map screen after it opens now keeps the view where the user put it; with no touch, the first-load zoom happens as before. */
+let _mapOpenedAt=0, _userMapTouchAt=0;
+function userTouchedMap_(){ return _userMapTouchAt>0 && _userMapTouchAt>_mapOpenedAt; }
+function fetchCrew(silent, auto){
   if(!connected || isOffline()) return;
   const cb="__crew"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?";
   const sc=document.createElement("script");
   const cleanup=()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
-  window[cb]=resp=>{ try{ renderCrewPlots((resp&&resp.plots)||[], silent); if(resp && Array.isArray(resp.plots)) crewCacheSave_(resp.plots); }catch(e){ if(!silent) toast("Couldn't load crew plots",true); } cleanup(); };
+  window[cb]=resp=>{ try{ renderCrewPlots((resp&&resp.plots)||[], silent, auto); if(resp && Array.isArray(resp.plots)) crewCacheSave_(resp.plots); }catch(e){ if(!silent) toast("Couldn't load crew plots",true); } cleanup(); };
   sc.onerror=()=>{ cleanup(); if(!silent) toast("Couldn't load crew plots — check connection",true); };
   sc.src=SCRIPT_URL+sep+tokQ_()+"action=plotanalysis&callback="+cb;   // analyzed per-plot feed (BA, vol, type, age, …)
   document.body.appendChild(sc);
@@ -5777,7 +5782,7 @@ function crewPhotoHtml_(p){
              `style="width:78px;height:78px;object-fit:cover;border-radius:6px;border:1px solid #5a7a62"></a>`;
     }).join("")+`</div>`;
 }
-function renderCrewPlots(rows, silent){
+function renderCrewPlots(rows, silent, auto){
   if(!crewLayer) return;
   crewData = rows||[];                       // cache so re-labelling doesn't need a re-fetch
   crewLayer.clearLayers();
@@ -5851,10 +5856,11 @@ function renderCrewPlots(rows, silent){
   crewShown = (typeof layerVis==="undefined") ? true : layerVis.sheet!==false;
   setCrewBtn(); updateLayerStatus();
   const crews=Object.keys(latest).length, n=pts.length;
+  const keepView=!!(auto && userTouchedMap_());      // v464: the user has moved the map since it opened — leave it there
   if(!silent) toast(n?`Showing ${n} crew plot${n>1?"s":""} from ${crews} cruiser${crews>1?"s":""}`+
-      (hidDup?` · ${hidDup} already on this device, drawn once`:"")+(labelled?" · labelled":" · latest highlighted")
+      (hidDup?` · ${hidDup} already on this device, drawn once`:"")+(labelled?" · labelled":" · latest highlighted")+(keepView&&bounds.length?" · map left where you put it":"")
     :"No submitted plots with a location yet",!n);
-  if(!silent && bounds.length) try{ fmap.fitBounds(bounds,{padding:[44,44]}); }catch(e){}   // fit only on first load, not auto-refreshes
+  if(!silent && bounds.length && !keepView) try{ fmap.fitBounds(bounds,{padding:[44,44]}); }catch(e){}   // fit only on first load, not auto-refreshes
 }
 
 /* ---------- opt-in live crew location (shares while map is open; map GPS already running) ---------- */
@@ -7202,12 +7208,13 @@ async function openMap(){
    is restarted here, with an immediate fetch so it's current straight away rather than one interval
    behind. */
 function resumeSharing_(){
+  _mapOpenedAt=Date.now();
   sharingNotice_();
   try{ crewCacheLoad_(); }catch(e){}
   if(!connected || isOffline()){ setCrewBtn(); setCrewRouteBtn(); setLiveBtn(); return; }   // offline: carry on locally
   // Every plot already in the Sheet is pulled the moment the map opens, so nobody has to remember to
   // switch a layer on to find out what's been done. Refreshed on a timer as the crew submits.
-  if(!crewTimer){ fetchCrew(!!crewData.length); crewTimer=setInterval(()=>fetchCrew(true), CREW_REFRESH_MS); }
+  if(!crewTimer){ fetchCrew(!!crewData.length, true); crewTimer=setInterval(()=>fetchCrew(true), CREW_REFRESH_MS); }
   if(crewRoutesShown && !crewRoutesTimer){ fetchCrewRoutes(true); crewRoutesTimer=setInterval(()=>fetchCrewRoutes(true), CREW_REFRESH_MS); }
   if(liveOn && !liveBroadcastTimer && cruiserEmail){
     broadcastLive(); pollLive();
@@ -7228,6 +7235,8 @@ function closeMap(){ rememberMapView_(); $("mapView").style.display="none"; docu
   if(fmap) fmap.getContainer().style.cursor=""; closeLayersMenu(); }
 function initMap(){
   fmap=L.map("fmap",{zoomControl:false,attributionControl:false,preferCanvas:true}).setView([44.13,-79.49],14);
+  try{ const mv=$("mapView"), t=()=>{ _userMapTouchAt=Date.now(); };      // v464: any touch, click or wheel on the map screen
+    ["pointerdown","touchstart","mousedown","wheel","keydown"].forEach(ev=>mv.addEventListener(ev,t,{passive:true,capture:true})); }catch(e){}
   // crossOrigin lets the service worker store real (non-opaque) tiles, so imagery seen in signal
   // is still there offline. See TILE_CACHE in sw.js.
   setImagery_(imageryId,true);      // v382: Esri, or York Region / Simcoe County photography (chosen under Layers)
