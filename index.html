@@ -1068,7 +1068,7 @@ try{ (function(){
   <div class="modal-card">
     <div class="modal-title">Who's entering data on this device?</div>
     <div class="hint" style="margin-bottom:10px">Your name or initials are saved on this device and recorded on every plot you submit. You only need to set this once.</div>
-    <input id="cruiserInput" placeholder="Name or initials…" autocomplete="off" autocapitalize="words">
+    <input id="cruiserInput" placeholder="Your full name (e.g. Chris Gynan)" autocomplete="off" autocapitalize="words">
     <div class="hint" style="margin:10px 0 6px">Email (optional) — get a copy of the notification for plots <i>you</i> submit.</div>
     <input id="cruiserEmail" type="email" placeholder="you@example.com" autocomplete="off" autocapitalize="off" inputmode="email">
     <div class="modal-actions">
@@ -1243,7 +1243,8 @@ try{ (function(){
   <div class="modal-card">
     <div class="modal-title">Analyze &amp; email report</div>
     <div class="hint" style="margin-bottom:8px">Rebuilds the summary tabs from the plots in the Sheet, then emails you the workbook. Choosing a property analyses that property on its own.</div>
-    <div><label class="n">Property / tract</label><select id="reportTractSel"></select></div>
+    <div><label class="n">Property / tract</label><select id="reportTractSel" onchange="repOptsLoad_()"></select></div>
+    <div id="reportOpts" style="max-height:46vh;overflow:auto;margin-top:6px"></div>
     <div class="modal-actions">
       <button class="btn ghost" type="button" onclick="closeReportModal()">Cancel</button>
       <button class="btn ghost" type="button" onclick="runReportPdf()">📄 PDF</button>
@@ -1373,7 +1374,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-06 · v459";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-06 · v461";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1387,7 +1388,9 @@ const SPECIES = [
   ["Aw","Aw White Ash"],["Ab","Ab Black Ash"],["Ag","Ag Green Ash"],
   ["El","El White Elm"],["Iw","Iw Ironwood"],["Hi","Hi Hickory"],
   ["Cb","Cb Black Cherry"],["Cc","Cc Chokecherry"],
-  ["Bn","Bn Butternut"],["Wn","Wn Black Walnut"],
+  ["Bn","Bn Butternut"],["Wn","Wn Black Walnut"],["Hs","Hs Shagbark Hickory"],
+  ["Sa","Sa Sycamore"],["Mf","Mf Freeman Maple"],["Sg","Sg Sweet Gum"],
+  ["HBC","HBC Highbush Cranberry"],["ROD","ROD Red Osier Dogwood"],
   ["Pt","Pt Trembling Aspen"],["Pg","Pg Largetooth Aspen"],["Pb","Pb Balsam Poplar"],["Po","Po Poplar"],
   ["Wi","Wi Willow"],["Bt","Bt Buckthorn"],
   ["Sng","Sng Snag (dead standing)"],["CWD","CWD Coarse woody debris"],["CAV","CAV Cavity tree"],
@@ -3027,10 +3030,18 @@ function submitPlot(){
 /* A plot with no trees and no regen is either a real opening (a measured zero that belongs in the
    analysis) or an entry with nothing in it. Only the person standing there can tell, so ask. The
    answer is written to INANALYSIS and travels with the plot. */
+/* v460: a comment saying nothing grows here ("No trees", "no regen", "0 trees") is the answer — say so on the
+   question. Chris, 2026-11-06: 113k plot 98 said "No trees" and was left out; in a survival survey that plot is
+   the evidence of understocking. The crew still chooses. */
+const NO_TREES_RE_=/\b(no|zero|0|nil|without)\s+(trees?|regen(eration)?|stems?|seedlings?|saplings?|growth|stocking|survivors?|live\s+trees?)\b|\b(nothing|none)\s+(growing|present|alive|found|planted|surviv\w*)\b/i;
+const NOT_ASSESSED_RE_=/\b(not\s+(assessed|sampled|measured|done)|inaccessible|no\s+access|flooded|under\s+water|skip(ped)?|could\s?n[o']?t\s+(get|reach|access))\b/i;
+function bareSaysZero_(c){ c=String(c||""); return NO_TREES_RE_.test(c) && !NOT_ASSESSED_RE_.test(c); }
 function askIncludeBare_(d,then){
+  const zero=bareSaysZero_(d&&d.COMMENT);
   showInfoSheet_("No tree or regeneration data",
     `<div style="color:#a9c9b0;font-size:13px;line-height:1.5;margin-bottom:10px">`+
     `This plot has no trees tallied and no regeneration recorded.</div>`+
+    (zero?`<div style="font-size:13px;line-height:1.5;margin-bottom:10px;padding:9px 10px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#eafae8">Your comment says “${esc(String(d.COMMENT).slice(0,60))}” — a plot you looked at and found nothing in is a <b>measured zero</b>. Include it: in a regeneration or survival survey it is what shows the area is understocked.</div>`:"")+
     `<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:10px">`+
     `Include it if the ground really is open — it then counts as a measured zero and pulls the stand`+
     ` averages down, which is usually what you want. Leave it out if nothing was assessed here.</div>`+
@@ -3536,13 +3547,13 @@ function openAnalysisPage(){
   window.open(url,"_blank");
 }
 // Build a landscape, fit-to-width PDF of the summary tabs on the server and email it (printable / shareable).
-function emailSummaryPdf(tract){ if(_analysisSet==="audit" && limitedNo_()) return;
+function emailSummaryPdf(tract, extra){ if(_analysisSet==="audit" && limitedNo_()) return;
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   if(isOffline()){ toast("Need internet to build the PDF",true); return; }
   const t=String(tract||"").trim();
   const to=String(cruiserEmail||"").trim();
   toast(`Building ${t?`“${t}” `:""}PDF and emailing… (may take ~15s)`);
-  fetchJson_("summarypdf&set="+encodeURIComponent(_analysisSet||"main")+(t?"&tract="+encodeURIComponent(t):"")+(to?"&to="+encodeURIComponent(to):""), (r,err)=>{
+  fetchJson_("summarypdf&set="+encodeURIComponent(_analysisSet||"main")+(t?"&tract="+encodeURIComponent(t):"")+(to?"&to="+encodeURIComponent(to):"")+(extra||""), (r,err)=>{
     if(r&&r.ok){ toast(`✓ Summary PDF emailed to ${r.to}${r.tract?` — ${r.tract}`:""} · ${r.count} table${r.count>1?"s":""}`); }
     else if((""+err).indexOf("timeout")>=0){ toast("Still building — the PDF email should arrive shortly"); }
     else { toast("PDF failed: "+((r&&r.error)||err||"unknown"),true); }
@@ -4993,7 +5004,15 @@ let cruiserEmail = (STORE && (()=>{ try{ return STORE.getItem("fi_cruiser_email"
 function renderCruiser(){ const el=$("cruiserName"); if(el) el.textContent = cruiser || "not set"; }
 function openCruiser(){ $("cruiserInput").value=cruiser; $("cruiserEmail").value=cruiserEmail; $("cruiserModal").style.display="flex"; setTimeout(()=>$("cruiserInput").focus(),40); }
 function closeCruiser(){ $("cruiserModal").style.display="none"; }
+/* v460: "Hs" went onto 298 plots as the person who entered them — initials that are also a species code.
+   A short name or a species code is questioned once; Save again keeps it. */
+let _cruiserWarned="";
+function cruiserLooksOff_(n){ n=String(n||"").trim(); if(!n) return ""; const sp=SPECIES.some(x=>x[0]&&x[0].toLowerCase()===n.toLowerCase());
+  return sp ? `“${n}” is a species code` : (n.replace(/[^A-Za-z]/g,"").length<=3 && !/\s/.test(n)) ? `“${n}” looks like initials` : ""; }
 function saveCruiser(){
+  const _nm=$("cruiserInput").value.trim(), _why=cruiserLooksOff_(_nm);
+  if(_why && _cruiserWarned!==_nm){ _cruiserWarned=_nm; toast(_why+" — please type your full name, so the Sheet and reports show who entered each plot. Tap Save again to keep it.",true); return; }
+  _cruiserWarned="";
   cruiser=$("cruiserInput").value.trim();
   const em=$("cruiserEmail").value.trim();
   if(em && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){ toast("That email doesn't look right",true); return; }
@@ -6249,22 +6268,70 @@ function openReportModal(){
   // plots were all deleted drops off the list until plots exist for it again.)
   sel.innerHTML=`<option value="">All properties</option>`;
   $("reportModal").style.display="flex";
+  _repInfo=null; const _ro=$("reportOpts"); if(_ro) _ro.innerHTML="";
   fetchTractList_(curT);   // preselect the current tract only if it still has plots
+  repOptsLoad_();
 }
 function closeReportModal(){ $("reportModal").style.display="none"; }
+/* v461 — what the export is for (Chris, 2026-11-06). Every plot counts in the inventory summaries; this panel
+   adds (1) which years' plots to use — an earlier survey of the same property can be left out — and (2) a
+   survival report for the compartments ticked, against the prescribed density typed beside each. The densities
+   are kept (on the Sheet, and on this phone) so they are there next time. Nothing ticked = plain inventory. */
+let _repInfo=null, _repSeq=0;
+function repPrescLocal_(t){ try{ return JSON.parse((STORE&&STORE.getItem("fi_presc_"+String(t).toLowerCase()))||"{}")||{}; }catch(e){ return {}; } }
+function repOptsLoad_(){
+  const box=$("reportOpts"); if(!box) return; const t=$("reportTractSel").value, seq=++_repSeq;
+  box.innerHTML=`<div class="hint" style="padding:4px 0">Reading ${t?esc(t)+"'s":"the"} plots…</div>`; _repInfo=null;
+  jsonpAction_("exportinfo"+(t?"&tract="+encodeURIComponent(t):""), r=>{ if(seq!==_repSeq) return; _repInfo=(r&&r.ok)?r:{years:{},stands:[],presc:{}}; repOptsRender_(); });
+}
+function repOptsRender_(){
+  const box=$("reportOpts"), r=_repInfo; if(!box||!r) return; const t=$("reportTractSel").value;
+  const ys=Object.keys(r.years||{}).sort().reverse();
+  const lbl='style="display:flex;align-items:center;gap:8px;padding:5px 0;margin:0;font-size:14px;color:#e8f0e6;text-transform:none;letter-spacing:normal;font-weight:400"', cb='style="width:20px;height:20px;flex:none"';
+  let h="";
+  if(ys.length>1) h+=`<div class="hint" style="margin:6px 0 2px">Plots from (untick a year that belongs to a different survey):</div>`+
+    ys.map((y,i)=>`<label ${lbl}><input type="checkbox" id="repY_${i}" data-y="${esc(y)}" checked ${cb}> ${esc(y)} <span style="color:#8fae95;font-size:12px">· ${r.years[y]} plot${r.years[y]===1?"":"s"}</span></label>`).join("");
+  h+=`<div class="hint" style="margin:10px 0 2px">The inventory summaries are always included, from every plot above.</div>`;
+  if(t && (r.stands||[]).length){
+    const loc=repPrescLocal_(t), pr=Object.assign({}, loc, r.presc||{});
+    h+=`<div style="margin:8px 0 2px;font-size:14px;font-weight:600;color:#eafae8">Add a survival report for:</div>`+
+      `<div class="hint" style="margin-bottom:4px">Tick a compartment and give its prescribed density. Leave all unticked for a plain inventory report.</div>`+
+      r.stands.map((x,i)=>{ const p=pr[String(x.s).toLowerCase()]||{};
+        return `<div style="border-bottom:1px solid #1f3a24;padding:4px 0"><label ${lbl}><input type="checkbox" id="repS_${i}" data-s="${esc(x.s)}" onchange="repSurvTick_(${i})" ${cb}> <b>${esc(x.s)}</b> <span style="color:#8fae95;font-size:12px">· ${x.n} plot${x.n===1?"":"s"}</span></label>`+
+          `<div id="repSB_${i}" style="display:none;padding:0 0 6px 28px"><div style="display:flex;gap:6px;align-items:center"><input id="repSph_${i}" inputmode="numeric" placeholder="stems/ha" value="${esc(p.sph||"")}" style="width:110px;font-size:16px;padding:7px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"> <span style="font-size:12px;color:#a9c9b0">prescribed stems/ha</span></div>`+
+          `<input id="repBy_${i}" placeholder="by species (optional) — e.g. Pw 800; Or 600" value="${esc(p.by||"")}" style="width:100%;box-sizing:border-box;margin-top:5px;font-size:14px;padding:7px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></div></div>`; }).join("");
+  } else if(!t) h+=`<div class="hint" style="margin-top:6px">Choose one property to add a survival report.</div>`;
+  box.innerHTML=h;
+}
+function repSurvTick_(i){ const c=$("repS_"+i), b=$("repSB_"+i); if(b) b.style.display=(c&&c.checked)?"block":"none"; if(c&&c.checked){ const p=$("repSph_"+i); if(p&&!p.value) try{ p.focus(); }catch(e){} } }
+/* The panel's choices as request parameters; null (with a toast) if something ticked has no density. */
+function repOptsParams_(){
+  const r=_repInfo; if(!r) return "";
+  let q=""; const ys=Object.keys(r.years||{});
+  if(ys.length>1){ const on=[]; document.querySelectorAll('#reportOpts input[id^="repY_"]').forEach(c=>{ if(c.checked) on.push(c.getAttribute("data-y")); });
+    if(!on.length){ toast("Tick at least one year",true); return null; }
+    if(on.length<ys.length) q+="&years="+encodeURIComponent(on.filter(y=>/^\d{4}$/.test(y)).join(",")); }
+  const t=$("reportTractSel").value, surv=[], loc=repPrescLocal_(t);
+  for(let i=0;i<(r.stands||[]).length;i++){ const c=$("repS_"+i); if(!c||!c.checked) continue;
+    const s=c.getAttribute("data-s"), sph=String(($("repSph_"+i)||{}).value||"").replace(/[^\d.]/g,""), by=String(($("repBy_"+i)||{}).value||"").trim();
+    if(!(+sph>0) && !/\d/.test(by)){ toast(`Give ${s}'s prescribed stems/ha for its survival report`,true); try{ $("repSph_"+i).focus(); }catch(e){} return null; }
+    surv.push({s:s, sph:+sph||"", by:by}); loc[s.toLowerCase()]={sph:+sph||"", by:by}; }
+  if(surv.length){ q+="&surv="+encodeURIComponent(JSON.stringify(surv)); try{ if(STORE) STORE.setItem("fi_presc_"+String(t).toLowerCase(), JSON.stringify(loc)); }catch(e){} }
+  return q;
+}
 function fetchTractList_(preselect){
   const cb="__tl"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?", sc=document.createElement("script");
   const cleanup=()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
   window[cb]=resp=>{ try{ const sel=$("reportTractSel"), keep=preselect||sel.value;
       ((resp&&resp.tracts)||[]).forEach(t=>{ if(t && ![...sel.options].some(o=>o.value.toLowerCase()===String(t).toLowerCase()))
         sel.insertAdjacentHTML("beforeend",`<option value="${esc(t)}">${esc(t)}</option>`); });
-      if(keep && [...sel.options].some(o=>o.value.toLowerCase()===String(keep).toLowerCase())) setSel(sel,keep); }catch(e){} cleanup(); };
+      if(keep && [...sel.options].some(o=>o.value.toLowerCase()===String(keep).toLowerCase())){ setSel(sel,keep); repOptsLoad_(); } }catch(e){} cleanup(); };
   sc.onerror=cleanup; sc.src=SCRIPT_URL+sep+tokQ_()+"action=tractlist&callback="+cb; document.body.appendChild(sc);
 }
-function runReport(){ const t=$("reportTractSel").value; closeReportModal(); emailReport(t); }
-function runReportPdf(){ const t=$("reportTractSel").value; closeReportModal(); emailSummaryPdf(t); }
+function runReport(){ const t=$("reportTractSel").value, q=repOptsParams_(); if(q===null) return; closeReportModal(); emailReport(t,q); }
+function runReportPdf(){ const t=$("reportTractSel").value, q=repOptsParams_(); if(q===null) return; closeReportModal(); emailSummaryPdf(t,q); }
 // Email the workbook (data + all summary tabs) to the person's own address. A tract analyses that property alone.
-function emailReport(tract){
+function emailReport(tract, extra){
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   if(mailNeedsEmail_()){ toast("Add your email in “Entered by” first — that's where the report goes",true); openCruiser(); return; }
   if(isOffline()){ toast("Need internet to email the report",true); return; }
@@ -6276,7 +6343,7 @@ function emailReport(tract){
   window[cb]=resp=>{ if(resp&&resp.ok) toast(`✓ Report emailed to ${resp.to}${resp.tract?` — ${resp.tract}`:""} — check your inbox`);
                      else toast("Couldn't email the report"+((resp&&resp.error)?": "+resp.error:""),true); cleanup(); };
   sc.onerror=()=>{ cleanup(); toast("Couldn't reach the Sheet — check your connection",true); };
-  sc.src=SCRIPT_URL+sep+tokQ_()+"action=emailreport&to="+encodeURIComponent(cruiserEmail)+(t?"&tract="+encodeURIComponent(t):"")+"&callback="+cb;
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=emailreport&to="+encodeURIComponent(cruiserEmail)+(t?"&tract="+encodeURIComponent(t):"")+(extra||"")+"&callback="+cb;
   document.body.appendChild(sc);
 }
 
