@@ -1376,7 +1376,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-10 · v465";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-12 · v466";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -12767,7 +12767,7 @@ function lioRender_(){
   let any=false;
   if(sameTract) LIO_LAYERS.forEach(L_=>{ const d=lioCache.layers[L_.k]; if(L_.k==="towns"||!lioVis[L_.k]||!d||!d.fc||!d.fc.features.length) return; any=true;      /* v442: towns are names on the zoomed-out map now (twMapRender_), gone when zoomed in */
     const st=Object.assign({pane:"lioPane",renderer:lioRenderer,interactive:false}, LIO_STYLE[L_.k]);
-    L.geoJSON(d.fc,{renderer:lioRenderer, style:f=>{ if(L_.k==="water"&&/intermit/i.test(String(f.properties&&f.properties.PERMANENCY||""))) return Object.assign({},st,{dashArray:"5 4"}); return st; },
+    L.geoJSON(d.fc,{renderer:lioRenderer, filter:L_.k==="building"?lioBldgShown_:undefined, style:f=>{ if(L_.k==="water"&&/intermit/i.test(String(f.properties&&f.properties.PERMANENCY||""))) return Object.assign({},st,{dashArray:"5 4"}); return st; },
       pointToLayer:(f,ll)=>{ if(L_.k==="towns"){ const m=L.circleMarker(ll,Object.assign({radius:6},st)); try{ m.bindTooltip(String((f.properties||{}).NAME||""),{permanent:true,direction:"right",offset:[6,0],className:"town-tip"}); }catch(e){} return m; } return L.circleMarker(ll,Object.assign({radius:3},st)); }, interactive:false, pane:"lioPane"}).addTo(lioLayer); });
   const p=propGet_(t);
   if(p&&Array.isArray(p.boundary)&&p.boundary.length) bndShow_(p.tract||propActiveTract_(),p.boundary).forEach(r=>L.polygon(r,{color:MAP_STYLE.propColor,weight:MAP_STYLE.propWidth,fill:false,interactive:false}).addTo(propLineLayer));
@@ -13537,7 +13537,7 @@ async function mmRender_(tract, o, onPct, frozen){
   const onMap=g=>{ let x0=1/0,y0=1/0,x1=-1/0,y1=-1/0; const add=q=>{ const p=V.toPx(q[0],q[1]); if(p[0]<x0)x0=p[0]; if(p[0]>x1)x1=p[0]; if(p[1]<y0)y0=p[1]; if(p[1]>y1)y1=p[1]; };
     g.polys.forEach(pg=>(pg[0]||[]).forEach(add)); g.lines.forEach(l=>l.forEach(add)); g.pts.forEach(add);
     return x1>=MM_FRAME.x && x0<=MM_FRAME.x+MM_FRAME.w && y1>=MM_FRAME.y && y0<=MM_FRAME.y+MM_FRAME.h; };
-  const eachF=(k,fn)=>{ const fc=L[k]; if(!fc||!fc.features) return; fc.features.forEach(f=>{ const g=mmGeomParts_(f.geometry); if(onMap(g)) fn(g,f.properties||{}); }); };
+  const eachF=(k,fn)=>{ const fc=L[k]; if(!fc||!fc.features) return; fc.features.forEach(f=>{ if(k==="building"&&!lioBldgShown_(f)) return; const g=mmGeomParts_(f.geometry); if(onMap(g)) fn(g,f.properties||{}); }); };      // v466: a hidden building is left off
   const halo=o.aerial;      // over a photo, lines need a light edge to be seen
   const fA=Math.max(.1,Math.min(1,(o.fillAlpha||100)/100)); ctx.globalAlpha=fA;      // v401: the fills, as solid as asked; v462: down to 10%
   if(o.layers.woodland) eachF("woodland",g=>{ g.polys.forEach(r=>{ mmPath_(ctx,V,r); ctx.fillStyle=MM_COL.wood; ctx.fill("evenodd"); present.wood=1; }); });
@@ -14298,7 +14298,7 @@ const FT_COL={building:"#111", gate:"#111", access:"#111", sar:"#d32f2f", nest:"
 function ftCol_(k){ return Object.prototype.hasOwnProperty.call(FT_COL,k)?FT_COL[k]:FT_COL.other; }
 function ftKindName_(k){ const r=FT_KINDS.find(x=>x[0]===k); return r?r[1]:"Other"; }
 let ftLayer=null, _ftPlace=null, _ftPushT=null;
-function ftAll_(){ return Object.values(PROPS.feats||{}).filter(f=>f&&f.id&&isFinite(+f.lat)&&isFinite(+f.lon)); }
+function ftAll_(){ return Object.values(PROPS.feats||{}).filter(f=>f&&f.id&&f.kind!=="hide"&&isFinite(+f.lat)&&isFinite(+f.lon)); }      // v466: a hidden-building record is not a point
 function ftOf_(tract){ const k=propK_(tract); return ftAll_().filter(f=>propK_(f.tract)===k); }
 function ftLabel_(f){ return String(f.name||"").trim(); }
 /* What a map prints: plain copies, and how many sensitive points were left off. */
@@ -15463,9 +15463,9 @@ function csNextName_(tract, taken){ const used={}; csOf_(tract).forEach(c=>used[
   for(let i=1;;i++){ const n="C-"+i; if(!used[propK_(n)]) return n; } }
 let _csUndo=[], _csPushT=null;
 /* Replace a property's pieces with `list`, as one step that Undo can take back. */
-function csCommit_(tract, list, label, noUndo){
+function csCommit_(tract, list, label, noUndo, bnd){
   const k=propK_(tract), before=csOf_(tract);
-  if(!noUndo){ _csUndo.push({tract, label, pieces:JSON.parse(JSON.stringify(before))}); if(_csUndo.length>30) _csUndo.shift(); }
+  if(!noUndo){ _csUndo.push(Object.assign({tract, label, pieces:JSON.parse(JSON.stringify(before))}, bnd?{bnd:JSON.parse(JSON.stringify(bnd))}:{})); if(_csUndo.length>30) _csUndo.shift(); }      // v466: an outline change keeps the outline it replaced
   PROPS.shapes=PROPS.shapes||{}; propDirty.shapes=propDirty.shapes||{}; propDirty.shapeDel=propDirty.shapeDel||[];
   const now={}, taken=[]; list.forEach(c=>{ if(c.name) taken.push(c.name); });
   list.forEach(c=>{ const id=c.id||csNewId_(), name=c.name||csNextName_(tract,taken); if(!c.name) taken.push(name);
@@ -15528,7 +15528,8 @@ function csPlotsFollow_(tract, before, after, quiet){
 }
 function csUndo_(){ const t=_csEd?_csEd.tract:propActiveTract_(); let i=_csUndo.length-1; while(i>=0 && propK_(_csUndo[i].tract)!==propK_(t)) i--;
   if(i<0){ toast("Nothing to undo"); return; }
-  const u=_csUndo.splice(i,1)[0]; csCommit_(u.tract, u.pieces, "undo", true); toast("Undone: "+u.label); csBar_(); }
+  const u=_csUndo.splice(i,1)[0]; if(u.bnd) propSaveLocal_({tract:u.tract, boundary:u.bnd});      // v466: the outline goes back too
+  csCommit_(u.tract, u.pieces, "undo", true); toast("Undone: "+u.label); if(u.bnd) try{ lioRender_(); }catch(e){} csBar_(); }
 /* v391 — start the layer from the compartment polygons already loaded for the property (a shapefile under
    Layers, or areas drawn with ⬠ Draw), so an imported layer can be cut, merged, corner-moved and added to.
    Corners within CS_SNAP_M of each other become one corner, and every corner is let into the neighbouring
@@ -15705,15 +15706,16 @@ function csSetAttr_(id, name, cls){
 }
 /* ---- the editor on the map ---- */
 let _csEd=null, csLayer=null, _csTmp=[];
-function csEdit_(tract){
+function csEdit_(tract, opt){
   const t=tract||_ppTract||propActiveTract_(); if(!t){ toast("Choose the property first",true); return; }
-  if(!csOf_(t).length && !csFromOutline_(t)) return;
+  if(!csOf_(t).length && !(opt&&opt.outline&&csOutline_(t).length) && !csFromOutline_(t)) return;      // v466: the outline's corners can be moved before it is divided
   propSetActive_(t); closeDataSheet_(); try{ mnCancel_(true); ftCancel_(true); lnCancel_(true); }catch(e){}     // v389: nothing else being placed or drawn
   _csEd={tract:t, mode:"idle", line:[], pick:null};
   csRender_(); csBar_(); csZoom_();
 }
 function csZoom_(){ try{ const b=[]; csOf_(_csEd.tract).forEach(c=>c.rings[0].forEach(p=>b.push(p))); if(b.length&&fmap) fmap.fitBounds(b,{padding:[30,30]}); }catch(e){} }
 function csDone_(){ if(_pw && _pw.step==="cut"){ _csEd=null; csTmpClear_(); csBarRemove_(); csRender_(); pwGo_("names"); return; }      // v465: ＋ Set up goes on to the names
+  if(_pw && _pw.step==="edit"){ _csEd=null; csTmpClear_(); csBarRemove_(); csRender_(); pwGo_("hub"); return; }      // v466: back to the property's page
   _csEd=null; csTmpClear_(); csBarRemove_(); csRender_(); openPropSheet_(propActiveTract_()); }
 let _csBarEl=null;
 function csBarRemove_(){ try{ document.body.classList.remove("bar-open"); }catch(e){} const bar=$("csBar")||_csBarEl; _csBarEl=null; try{ if(bar&&bar.parentNode) bar.parentNode.removeChild(bar); else if(bar&&bar.remove) bar.remove(); }catch(e){} }
@@ -15721,7 +15723,8 @@ function csTmpClear_(){ try{ _csTmp.forEach(m=>fmap.removeLayer(m)); }catch(e){}
 function csMode_(m){ if(!_csEd) return; _csEd.mode=m; _csEd.line=[]; _csEd.pick=null; csTmpClear_(); csRender_(); csBar_();
   toast(m==="cut"?"Tap points across the piece, starting and ending outside it (or on its edge) — then Apply cut"
        :m==="merge"?"Tap the two pieces to join"
-       :m==="move"?"Drag a corner. Corners of the property outline stay put; one on the outline's edge slides along it"
+       :m==="move"?"Drag a red corner — the compartments either side follow. Drag a small ○ on a line to add a corner; tap a corner to remove it. Grey corners are the outline's (⬚ Outline corners)"
+       :m==="outline"?"Drag a blue corner of the property outline — the compartments follow and stay inside it. Drag a small ○ to add a corner; tap a corner to remove it"
        :(_pw&&_pw.step==="cut")?"Tap ✂ Cut for another line — or ✓ Next: names when every compartment is cut":"Tap a piece to name it and set its class"); }
 /* ---------- v407 — ring compartments on the map and give them a tract (Chris, 2026-10-12) ----------
    ⬚ Tract on the rail: tap a ring around the compartments, Select takes every compartment whose centre is inside it
@@ -15811,8 +15814,11 @@ function csBar_(){
   const chk=csCheck_(_csEd.tract); if(!chk.ok) h+=`<div style="color:#ffd24a;font-size:12px;margin-bottom:6px">${chk.over?"Some pieces overlap — two phones may have cut it at the same time. Join or undo until they fit, or start again from the outline.":"The pieces add up to "+chk.layHa.toFixed(2)+" ha but the outline is "+chk.propHa.toFixed(2)+" ha — the outline may have changed since. Start again from the outline to match it."}</div>`;
   if(m==="cut") h+=`<div style="margin-bottom:6px;color:#cfe3d2">${_csEd.line.length} point${_csEd.line.length===1?"":"s"} on the cut line${_csEd.line.length>=3?" · or close it into an island inside a piece":""}</div><div style="display:flex;gap:6px">`+
      B("csApplyCut_()","✂ Apply cut",true)+B("csApplyIsland_()","◌ Island",_csEd.line.length>=3)+B("csLineUndo_()","↶ Point")+B("csMode_('idle')","Cancel")+`</div>`;
-  else h+=`<div style="display:flex;gap:6px;flex-wrap:wrap">`+B("csMode_('cut')","✂ Cut",m==="cut")+B("csMode_('merge')","⊕ Merge",m==="merge")+B("csMode_('move')","✥ Corners",m==="move")+
-     B("csUndo_()","↶ Undo")+B("csDone_()",_pw&&_pw.step==="cut"?"✓ Next: names ▸":"✓ Done",!!(_pw&&_pw.step==="cut"))+`</div>`+(m==="idle"?`<div style="margin-top:6px;color:#a9c9b0;font-size:12px">Tap a piece to name it and set its class.</div>`:"");
+  else h+=`<div style="display:flex;gap:6px;margin-bottom:6px">`+(n?B("csMode_('cut')","✂ Cut",m==="cut")+B("csMode_('merge')","⊕ Merge",m==="merge")+B("csMode_('move')","✥ Corners",m==="move"):"")+B("csMode_('outline')","⬚ Outline",m==="outline")+`</div>`+      /* v466: two rows — six buttons did not fit a phone */
+     `<div style="display:flex;gap:6px">`+B("csUndo_()","↶ Undo")+B("csDone_()",_pw&&_pw.step==="cut"?"✓ Next: names ▸":_pw&&_pw.step==="edit"?"✓ Done ▸":"✓ Done",!!(_pw&&(_pw.step==="cut"||_pw.step==="edit")))+`</div>`+
+     (m==="idle"?`<div style="margin-top:6px;color:#a9c9b0;font-size:12px">Tap a piece to name it and set its class.</div>`:"")+
+     ((m==="move"||m==="outline")?`<div style="margin-top:6px;color:#a9c9b0;font-size:12px;line-height:1.4">${m==="outline"?"<b style='color:#7cc4ff'>Outline corners</b> — drag a blue corner; the compartments follow. ○ adds a corner.":"<b style='color:#ff8a80'>Compartment corners</b> — drag a red corner; the compartments either side follow. ○ adds a corner."}</div>`+
+       (_csEd.pick?`<div style="display:flex;gap:6px;margin-top:6px">${B("csPickRemove_()","🗑 Remove this corner",true)}${B("_csEd.pick=null;csRender_();csBar_()","Keep it")}</div>`:`<div style="color:#8fae95;font-size:11px;margin-top:3px">Tap a corner to remove it.</div>`):"");
   bar.innerHTML=h;
 }
 /* A tap snaps to a corner of a piece within 14 px, so a cut can start exactly where an earlier one ended. */
@@ -16007,6 +16013,128 @@ function csAttrSave_(id){ const n=$("csName"), k=$("csCls"), tsel=$("csTract"); 
 function csRemove_(id){ const c=(PROPS.shapes||{})[id]; if(!c) return; const ha=cgPieceHa_(c.rings);
   if(!confirm("Remove the piece "+c.name+" ("+ha.toFixed(2)+" ha) from "+c.tract+"? Its neighbours keep their shape, so the property outline will have a gap there until it is redrawn or they are joined. Undo is on the compartment layer bar.")) return;
   csCommit_(c.tract, csOf_(c.tract).filter(x=>x.id!==id), "removed "+c.name); closeDataSheet_(); csRender_(); toast("Removed "+c.name); }
+/* ================= v466 — moving corners: the property outline, and the compartments (Chris, 2026-11-12) =================
+   "if I need to edit the property boundary, the tool should allow me to select the boundary and adjust its node locations,
+   the compartments should auto adjust to stay within the new boundary. Also, a compartment boundary editor … to adjust nodes
+   and adjacent compartments auto adjust too."
+   ⬚ Outline corners: drag a corner of the property outline; every compartment corner on it moves with it, and every corner
+   along the two outline edges either side slides with its edge (it keeps its place along the edge), so the compartments
+   still fill the outline exactly. Drag the small ○ in the middle of an edge to add a corner; tap a corner, then 🗑, to take
+   it out (the corners along the two edges move onto the straight edge between its neighbours).
+   ✥ Compartment corners: as before, a corner shared by two or three compartments moves in all of them; now the ○ in the
+   middle of a line between compartments adds a corner there (in both), and a tapped corner can be removed.
+   Each change is checked before it is kept (no compartment crossing itself or another, and the layer still adds up to the
+   outline) and is one step of ↶ Undo — which puts the outline back too. */
+function csTryList_(tract, before, list, P, wantHa){
+  const moved=list.filter((c,i)=>JSON.stringify(c.rings)!==JSON.stringify((before[i]||{}).rings));
+  if(!cgSound_(moved, null, P)) return "cross";
+  if(moved.some(a=>list.some(b=>b.id!==a.id && cgOverlap_(a,b,P)))) return "cross";
+  if(wantHa!=null && before.length){ const was=cgLayerHa_(before), now=cgLayerHa_(list);
+    if(Math.abs(was-wantHa.old)<0.01 && Math.abs(now-wantHa.now)>=0.01) return "area"; }
+  return ""; }
+function csWhy_(why){ if(why==="cross") toast("That would make a compartment cross itself or run over another — put back. Move the corners near it first, or take smaller steps.",true);
+  else if(why==="area") toast("That would leave a gap between the compartments and the outline — put back",true);
+  else if(why==="few") toast("An outline needs at least three corners",true);
+  else if(why==="fixed") toast("That corner is on the property outline — use ⬚ Outline corners to move it",true); }
+function csOutlineEdit_(tract, ri, vi, op, to){
+  const old=csOutline_(tract); if(!old[ri]) return "none";
+  const ring=old[ri], n=ring.length; if(op==="del" && n<=3) return "few";
+  const P=cgProj_(ring[0][0],ring[0][1]), X=ring.map(P.xy), T=to?P.xy(cgLL_(to)):null, kA=cgKey_(ring[vi]);
+  const onSeg=(q,i)=>{ const s=cgSegD_(q[0],q[1],X[i],X[(i+1)%n]); return s.d<=CG_EDGE_M?s.u:null; };
+  const lerp=(a,b,u)=>[a[0]+u*(b[0]-a[0]), a[1]+u*(b[1]-a[1])];
+  const nr=ring.slice(); let mapPt, addAt=null;
+  if(op==="move"){ nr[vi]=cgLL_(to); const ip=(vi-1+n)%n;
+    mapPt=(q,k)=>{ if(k===kA) return T; let u=onSeg(q,ip); if(u!=null&&u>0&&u<1) return lerp(X[ip],T,u); u=onSeg(q,vi); if(u!=null&&u>0&&u<1) return lerp(T,X[(vi+1)%n],u); return null; }; }
+  else if(op==="add"){ nr.splice(vi+1,0,cgLL_(to)); const a=X[vi], b=X[(vi+1)%n]; addAt=vi;      // the ○ sat at the middle of the edge
+    mapPt=(q,k)=>{ const u=onSeg(q,vi); if(u==null||u<=0||u>=1) return null; return u<=0.5?lerp(a,T,u/0.5):lerp(T,b,(u-0.5)/0.5); }; }
+  else { nr.splice(vi,1); const ip=(vi-1+n)%n, a=X[ip], c=X[(vi+1)%n], L1=Math.hypot(X[vi][0]-a[0],X[vi][1]-a[1]), L2=Math.hypot(c[0]-X[vi][0],c[1]-X[vi][1]), Lt=(L1+L2)||1;
+    mapPt=(q,k)=>{ if(k===kA) return lerp(a,c,L1/Lt); let u=onSeg(q,ip); if(u!=null&&u>0&&u<1) return lerp(a,c,u*L1/Lt); u=onSeg(q,vi); if(u!=null&&u>0&&u<1) return lerp(a,c,(L1+u*L2)/Lt); return null; }; }
+  if(nr.length<3 || cgSelfCross_(nr,P) || Math.abs(cgArea_(nr.map(P.xy)))<1) return "cross";
+  const nb=old.map((r,i)=>i===ri?nr:r);
+  const before=csOf_(tract);
+  const list=before.map(c=>Object.assign({},c,{rings:c.rings.map(r=>{ const out=[];
+    r.forEach((p,j)=>{ const q=P.xy(p), m=mapPt(q,cgKey_(p)); out.push(m?P.ll(m):cgLL_(p));
+      if(addAt!=null){ const qn=P.xy(r[(j+1)%r.length]), u1=onSeg(q,addAt), u2=onSeg(qn,addAt); if(u1!=null&&u2!=null&&((u1<0.5&&u2>0.5)||(u1>0.5&&u2<0.5))) out.push(cgLL_(to)); } });
+    return cgDedupe_(out); })}));
+  const why=csTryList_(tract, before, list, P, {old:propOutlineHa_(old), now:propOutlineHa_(nb)}); if(why) return why;
+  propSaveLocal_({tract, boundary:nb});
+  if(before.length) csCommit_(tract, list, op==="move"?"move an outline corner":op==="add"?"add an outline corner":"remove an outline corner", false, old);
+  else { _csUndo.push({tract, label:"change the outline", pieces:[], bnd:old}); }
+  try{ lioRender_(); }catch(e){}
+  return ""; }
+/* a corner between compartments: added in the middle of a line (in every compartment along that line), or removed */
+function csCornerAdd_(tract, k1, k2, to){
+  const before=csOf_(tract); if(!before.length) return "none"; const P=cgProj_(to[0],to[1]), np=cgLL_(to); let hit=false;
+  const list=before.map(c=>Object.assign({},c,{rings:c.rings.map(r=>{ const out=[];
+    r.forEach((p,j)=>{ out.push(p); const a=cgKey_(p), b=cgKey_(r[(j+1)%r.length]); if((a===k1&&b===k2)||(a===k2&&b===k1)){ out.push(np); hit=true; } }); return out; })}));
+  if(!hit) return "none";
+  const out=csOutline_(tract), why=csTryList_(tract, before, list, P, out.length?{old:propOutlineHa_(out), now:propOutlineHa_(out)}:null); if(why) return why;
+  csCommit_(tract, list, "add a corner"); return ""; }
+function csCornerDel_(tract, key){
+  const okeys={}; csOutline_(tract).forEach(r=>r.forEach(p=>okeys[cgKey_(p)]=1)); if(okeys[key]) return "fixed";
+  const before=csOf_(tract); let P=null;
+  const list=before.map(c=>Object.assign({},c,{rings:c.rings.map(r=>r.filter(p=>{ if(cgKey_(p)!==key) return true; P=P||cgProj_(p[0],p[1]); return false; }))}));
+  if(!P) return "none";
+  const out=csOutline_(tract), why=csTryList_(tract, before, list, P, out.length?{old:propOutlineHa_(out), now:propOutlineHa_(out)}:null); if(why) return why;
+  csCommit_(tract, list, "remove a corner"); return ""; }
+function csPickRemove_(){ if(!_csEd||!_csEd.pick) return; const t=_csEd.tract, pk=String(_csEd.pick); let why="none";
+  if(pk.indexOf("o:")===0){ const [,ri,vi]=pk.split(":").map(Number); why=csOutlineEdit_(t,ri,vi,"del"); }
+  else if(pk.indexOf("k:")===0) why=csCornerDel_(t, pk.slice(2));
+  if(why) csWhy_(why); else toast("Corner removed");
+  _csEd.pick=null; csRender_(); csBar_(); }
+/* the handles: corners (drag to move, tap to pick) and the ○ in the middle of each line (drag to add a corner) */
+function csHandles_(t, pcs){
+  const m=_csEd.mode, out=csOutline_(t), okeys={}; out.forEach(r=>r.forEach(p=>okeys[cgKey_(p)]=1));
+  const dot=(p,bg,size,hollow,picked)=>L.marker(p,{draggable:true,keyboard:false,zIndexOffset:picked?1000:0,icon:L.divIcon({className:"",iconSize:[size+10,size+10],iconAnchor:[(size+10)/2,(size+10)/2],
+    html:`<div style="margin:5px;width:${size}px;height:${size}px;box-sizing:border-box;border-radius:50%;border:2px solid ${picked?"#ffd24a":"#fff"};background:${hollow?"rgba(255,255,255,.35)":bg};${picked?"box-shadow:0 0 0 3px #ffd24a;":""}"></div>`})}).addTo(csLayer);
+  const back=why=>{ if(why) csWhy_(why); csRender_(); csBar_(); };
+  if(m==="outline"){
+    out.forEach((r,ri)=>{ try{ L.polygon(r,{color:"#2196f3",weight:4,fill:false,interactive:false}).addTo(csLayer); }catch(e){}
+      r.forEach((p,vi)=>{ const pk="o:"+ri+":"+vi, mk=dot(p,"#2196f3",16,false,_csEd.pick===pk);
+        mk.on("click",()=>{ _csEd.pick=_csEd.pick===pk?null:pk; csRender_(); csBar_(); });
+        mk.on("dragend",e=>{ const q=e.target.getLatLng(); _csEd.pick=null; back(csOutlineEdit_(t,ri,vi,"move",[q.lat,q.lng])); });
+        const nx=r[(vi+1)%r.length], mid=[(p[0]+nx[0])/2,(p[1]+nx[1])/2], mm=dot(mid,"#2196f3",11,true,false);
+        mm.on("dragend",e=>{ const q=e.target.getLatLng(); back(csOutlineEdit_(t,ri,vi,"add",[q.lat,q.lng])); }); }); });
+    return; }
+  /* ✥ compartment corners: outline corners stay grey (moved under ⬚ Outline corners) */
+  const seen={}, edges={};
+  pcs.forEach(c=>c.rings.forEach(r=>r.forEach((p,j)=>{ const k=cgKey_(p), nx=r[(j+1)%r.length], k2=cgKey_(nx), ek=k<k2?k+"|"+k2:k2+"|"+k;
+    if(!edges[ek]) edges[ek]={a:p,b:nx,k1:k,k2};
+    if(seen[k]) return; seen[k]=1; const fixed=!!okeys[k], pk="k:"+k;
+    if(fixed){ L.marker(p,{keyboard:false,interactive:false,icon:L.divIcon({className:"",iconSize:[18,18],iconAnchor:[9,9],html:`<div style="width:14px;height:14px;border-radius:50%;border:2px solid #fff;background:#777"></div>`})}).addTo(csLayer); return; }
+    const mk=dot(p,"#ff3b30",14,false,_csEd.pick===pk);
+    mk.on("click",()=>{ _csEd.pick=_csEd.pick===pk?null:pk; csRender_(); csBar_(); });
+    mk.on("dragend",e=>{ const q=e.target.getLatLng(), why=csMoveCorner_(t,k,[q.lat,q.lng]); _csEd.pick=null;
+      if(why==="cross") toast("That would make a piece cross itself or run over another — the corner is put back",true); else if(why==="area") toast("That would take the layer further from the property outline's area — the corner is put back",true); csRender_(); csBar_(); }); })));
+  /* a ○ on each line between compartments (not along the outline — that is ⬚ Outline corners) */
+  const OP=out.length?cgProj_(out[0][0][0],out[0][0][1]):null, OX=OP?out.map(r=>r.map(OP.xy)):[];
+  const alongOutline=(a,b)=>{ if(!OP) return false; const qa=OP.xy(a), qb=OP.xy(b); return OX.some(X=>X.some((x,i)=>{ const y=X[(i+1)%X.length]; return cgSegD_(qa[0],qa[1],x,y).d<=CG_EDGE_M && cgSegD_(qb[0],qb[1],x,y).d<=CG_EDGE_M; })); };
+  Object.values(edges).forEach(e=>{ if(alongOutline(e.a,e.b)) return; const mid=[(e.a[0]+e.b[0])/2,(e.a[1]+e.b[1])/2], mm=dot(mid,"#ff3b30",11,true,false);
+    mm.on("dragend",ev=>{ const q=ev.target.getLatLng(); back(csCornerAdd_(t,e.k1,e.k2,[q.lat,q.lng])); }); });
+}
+/* ================= v466 — hide a building the online layer shows that is not on the property (Chris, 2026-11-12) =================
+   "sometimes buildings grabbed from the online layers may be shown but not present in the property. Is there a way to delete
+   them from the map." A hidden building is kept on the Sheet as a Map Features row of kind "hide" naming the building's
+   provincial id (OGF_ID), so every phone and every printed map leaves it out; it is never shown as a point itself. */
+function lioHidden_(){ const s={}; Object.values(PROPS.feats||{}).forEach(f=>{ if(f&&f.kind==="hide"){ const m=/^OGF:(\S+)/.exec(String(f.name||"")); if(m) s[m[1]]=f.id; } }); return s; }
+function lioBldgShown_(f){ const id=String(((f||{}).properties||{}).OGF_ID||""); return !id || !lioHidden_()[id]; }
+function lioBldgs_(t){ const ok=lioCache&&propK_(lioCacheTract)===propK_(t); const d=ok&&lioCache.layers&&lioCache.layers.building; return (d&&d.fc&&d.fc.features)||null; }
+function lioBldgToggle_(t, f){ const id=String(((f||{}).properties||{}).OGF_ID||""); if(!id){ toast("That building has no provincial id — it cannot be hidden",true); return; }
+  const h=lioHidden_();
+  if(h[id]){ const fid=h[id]; delete PROPS.feats[fid]; if(propDirty.feats) delete propDirty.feats[fid]; (propDirty.featDel=propDirty.featDel||[]).push(fid); propPersist_(); if(propBackendOk) propPush_().then(()=>{}); toast("Building shown again"); }
+  else { const g=mmGeomParts_(f.geometry); let la=0,lo=0,n=0; g.pts.forEach(q=>{ la+=q[0]; lo+=q[1]; n++; }); g.polys.forEach(pg=>(pg[0]||[]).forEach(q=>{ la+=q[0]; lo+=q[1]; n++; }));
+    if(!n) return; ftTouch_({id:ftNewId_(), tract:t, kind:"hide", lat:la/n, lon:lo/n, name:"OGF:"+id, note:"hidden: a provincial building not on the property", photos:[], sens:false}); toast("Building hidden on the map and on printed maps"); }
+  try{ lioRender_(); }catch(e){} }
+function lioBldgAt_(t, ll){ const fs=lioBldgs_(t); if(!fs) return null; const P=cgProj_(ll.lat,ll.lng), q=[0,0];
+  let best=null; const px=fmap?(()=>{ const a=fmap.latLngToContainerPoint(ll), b=fmap.latLngToContainerPoint([ll.lat,ll.lng+0.0001]); return Math.abs(b.x-a.x)/(0.0001*111320*Math.cos(ll.lat*Math.PI/180)); })():1;   // px per metre
+  fs.forEach(f=>{ const g=mmGeomParts_(f.geometry);
+    g.polys.forEach(pg=>{ const R=pg.map(r=>r.map(P.xy)); if(cgInRings_(0,0,R)){ best={f,d:0}; return; }
+      R.forEach(r=>r.forEach((x,i)=>{ const d=cgSegD_(0,0,x,r[(i+1)%r.length]).d*px; if(d<=14&&(!best||d<best.d)) best={f,d}; })); });
+    g.pts.forEach(p=>{ const x=P.xy(p), d=Math.hypot(x[0],x[1])*px; if(d<=16&&(!best||d<best.d)) best={f,d}; }); });
+  return best&&best.f; }
+function pwBldgDraw_(){ pwTmpClear_(); const t=_pw&&_pw.tract, fs=lioBldgs_(t); if(!fs||!fmap||!window.L) return; const h=lioHidden_();
+  fs.forEach(f=>{ const hid=!!h[String((f.properties||{}).OGF_ID||"")], g=mmGeomParts_(f.geometry), st=hid?{color:"#ff3b30",weight:2,dashArray:"4 3",fillColor:"#ff3b30",fillOpacity:.15,interactive:false}:{color:"#ffd24a",weight:2,fillColor:"#ffd24a",fillOpacity:.35,interactive:false};
+    try{ g.polys.forEach(pg=>_pwTmp.push(L.polygon(pg,st).addTo(fmap))); g.pts.forEach(p=>_pwTmp.push(L.circleMarker(p,Object.assign({radius:7},st)).addTo(fmap))); }catch(e){} }); }
 /* ================= v465 — ＋ Set up: a property step by step (Chris, 2026-11-10) =================
    "a tool on the right side that allows a user to add a property … by loading the CLTIP boundary … or by drawing it. Once the
    boundary is drawn, the app asks if you'd like to create compartments through slicing up that layer … then the app allows the user
@@ -16035,6 +16163,8 @@ function pwBarRemove_(){ try{ document.body.classList.remove("bar-open","pw-open
 function pwGo_(step){ if(!_pw) return; pwTmpClear_();
   if(_pw.step==="names" && step!=="names" && _csEd && _csEd.mode==="pw"){ _csEd=null; try{ csRender_(); }catch(e){} }
   _pw.step=step; if(step==="draw") _pw.pts=[];
+  if(step==="edit"){ pwBarRemove_(); const t=_pw.tract, sub=_pw.sub||"move"; csEdit_(t,{outline:sub==="outline"}); if(_csEd) csMode_(sub); else pwGo_("hub"); return; }      // v466: move corners, back to the page
+  if(step==="bldg"){ const t=_pw.tract; if(!lioBldgs_(t)){ try{ lioEnsure_(t,false,true); }catch(e){} } }
   if(step==="cut"){ pwBarRemove_(); const t=_pw.tract; csEdit_(t); if(_csEd){ csMode_("cut"); toast("Tap points across the property, starting and ending outside it — then ✂ Apply cut. Repeat for each line. ✓ Next when every compartment is cut.",false); } else pwGo_("hub"); return; }
   if(step==="names"){ _csEd={tract:_pw.tract, mode:"pw", line:[], pick:null}; try{ csRender_(); }catch(e){} }
   pwBar_();
@@ -16047,6 +16177,7 @@ function pwFit_(){ try{ const t=_pw&&_pw.tract; if(!t||!fmap) return; const pts=
 function pwTap_(ll){ if(!_pw) return false;
   if(_pw.step==="draw"){ _pw.pts.push([+ll.lat,+ll.lng]); pwDraw_(); pwBar_(); return true; }
   if(_pw.step==="names"){ const pc=csPieceAt_(ll.lat,ll.lng); if(pc) pwFocus_(pc.id,true); return true; }
+  if(_pw.step==="bldg"){ const f=lioBldgAt_(_pw.tract, ll); if(f){ lioBldgToggle_(_pw.tract, f); pwBldgDraw_(); pwBar_(); } return true; }
   return false; }
 function pwDraw_(){ pwTmpClear_(); if(!_pw||!fmap||!window.L) return; const pts=_pw.pts;
   try{ if(pts.length>=3) _pwTmp.push(L.polygon(pts,{color:"#ff3b30",weight:3,fillColor:"#ff3b30",fillOpacity:.12,interactive:false}).addTo(fmap));
@@ -16180,20 +16311,27 @@ function pwBar_(){
           `<select style="width:100%;margin-top:5px;font-size:15px;padding:6px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">${opt(rec.cls)}</select></div>`; }).join("")+`</div>`+
       `<div style="font-size:11px;color:#8fae95;margin:2px 0 8px;line-height:1.4">↓ continues the series from that compartment down — e.g. type W-1 on the first wetland and tap ↓. Two pieces with the same name count as one compartment.</div>`+
       `<div style="display:flex;gap:6px">`+B("pwSaveNames_()","✓ Save",true)+B("pwGo_('cut')","✂ Cut more")+B("pwGo_('hub')","Later")+`</div>`; }
+  else if(st==="bldg"){ const fs=lioBldgs_(t), hid=lioHidden_(), nH=fs?fs.filter(f=>hid[String((f.properties||{}).OGF_ID||"")]).length:0;
+    h=head(esc(t)+" — buildings")+
+      (fs?`<div style="color:#cfe3d2;margin-bottom:8px;line-height:1.45">Tap a building that isn't there to hide it — on this map, on printed maps and on every phone. Tap a hidden one (<span style="color:#ff8a80">red, dashed</span>) to bring it back.<br><b>${fs.length}</b> from the online map · <b>${nH}</b> hidden</div>`
+        :`<div style="color:#ffd24a;margin-bottom:8px">The online buildings for this property aren't on this phone yet — they're being fetched. Try again in a moment.</div>`)+
+      `<div style="display:flex;gap:6px">`+B("pwGo_('hub')","✓ Done",true)+`</div>`; }
   else if(st==="hub"){ const p=propGet_(t)||{}, b=Array.isArray(p.boundary)?p.boundary:[], ha=b.length?propOutlineHa_(b):0, pcs=csOf_(t), chk=pcs.length?csCheck_(t):{ok:true};
     const names={}; pcs.forEach(c=>names[propK_(c.name)]=c.name); const nComp=Object.keys(names).length, unnamed=pcs.filter(c=>/^C-\d+$/.test(c.name)).length;
     const noCls=Object.values(names).filter(n=>!(propComp_(t,n)||{}).cls).length;
     let byCls=""; try{ if(pcs.length){ const S=propSummary_(t), A=x=>(x&&x.ac)||0; byCls=["MFTIP","CLTIP","INELIGIBLE",""].filter(k=>S.byClass[k]&&S.byClass[k].n).map(k=>`${PROP_CLS_LABEL[k]} ${A(S.byClass[k]).toFixed(2)} ac`).join(" · "); } }catch(e){}
     const row=(ok,label,state,btns)=>`<div style="border:1px solid #2a4030;border-radius:10px;padding:8px;margin-bottom:6px"><div style="display:flex;gap:6px;align-items:baseline"><span style="color:${ok?"#7fd88a":"#e8b84b"}">${ok?"✓":"○"}</span><b style="flex:1">${label}</b></div><div style="color:#cfe3d2;font-size:12px;margin:2px 0 6px 18px;line-height:1.4">${state}</div><div style="display:flex;gap:6px">${btns}</div></div>`;
     h=head(esc(t))+
-      row(b.length,"1 Outline",b.length?`${(ha*HA_AC).toFixed(2)} ac (${ha.toFixed(2)} ha)`:"Not made yet",B("pwGo_('outline')",b.length?"Change the outline…":"Make the outline ▸",!b.length))+
+      row(b.length,"1 Outline",b.length?`${(ha*HA_AC).toFixed(2)} ac (${ha.toFixed(2)} ha)`:"Not made yet",(b.length?B("_pw.sub='outline';pwGo_('edit')","⬚ Move its corners"):"")+B("pwGo_('outline')",b.length?"Replace it…":"Make the outline ▸",!b.length))+
       row(pcs.length&&chk.ok,"2 Compartments",!b.length?"Make the outline first":!pcs.length?"Not divided yet":(nComp+" compartment"+(nComp===1?"":"s")+(pcs.length!==nComp?" ("+pcs.length+" pieces)":""))+(chk.ok?"":` — <span style="color:#ffd24a">${chk.over?"some pieces overlap":"they no longer fit the outline"}</span>`),
-        pcs.length?B("pwGo_('cut')","✂ Cut, join or move corners")+B("pwCutAgain_()","Start again"):B("pwGo_('divide')","Divide it ▸",true,!b.length))+
+        pcs.length?B("_pw.sub='move';pwGo_('edit')","✥ Move corners")+B("pwGo_('cut')","✂ Cut or join")+B("pwCutAgain_()","Start again"):B("pwGo_('divide')","Divide it ▸",true,!b.length))+
       row(pcs.length&&!unnamed&&!noCls,"3 Names & MFTIP class",!pcs.length?"Divide it first":(unnamed?unnamed+" not named yet":"All named")+" · "+(noCls?noCls+" without a class":"every one has a class")+(byCls?`<br>${byCls}`:""),B("pwGo_('names')","🏷 Names & classes",!!pcs.length&&(unnamed||noCls),!pcs.length))+
+      (lioBldgs_(t)&&lioBldgs_(t).length?row(true,"Buildings from the online map",(()=>{ const nH=Object.keys(lioHidden_()).filter(id=>lioBldgs_(t).some(f=>String((f.properties||{}).OGF_ID||"")===id)).length; return lioBldgs_(t).length+" near the property"+(nH?" · "+nH+" hidden":""); })(),B("pwGo_('bldg')","🏚 Hide any that aren't there")):"")+
       `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">`+B("pwClose_();_ppTract=propActiveTract_();openPropSheet_(propActiveTract_())","🏠 Owner, roll no. & more")+B("pwClose_();mmMenuShow_()","🖨 Make a map",false,!b.length)+`</div>`+
       `<div style="display:flex;gap:6px;margin-top:6px">`+B("pwFit_()","🔍 Zoom to it")+B("pwClose_()","✓ Close",true)+`</div>`; }
   bar.innerHTML=h; if(bar.getAttribute("data-top")!==st){ bar.scrollTop=0; bar.setAttribute("data-top",st); }
   if(st==="names") setTimeout(pwLabels_,0);
+  if(st==="bldg") setTimeout(pwBldgDraw_,0);
   if(st==="start") setTimeout(()=>{ const i=$("pwNewName"); if(i) try{ i.focus(); }catch(e){} },50);
 }
 const CS_FILL={MFTIP:"#4caf50", CLTIP:"#1e8a3c", INELIGIBLE:"#9e9e9e", "":"#ffd24a"};
@@ -16234,7 +16372,8 @@ function csRender_(){
     if(_csEd&&_csEd.mode==="pw") return;      // v465: ＋ Set up's names step draws the names being typed
     L.marker(ctr,{interactive:false,keyboard:false,icon:L.divIcon({className:"",iconSize:[120,20],iconAnchor:[60,10],
       html:`<div style="text-align:center;font:700 12px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000">${esc(c.name)}</div>`})}).addTo(csLayer); });   // v418: no " ·?" after a piece without a class (read as an error, Chris 2026-10-13)
-  if(_csEd&&_csEd.mode==="move"){
+  if(_csEd&&(_csEd.mode==="move"||_csEd.mode==="outline")){ csHandles_(t, pcs); return; }      // v466
+  if(false){
     const okeys={}; csOutline_(t).forEach(r=>r.forEach(p=>okeys[cgKey_(p)]=1)); const seen={};
     pcs.forEach(c=>c.rings.forEach(r=>r.forEach(p=>{ const k=cgKey_(p); if(seen[k]) return; seen[k]=1; const fixed=!!okeys[k];
       const mk=L.marker(p,{draggable:!fixed,keyboard:false,icon:L.divIcon({className:"",iconSize:[18,18],iconAnchor:[9,9],
