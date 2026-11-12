@@ -201,6 +201,7 @@ try{ (function(){
   .rail-sub{ display:none; position:absolute; right:58px; top:0; grid-template-columns:repeat(3,52px); gap:6px; padding:5px; border-radius:12px; background:rgba(15,30,13,.72); }
   .map-rail.edit-open .rail-sub{ display:grid; }
   body.bar-open .toast{ bottom:150px; }   /* above an editing bar, not on it */
+  body.pw-open .toast{ bottom:auto; top:calc(64px + env(safe-area-inset-top)); }   /* v465: ＋ Set up's bar is taller — messages at the top */
   .map-rail.edit-open #toolEdit{ border-color:#c8952a; color:#e8b84b; background:#1c2e14; }
   body.bar-open .map-drop, body.bar-open .map-chips, body.bar-open .map-legend{ display:none !important; }   /* an editing bar has the bottom of the screen */
   #dataSheet label:has(input[type=checkbox]), #infoSheet label:has(input[type=checkbox]){ text-transform:none; letter-spacing:0; }
@@ -946,6 +947,7 @@ try{ (function(){
   <div id="fmap"></div>
   <div class="map-rail">
     <!-- tap-to-place button removed: use "＋ Create inventory plot" (crosshair/GPS) instead; tapping conflicted with selecting polygons -->
+    <button class="map-tool" id="toolSetup" type="button" onclick="pwOpen_()" title="Add a property, or change one: its outline, compartments, names and MFTIP classes"><span class="mt-i">＋</span><span class="mt-l">Set up</span></button>
     <button class="map-tool" id="toolFind" type="button" onclick="findOpen_()" title="Find an address or a property"><span class="mt-i">🔎</span><span class="mt-l">Find</span></button>
     <button class="map-tool" id="toolProp" type="button" onclick="propBarOpen_()" title="The property shown on the map: pick it, its details, its maps"><span class="mt-i">🏠</span><span class="mt-l">Property</span></button>
     <button class="map-tool on" id="toolNames" type="button" onclick="namesToggle_()" title="Property names and point symbols on or off"><span class="mt-i">🏷</span><span class="mt-l">Names</span></button>
@@ -1374,7 +1376,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-07 · v464";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-10 · v465";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -7249,6 +7251,7 @@ function initMap(){
      (Samsung Internet, WebViews) do not when a canvas renderer is under the finger, so a short, still touch that is not
      followed by a click within 450 ms is handled the same way (Chris, 2026-10-13: no popup on Android). */
   window.mapTapHandle_=function(ll){ try{
+    if(typeof pwTap_==="function" && pwTap_(ll)) return;                       // v465: ＋ Set up — drawing the outline, or finding a compartment in the names list
     if(typeof rnTap_==="function" && rnTap_(ll)) return;                       // v384: placing a typed road label
     if(typeof taTap_==="function" && taTap_(ll)) return;                       // v407: ringing compartments to give them a tract
     if(typeof csTap_==="function" && csTap_(ll)) return;                       // v387: the compartment layer editor
@@ -10315,6 +10318,7 @@ function mapToolHelp_(){
     `<div><div style="color:#eafae8;font-size:13px">${n}</div>`+
     `<div style="color:#8fae95;font-size:11px;line-height:1.4;margin-top:1px">${d}</div></div></div>`;
   showInfoSheet_("The map tools",
+    row("＋","Set up","Add a property step by step: name it, make its outline (draw it, or load the CLTIP viewer's export), cut it into compartments, then name them and set each one's MFTIP class. On a property already set up it opens its page, where any step can be done again.")+
     row("🏠","Property","The property shown on the map: pick it (the map zooms to it), open its details and MFTIP areas, print its maps, or show every property again after a Find.")+
     row("✎","Edit","Opens the drawing tools in a row: Text, Points, Lines, Draw, Tract and Measure. Tap again to tuck them away.")+
     row("✎","Text","Notes and arrows for the MFTIP maps: one tap for a note, two for an arrow (tail, then head). Size in inches as printed, bold, colour, and which map it goes on.")+
@@ -12118,7 +12122,7 @@ function propRender_(keep){
   let h=`<div style="font-size:12px;color:#a9c9b0;line-height:1.5;margin-bottom:8px">One record per tract. It goes on the MFTIP maps and the area summary. Saved on this phone, and sent to the Sheet when there is signal.</div>`;
   h+=`<label style="display:block;margin:0 0 10px"><span style="display:block;font-size:12px;color:#a9c9b0;margin-bottom:2px">Property (tract)</span>`+
      sel("ppTract",[["","— choose —"]].concat(list.map(x=>[x,x])),t,`onchange="propPick_(this.value)"`)+`</label>`;
-  if(!t){ box.innerHTML=h+`<div style="color:#e8a33a;font-size:13px">Add the tract on the plot card first (Tract / property), then come back here.</div>`; return; }
+  if(!t){ box.innerHTML=h+`<div style="color:#e8a33a;font-size:13px">To add a property, tap <b>＋ Set up</b> at the top of the map's right-hand buttons.</div><button type="button" class="btn submit" style="width:100%;margin-top:8px" onclick="closeDataSheet_();openMap();setTimeout(function(){ pwOpen_(); },80)">＋ Set up a property</button>`; return; }
   const p=propGet_(t)||{};
   h+=inp("ppOwner","Owner",p.owner)+
      inp("ppRoll","Roll number (19 digits)",p.roll,`inputmode="numeric" oninput="propRollHint_()"`)+`<div id="ppRollHint" style="font-size:11px;margin:-4px 0 8px;color:#8fae95"></div>`+
@@ -12270,6 +12274,7 @@ function propBndSet_(rings, what, tract){
   if(!/compartments/.test(what)){ try{ const k=propK_(t); if(PROPS.props[k]) delete PROPS.props[k].bndAuto; }catch(e){} }
   toast("Property outline set from "+what);
   propRender_(true); try{ lioEnsure_(t,false,true); }catch(e){}
+  try{ pwOutlineSaved_(t); }catch(e){}      // v465: ＋ Set up goes on to the compartments
 }
 function propUseFile_(id){ if(!id) return; const f=(boundFiles||[]).find(x=>x.id===id); if(!f) return;
   const rings=[]; (f.features||[]).forEach(ft=>featPolys_(ft).forEach(pg=>pg.forEach(r=>{ if(r&&r.length>=3) rings.push(r); })));   // holes too: the area is worked out even-odd
@@ -12864,7 +12869,7 @@ function propBarOpen_(){ const b=$("propBar"); if(!b) return; try{ findClose_();
   const show=b.style.display!=="block"; b.style.display=show?"block":"none"; const t=$("toolProp"); if(t) t.classList.toggle("on",show); if(show) propBarFill_(); }
 function propBarClose_(){ const b=$("propBar"); if(b) b.style.display="none"; const t=$("toolProp"); if(t) t.classList.remove("on"); }
 function propBarFill_(){ const sel=$("propBarSel"), box=$("propBarBtns"); if(!sel||!box) return; const cur=propActiveTract_(), list=propTracts_();
-  sel.innerHTML=`<option value="">${list.length?"— choose the property to show —":"— no properties yet: load a file or draw an outline —"}</option>`+list.map(t=>`<option value="${esc(t)}"${propK_(t)===propK_(cur)?" selected":""}>${esc(t)}</option>`).join("");
+  sel.innerHTML=`<option value="">${list.length?"— choose the property to show —":"— no properties yet: tap ＋ Set up —"}</option>`+list.map(t=>`<option value="${esc(t)}"${propK_(t)===propK_(cur)?" selected":""}>${esc(t)}</option>`).join("");
   const B=(fn,label,dis)=>`<button type="button" ${dis?"disabled":""} onclick="${fn}" style="padding:9px 6px;border-radius:8px;border:1px solid ${dis?"#2a4030":"#2f7a44"};background:${dis?"#14201a":"#123a1c"};color:${dis?"#6f8a76":"#e8f0e6"};font:inherit;font-size:13px">${label}</button>`;
   const has=!!cur;
   box.innerHTML=B("propBarClose_();openPropSheet_(propActiveTract_())","🏠 Details & areas",!has)+B("propZoomTo_()","🔍 Zoom to it",!has)+
@@ -15708,7 +15713,8 @@ function csEdit_(tract){
   csRender_(); csBar_(); csZoom_();
 }
 function csZoom_(){ try{ const b=[]; csOf_(_csEd.tract).forEach(c=>c.rings[0].forEach(p=>b.push(p))); if(b.length&&fmap) fmap.fitBounds(b,{padding:[30,30]}); }catch(e){} }
-function csDone_(){ _csEd=null; csTmpClear_(); csBarRemove_(); csRender_(); openPropSheet_(propActiveTract_()); }
+function csDone_(){ if(_pw && _pw.step==="cut"){ _csEd=null; csTmpClear_(); csBarRemove_(); csRender_(); pwGo_("names"); return; }      // v465: ＋ Set up goes on to the names
+  _csEd=null; csTmpClear_(); csBarRemove_(); csRender_(); openPropSheet_(propActiveTract_()); }
 let _csBarEl=null;
 function csBarRemove_(){ try{ document.body.classList.remove("bar-open"); }catch(e){} const bar=$("csBar")||_csBarEl; _csBarEl=null; try{ if(bar&&bar.parentNode) bar.parentNode.removeChild(bar); else if(bar&&bar.remove) bar.remove(); }catch(e){} }
 function csTmpClear_(){ try{ _csTmp.forEach(m=>fmap.removeLayer(m)); }catch(e){} _csTmp=[]; }
@@ -15716,7 +15722,7 @@ function csMode_(m){ if(!_csEd) return; _csEd.mode=m; _csEd.line=[]; _csEd.pick=
   toast(m==="cut"?"Tap points across the piece, starting and ending outside it (or on its edge) — then Apply cut"
        :m==="merge"?"Tap the two pieces to join"
        :m==="move"?"Drag a corner. Corners of the property outline stay put; one on the outline's edge slides along it"
-       :"Tap a piece to name it and set its class"); }
+       :(_pw&&_pw.step==="cut")?"Tap ✂ Cut for another line — or ✓ Next: names when every compartment is cut":"Tap a piece to name it and set its class"); }
 /* ---------- v407 — ring compartments on the map and give them a tract (Chris, 2026-10-12) ----------
    ⬚ Tract on the rail: tap a ring around the compartments, Select takes every compartment whose centre is inside it
    (boundary-file features, drawn areas, and the pieces of the compartment layer), then a tract is chosen or typed.
@@ -15806,7 +15812,7 @@ function csBar_(){
   if(m==="cut") h+=`<div style="margin-bottom:6px;color:#cfe3d2">${_csEd.line.length} point${_csEd.line.length===1?"":"s"} on the cut line${_csEd.line.length>=3?" · or close it into an island inside a piece":""}</div><div style="display:flex;gap:6px">`+
      B("csApplyCut_()","✂ Apply cut",true)+B("csApplyIsland_()","◌ Island",_csEd.line.length>=3)+B("csLineUndo_()","↶ Point")+B("csMode_('idle')","Cancel")+`</div>`;
   else h+=`<div style="display:flex;gap:6px;flex-wrap:wrap">`+B("csMode_('cut')","✂ Cut",m==="cut")+B("csMode_('merge')","⊕ Merge",m==="merge")+B("csMode_('move')","✥ Corners",m==="move")+
-     B("csUndo_()","↶ Undo")+B("csDone_()","✓ Done")+`</div>`+(m==="idle"?`<div style="margin-top:6px;color:#a9c9b0;font-size:12px">Tap a piece to name it and set its class.</div>`:"");
+     B("csUndo_()","↶ Undo")+B("csDone_()",_pw&&_pw.step==="cut"?"✓ Next: names ▸":"✓ Done",!!(_pw&&_pw.step==="cut"))+`</div>`+(m==="idle"?`<div style="margin-top:6px;color:#a9c9b0;font-size:12px">Tap a piece to name it and set its class.</div>`:"");
   bar.innerHTML=h;
 }
 /* A tap snaps to a corner of a piece within 14 px, so a cut can start exactly where an earlier one ended. */
@@ -16001,6 +16007,195 @@ function csAttrSave_(id){ const n=$("csName"), k=$("csCls"), tsel=$("csTract"); 
 function csRemove_(id){ const c=(PROPS.shapes||{})[id]; if(!c) return; const ha=cgPieceHa_(c.rings);
   if(!confirm("Remove the piece "+c.name+" ("+ha.toFixed(2)+" ha) from "+c.tract+"? Its neighbours keep their shape, so the property outline will have a gap there until it is redrawn or they are joined. Undo is on the compartment layer bar.")) return;
   csCommit_(c.tract, csOf_(c.tract).filter(x=>x.id!==id), "removed "+c.name); closeDataSheet_(); csRender_(); toast("Removed "+c.name); }
+/* ================= v465 — ＋ Set up: a property step by step (Chris, 2026-11-10) =================
+   "a tool on the right side that allows a user to add a property … by loading the CLTIP boundary … or by drawing it. Once the
+   boundary is drawn, the app asks if you'd like to create compartments through slicing up that layer … then the app allows the user
+   to assign compartment names and managed forest eligibility to each compartment … also allow for editing compartments … no
+   slivers between polygons." The pieces were already in the app (the outline, the cutter, the names and classes) but scattered over
+   the property sheet, the 🏠 bar and the Edit row; this walks a newcomer through them in order, on the map, one bar at a time:
+     1 name   2 outline (draw it / CLTIP viewer / a loaded file)   3 divide it? (✂ the cutter, or the whole property as one)
+     4 names & MFTIP class for every compartment (a series from the first name: 113a → 113b, W-1 → W-2)   5 the property's page.
+   A property already set up opens at its page, where each step can be done again. The compartments are always cut from the
+   outline, so they fit it exactly — no slivers, no overlaps. */
+let _pw=null, _pwBarEl=null, _pwTmp=[];
+function pwOpen_(tract){
+  if(_pw && tract==null){ pwClose_(); return; }
+  if(_csEd && !(_pw && _pw.step==="cut")){ toast("Finish the compartment editor first (✓ Done on its bar)",true); return; }
+  try{ propBarClose_(); }catch(e){} try{ findClose_(); }catch(e){} try{ taCancel_(); }catch(e){} try{ mnCancel_(true); ftCancel_(true); lnCancel_(true); }catch(e){}
+  try{ const r=document.querySelector(".map-rail"); if(r) r.classList.remove("edit-open"); }catch(e){}
+  _pw={step:"start", tract:"", pts:[]};
+  const b=$("toolSetup"); if(b) b.classList.add("on");
+  if(tract){ pwPick_(tract); return; }
+  pwBar_();
+}
+function pwClose_(){ pwTmpClear_(); pwBarRemove_(); if(_csEd && _csEd.mode==="pw"){ _csEd=null; try{ csRender_(); }catch(e){} }
+  _pw=null; const b=$("toolSetup"); if(b) b.classList.remove("on"); }
+function pwTmpClear_(){ try{ _pwTmp.forEach(m=>fmap.removeLayer(m)); }catch(e){} _pwTmp=[]; }
+function pwBarRemove_(){ try{ document.body.classList.remove("bar-open","pw-open"); }catch(e){} const bar=$("pwBar")||_pwBarEl; _pwBarEl=null; try{ if(bar&&bar.parentNode) bar.parentNode.removeChild(bar); }catch(e){} }
+function pwGo_(step){ if(!_pw) return; pwTmpClear_();
+  if(_pw.step==="names" && step!=="names" && _csEd && _csEd.mode==="pw"){ _csEd=null; try{ csRender_(); }catch(e){} }
+  _pw.step=step; if(step==="draw") _pw.pts=[];
+  if(step==="cut"){ pwBarRemove_(); const t=_pw.tract; csEdit_(t); if(_csEd){ csMode_("cut"); toast("Tap points across the property, starting and ending outside it — then ✂ Apply cut. Repeat for each line. ✓ Next when every compartment is cut.",false); } else pwGo_("hub"); return; }
+  if(step==="names"){ _csEd={tract:_pw.tract, mode:"pw", line:[], pick:null}; try{ csRender_(); }catch(e){} }
+  pwBar_();
+  if(step==="names"||step==="divide"||step==="hub") pwFit_(); }
+/* the property in the part of the map the bar leaves clear */
+function pwFit_(){ try{ const t=_pw&&_pw.tract; if(!t||!fmap) return; const pts=[]; ((propGet_(t)||{}).boundary||[]).forEach(r=>r.forEach(q=>pts.push(q))); csOf_(t).forEach(c=>c.rings[0].forEach(q=>pts.push(q)));
+  if(pts.length<2) return; const bar=$("pwBar"), bh=bar?bar.getBoundingClientRect().height:0;
+  fmap.fitBounds(pts,{paddingTopLeft:[16,70], paddingBottomRight:[70, Math.round(bh)+24], animate:false}); }catch(e){} }
+/* Is the tap ours? (drawing the outline, or picking a compartment in the names list) */
+function pwTap_(ll){ if(!_pw) return false;
+  if(_pw.step==="draw"){ _pw.pts.push([+ll.lat,+ll.lng]); pwDraw_(); pwBar_(); return true; }
+  if(_pw.step==="names"){ const pc=csPieceAt_(ll.lat,ll.lng); if(pc) pwFocus_(pc.id,true); return true; }
+  return false; }
+function pwDraw_(){ pwTmpClear_(); if(!_pw||!fmap||!window.L) return; const pts=_pw.pts;
+  try{ if(pts.length>=3) _pwTmp.push(L.polygon(pts,{color:"#ff3b30",weight:3,fillColor:"#ff3b30",fillOpacity:.12,interactive:false}).addTo(fmap));
+    else if(pts.length===2) _pwTmp.push(L.polyline(pts,{color:"#ff3b30",weight:3,interactive:false}).addTo(fmap));
+    pts.forEach((q,i)=>_pwTmp.push(L.circleMarker(q,{radius:i===0?7:5,color:"#fff",weight:2,fillColor:"#ff3b30",fillOpacity:1,interactive:false}).addTo(fmap))); }catch(e){} }
+function pwUndoPt_(){ if(!_pw) return; _pw.pts.pop(); pwDraw_(); pwBar_(); }
+function pwFinishDraw_(){ if(!_pw) return; const pts=_pw.pts;
+  if(pts.length<3){ toast("Tap at least three corners",true); return; }
+  try{ const P=cgProj_(pts[0][0],pts[0][1]); if(cgSelfCross_(pts.map(cgLL_),P)){ toast("The outline crosses itself — take back the last corners (↶) and tap them again",true); return; } }catch(e){}
+  pwSetOutline_([pts.map(q=>[q[0],q[1]])], "the outline drawn on the map"); }
+/* the outline saved, from any source: then the next question */
+function pwSetOutline_(rings, what){ const t=_pw&&_pw.tract; if(!t) return; const before=JSON.stringify((propGet_(t)||{}).boundary||null);
+  _pw.hold=true; try{ propBndSet_(rings, what, t); }finally{ _pw.hold=false; }
+  if(JSON.stringify((propGet_(t)||{}).boundary||null)===before && before!=="null") return;      // refused (too many parts)
+  pwTmpClear_(); pwGo_("divide"); }
+/* propBndSet_ calls this — the CLTIP viewer's export is loaded from its own sheet */
+function pwOutlineSaved_(t){ if(!_pw || _pw.hold || propK_(_pw.tract)!==propK_(t)) return; if(_pw.step!=="outline") return; pwTmpClear_(); pwGo_("divide"); }
+function pwUseFile_(id){ if(!id||!_pw) return; const f=(boundFiles||[]).find(x=>x.id===id); if(!f) return;
+  const rings=[]; (f.features||[]).forEach(ft=>featPolys_(ft).forEach(pg=>pg.forEach(r=>{ if(r&&r.length>=3) rings.push(r); })));
+  if(!rings.length){ toast("That file has no polygons to use as an outline",true); return; }
+  pwSetOutline_(rings, f.name); }
+function pwName_(){ const el=$("pwNewName"); const v=String(el?el.value:"").trim().slice(0,60);
+  if(!v){ toast("Type the property's name",true); return; }
+  const same=propTracts_().find(x=>propK_(x)===propK_(v));
+  if(same){ if(confirm(same+" is already a property. Open it?")) pwPick_(same); return; }
+  addTract(v); propSetActive_(v); _pw.tract=v; _pw.isNew=true; try{ findPropFill_(); }catch(e){}
+  pwGo_("outline"); }
+function pwPick_(t){ if(!t||!_pw) return; _pw.tract=t; _pw.isNew=false; propSetActive_(t); pwGo_("hub"); if(!((propGet_(t)||{}).boundary||[]).length&&!csOf_(t).length) try{ propZoomTo_(t,true); }catch(e){} }
+/* the whole property as one compartment */
+function pwWhole_(){ const t=_pw.tract; if(csOf_(t).length && !confirm("Replace the "+csOf_(t).length+" compartment pieces with one piece covering the whole property?")) return;
+  if(csOf_(t).length) csCommit_(t, [], "the whole property as one");
+  if(!csFromOutline_(t)) return;
+  pwGo_("names"); }
+function pwCutAgain_(){ const t=_pw.tract;
+  if(csOf_(t).length && !confirm("Start the compartments again from the outline? The "+csOf_(t).length+" pieces made so far are replaced (Undo on the cutting bar brings them back).")) return;
+  if(csOf_(t).length) csCommit_(t, [], "start again from the outline");
+  pwGo_("cut"); }
+/* ---- names: in reading order (rows north to south, each west to east), and a series from the first name ---- */
+function pwPieces_(t){ const pcs=csOf_(t).map(c=>({c, ctr:csCtr_(c), ha:cgPieceHa_(c.rings)})); if(!pcs.length) return [];
+  let n=-1/0, s=1/0; pcs.forEach(p=>{ n=Math.max(n,p.ctr[0]); s=Math.min(s,p.ctr[0]); });
+  const bands=Math.max(1,Math.round(Math.sqrt(pcs.length))), h=(n-s)/bands||1;
+  pcs.forEach(p=>{ p.band=Math.min(bands-1,Math.floor((n-p.ctr[0])/h)); });
+  return pcs.sort((a,b)=>a.band-b.band||a.ctr[1]-b.ctr[1]); }
+function pwNext_(s){ s=String(s);
+  let m=/^(.*?)(\d+)$/.exec(s); if(m){ const w=m[2].length, v=String(+m[2]+1); return m[1]+(m[2][0]==="0"&&v.length<w?v.padStart(w,"0"):v); }
+  m=/^(.*?)([A-Za-z]+)$/.exec(s); if(m){ const up=m[2]===m[2].toUpperCase(), a=m[2].toLowerCase().split(""); let i=a.length-1;
+    while(i>=0){ if(a[i]==="z"){ a[i]="a"; i--; } else { a[i]=String.fromCharCode(a[i].charCodeAt(0)+1); break; } } if(i<0) a.unshift("a");
+    const t=a.join(""); return m[1]+(up?t.toUpperCase():t); }
+  return s+"-2"; }
+function pwSeries_(first, n){ const out=[]; let c=String(first).trim(); for(let i=0;i<n;i++){ out.push(c); c=pwNext_(c); } return out; }
+function pwFill_(from){ const rows=[...document.querySelectorAll("#pwRows [data-pc]")]; if(!rows.length) return;
+  let i0=0, first="";
+  if(from==null){ first=String(($("pwFirst")||{}).value||"").trim(); if(!first){ toast("Type the first name — e.g. 113a, W-1 or P-1",true); return; } }
+  else { i0=from; first=String((rows[from].querySelector("input")||{}).value||"").trim(); if(!first){ toast("Type this compartment's name first",true); return; } }
+  pwSeries_(first, rows.length-i0).forEach((v,k)=>{ const inp=rows[i0+k].querySelector("input"); if(inp) inp.value=v; });
+  pwLabels_(); }
+function pwClassAll_(){ const v=String(($("pwClsAll")||{}).value||""); if(v==="-") return; document.querySelectorAll("#pwRows select").forEach(s=>{ s.value=v; }); }
+/* the names typed so far, on the map */
+function pwLabels_(){ pwTmpClear_(); if(!fmap||!window.L) return; const rows=[...document.querySelectorAll("#pwRows [data-pc]")];
+  rows.forEach(r=>{ const c=(PROPS.shapes||{})[r.getAttribute("data-pc")]; if(!c) return; const v=String((r.querySelector("input")||{}).value||"").trim();
+    try{ _pwTmp.push(L.marker(csCtr_(c),{interactive:false,keyboard:false,icon:L.divIcon({className:"",iconSize:[120,22],iconAnchor:[60,11],
+      html:`<div style="text-align:center;font:800 13px system-ui;color:#ffd24a;text-shadow:0 0 3px #000,0 0 3px #000,0 0 3px #000">${esc(v||"?")}</div>`})}).addTo(fmap)); }catch(e){} });
+  if(_pw&&_pw.focus){ const c=(PROPS.shapes||{})[_pw.focus]; if(c) try{ _pwTmp.push(L.polygon(c.rings,{color:"#ffd24a",weight:5,fillColor:"#ffd24a",fillOpacity:.3,interactive:false}).addTo(fmap)); }catch(e){} } }
+function pwFocus_(id, fromMap){ if(!_pw) return; _pw.focus=id; pwLabels_();
+  document.querySelectorAll("#pwRows [data-pc]").forEach(r=>{ const on=r.getAttribute("data-pc")===id; r.style.borderColor=on?"#ffd24a":"#2a4030";
+    if(on&&fromMap){ try{ r.scrollIntoView({block:"nearest"}); }catch(e){} const i=r.querySelector("input"); if(i) try{ i.focus(); i.select(); }catch(e){} } });
+  if(!fromMap){ const c=(PROPS.shapes||{})[id]; try{ const ctr=csCtr_(c); if(!fmap.getBounds().contains(ctr)) fmap.panTo(ctr); }catch(e){} } }
+function pwSaveNames_(){ const t=_pw.tract, rows=[...document.querySelectorAll("#pwRows [data-pc]")];
+  const want=rows.map(r=>({id:r.getAttribute("data-pc"), name:String((r.querySelector("input")||{}).value||"").trim().slice(0,60), cls:String((r.querySelector("select")||{}).value||"")}));
+  const blank=want.filter(w=>!w.name).length; if(blank){ toast(blank+" compartment"+(blank===1?" has":"s have")+" no name yet",true); return; }
+  const cnt={}; want.forEach(w=>{ cnt[propK_(w.name)]=(cnt[propK_(w.name)]||[]).concat(w.name); });
+  const dup=Object.values(cnt).filter(a=>a.length>1).map(a=>a[0]);
+  if(dup.length && !confirm("Pieces with the same name count as one compartment: "+dup.join(", ")+". Keep them that way?")) return;
+  /* every rename in one step (one Undo, one move of the plots), then each compartment's class */
+  const by={}; want.forEach(w=>by[w.id]=w); const renamed=[];
+  const list=csOf_(t).map(c=>{ const w=by[c.id]; if(w && c.name!==w.name){ renamed.push([c.name,w.name]); return Object.assign({},c,{name:w.name}); } return c; });
+  if(renamed.length) csCommit_(t, list, "names");
+  try{ renamed.forEach(([o,nw])=>{ if(propK_(o)===propK_(nw)) return; const of=cfGet_(t,o); if(of&&!cfGet_(t,nw)) cfSet_(t,nw,of.fields,of.source); if(of&&!csOf_(t).some(x=>propK_(x.name)===propK_(o))) cfSet_(t,o,null); }); }catch(e){}      // v443: the layer's fields follow the name
+  const cls={}, recs=[]; want.forEach(w=>{ const k=propK_(w.name); if(cls[k]!=null) return; cls[k]=w.cls; if(String((propComp_(t,w.name)||{}).cls||"")!==w.cls) recs.push({name:w.name, cls:w.cls}); });
+  if(recs.length) propSaveLocal_({tract:t}, recs);
+  const n=renamed.length+recs.length;
+  toast(n?"Names and classes saved for "+t:"Nothing changed"); pwGo_("hub"); }
+/* ---- the bar ---- */
+function pwBar_(){
+  if(!_pw){ pwBarRemove_(); return; }
+  let bar=$("pwBar")||_pwBarEl; if(!bar){ bar=document.createElement("div"); bar.id="pwBar"; document.body.appendChild(bar); } _pwBarEl=bar; try{ document.body.classList.add("bar-open","pw-open"); }catch(e){}
+  bar.style.cssText="position:fixed;left:8px;right:8px;bottom:10px;z-index:5450;max-height:46vh;overflow-y:auto;background:rgba(16,36,15,.97);border:1px solid #4caf50;border-radius:12px;padding:10px;color:#eafae8;font:13px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.5)";
+  const t=_pw.tract, st=_pw.step, B=(fn,label,main,dis)=>`<button type="button" class="btn ${main?"submit":"ghost"}" ${dis?"disabled":""} style="flex:1;min-width:0;padding:9px 6px;font-size:13px" onclick="${fn}">${label}</button>`;
+  const big=(fn,icon,label,sub,dis)=>`<button type="button" ${dis?"disabled":""} onclick="${fn}" style="display:block;width:100%;text-align:left;padding:10px 12px;margin:0 0 6px;border-radius:10px;border:1px solid ${dis?"#2a4030":"#2f7a44"};background:${dis?"#14201a":"#123a1c"};color:${dis?"#6f8a76":"#e8f0e6"};font:inherit;font-size:14px"><span style="font-size:17px">${icon}</span> ${label}${sub?`<div style="color:#8fae95;font-size:11px;margin-top:2px;line-height:1.35">${sub}</div>`:""}</button>`;
+  const steps=["Name","Outline","Compartments","Names & class"], at={start:0,outline:1,draw:1,divide:2,cut:2,names:3}[st];
+  const dots=at==null?"":`<div style="display:flex;gap:4px;margin:2px 0 8px">${steps.map((s,i)=>`<div style="flex:1;text-align:center;font-size:10px;padding:3px 0;border-radius:6px;background:${i<at?"#2f7a44":i===at?"#c8952a":"#1d3320"};color:${i===at?"#0b160a":"#cfe3d2"}">${i+1} ${s}</div>`).join("")}</div>`;
+  const head=(title)=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><b style="flex:1;font-size:15px">${title}</b><button type="button" onclick="pwClose_()" title="Close" style="border:0;background:none;color:#a9c9b0;font-size:20px;line-height:1;padding:0 4px">✕</button></div>`;
+  let h="";
+  if(st==="start"){ const list=propTracts_();
+    h=head("Set up a property")+dots+
+      `<div style="color:#cfe3d2;margin-bottom:6px;line-height:1.45">Name the property, then give it an outline and divide it into compartments.</div>`+
+      `<input id="pwNewName" type="text" placeholder="Property name — e.g. Smith Tract" maxlength="60" onkeydown="if(event.key==='Enter') pwName_()" style="width:100%;box-sizing:border-box;font-size:16px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6;margin-bottom:6px">`+
+      `<div style="display:flex;gap:6px">`+B("pwName_()","Next ▸",true)+`</div>`+
+      (list.length?`<div style="border-top:1px solid #2a4030;margin:10px 0 6px;padding-top:8px;color:#a9c9b0">…or change one already set up</div>`+
+        `<select id="pwPickSel" onchange="pwPick_(this.value)" style="width:100%;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"><option value="">— choose the property —</option>${list.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join("")}</select>`:""); }
+  else if(st==="outline"){ const has=(propGet_(t)||{}).boundary, files=(boundFiles||[]);
+    h=head(esc(t)+" — the outline")+dots+`<div style="color:#cfe3d2;margin-bottom:8px;line-height:1.45">How do you want to make the property's outline?</div>`+
+      big("pwGo_('draw')","✏️","Draw it on the map","Tap the property's corners in order. Zoom in on the aerial photo first — 🔎 Find an address if you need to.")+
+      big("cltipOpen_(_pw.tract)","🗺","From the CLTIP viewer","Trace the parcel in the Ministry's viewer, export it, and load the export here.")+
+      (files.length?`<div style="margin:0 0 6px"><select onchange="pwUseFile_(this.value)" style="width:100%;font-size:15px;padding:9px;border-radius:10px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6"><option value="">📂 Use a file I've loaded…</option>${files.map(f=>`<option value="${esc(f.id)}">${esc(f.name)}</option>`).join("")}</select></div>`:"")+
+      `<div style="display:flex;gap:6px">`+(has&&has.length?B("pwGo_('divide')","Keep the outline it has ▸",true):"")+B(_pw.isNew?"pwGo_('start')":"pwGo_('hub')","◂ Back")+`</div>`; }
+  else if(st==="draw"){ const n=_pw.pts.length;
+    h=head(esc(t)+" — draw the outline")+dots+`<div style="color:#cfe3d2;margin-bottom:8px;line-height:1.45">${n?n+" corner"+(n===1?"":"s")+" — keep tapping round the property; the outline closes itself back to the first corner.":"Tap the first corner of the property on the map, then each corner in order round it."}</div>`+
+      `<div style="display:flex;gap:6px">`+B("pwFinishDraw_()","✓ Finish outline",n>=3,n<3)+B("pwUndoPt_()","↶ Corner",false,!n)+B("pwGo_('outline')","Cancel")+`</div>`; }
+  else if(st==="divide"){ const p=propGet_(t)||{}, ha=propOutlineHa_(p.boundary||[]), n=csOf_(t).length, chk=n?csCheck_(t):{ok:true};
+    h=head(esc(t)+" — compartments")+dots+`<div style="color:#cfe3d2;margin-bottom:8px;line-height:1.45">Outline saved: <b>${(ha*HA_AC).toFixed(2)} ac</b> (${ha.toFixed(2)} ha).`+
+      (n?` It has ${n} compartment piece${n===1?"":"s"} already${chk.ok?".":" — <span style='color:#ffd24a'>they no longer fit this outline.</span>"}`:"")+`<br>Divide it into compartments?</div>`+
+      big(n?"pwCutAgain_()":"pwGo_('cut')","✂","Yes — cut it into compartments","Draw lines across the property; each line splits it. The compartments fit the outline exactly, with no gaps or slivers.")+
+      big("pwWhole_()","⬚","No — the whole property is one compartment","")+
+      (n&&chk.ok?big("pwGo_('names')","🏷","Keep the "+n+" pieces it has","Go on to their names and MFTIP classes."):"")+
+      `<div style="display:flex;gap:6px">`+B("pwGo_('outline')","◂ Change the outline")+`</div>`; }
+  else if(st==="names"){ const pcs=pwPieces_(t), opt=(v)=>MFTIP_CLASSES.map(o=>`<option value="${esc(o[0])}"${String(v||"")===o[0]?" selected":""}>${esc(o[1])}</option>`).join("");
+    const firstGuess=pcs.length&&!/^C-\d+$/.test(pcs[0].c.name)?pcs[0].c.name:"";
+    h=head(esc(t)+" — names & MFTIP class")+dots+
+      `<div style="color:#cfe3d2;margin-bottom:6px;line-height:1.45">${pcs.length} compartment${pcs.length===1?"":"s"}, in order from the top left. Tap one on the map to find it here.</div>`+
+      `<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><input id="pwFirst" type="text" value="${esc(firstGuess)}" placeholder="First name: 113a, W-1, P-1…" style="flex:1;min-width:0;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
+      `<button type="button" class="btn ghost" style="padding:8px 10px;font-size:13px" onclick="pwFill_()">Name all in order</button></div>`+
+      `<div style="display:flex;gap:6px;align-items:center;margin-bottom:8px"><select id="pwClsAll" style="flex:1;min-width:0;font-size:15px;padding:7px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"><option value="-">Class for all…</option>${opt("-")}</select>`+
+      `<button type="button" class="btn ghost" style="padding:8px 10px;font-size:13px" onclick="pwClassAll_()">Set all</button></div>`+
+      `<div id="pwRows">`+pcs.map((p,i)=>{ const rec=propComp_(t,p.c.name)||{};
+        return `<div data-pc="${esc(p.c.id)}" onclick="pwFocus_('${esc(p.c.id)}')" style="border:1px solid #2a4030;border-radius:8px;padding:6px;margin-bottom:5px">`+
+          `<div style="display:flex;gap:6px;align-items:center"><span style="width:20px;color:#8fae95;font-size:11px;text-align:right">${i+1}</span>`+
+          `<input type="text" value="${esc(/^C-\d+$/.test(p.c.name)?"":p.c.name)}" placeholder="${esc(p.c.name)}" maxlength="60" oninput="pwLabels_()" style="flex:1;min-width:0;font-size:16px;padding:7px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
+          `<span style="color:#a9c9b0;font-size:11px;white-space:nowrap">${(p.ha*HA_AC).toFixed(2)} ac</span>`+
+          `<button type="button" title="Continue the series from here" onclick="event.stopPropagation();pwFill_(${i})" style="padding:6px 8px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font-size:13px">↓</button></div>`+
+          `<select style="width:100%;margin-top:5px;font-size:15px;padding:6px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">${opt(rec.cls)}</select></div>`; }).join("")+`</div>`+
+      `<div style="font-size:11px;color:#8fae95;margin:2px 0 8px;line-height:1.4">↓ continues the series from that compartment down — e.g. type W-1 on the first wetland and tap ↓. Two pieces with the same name count as one compartment.</div>`+
+      `<div style="display:flex;gap:6px">`+B("pwSaveNames_()","✓ Save",true)+B("pwGo_('cut')","✂ Cut more")+B("pwGo_('hub')","Later")+`</div>`; }
+  else if(st==="hub"){ const p=propGet_(t)||{}, b=Array.isArray(p.boundary)?p.boundary:[], ha=b.length?propOutlineHa_(b):0, pcs=csOf_(t), chk=pcs.length?csCheck_(t):{ok:true};
+    const names={}; pcs.forEach(c=>names[propK_(c.name)]=c.name); const nComp=Object.keys(names).length, unnamed=pcs.filter(c=>/^C-\d+$/.test(c.name)).length;
+    const noCls=Object.values(names).filter(n=>!(propComp_(t,n)||{}).cls).length;
+    let byCls=""; try{ if(pcs.length){ const S=propSummary_(t), A=x=>(x&&x.ac)||0; byCls=["MFTIP","CLTIP","INELIGIBLE",""].filter(k=>S.byClass[k]&&S.byClass[k].n).map(k=>`${PROP_CLS_LABEL[k]} ${A(S.byClass[k]).toFixed(2)} ac`).join(" · "); } }catch(e){}
+    const row=(ok,label,state,btns)=>`<div style="border:1px solid #2a4030;border-radius:10px;padding:8px;margin-bottom:6px"><div style="display:flex;gap:6px;align-items:baseline"><span style="color:${ok?"#7fd88a":"#e8b84b"}">${ok?"✓":"○"}</span><b style="flex:1">${label}</b></div><div style="color:#cfe3d2;font-size:12px;margin:2px 0 6px 18px;line-height:1.4">${state}</div><div style="display:flex;gap:6px">${btns}</div></div>`;
+    h=head(esc(t))+
+      row(b.length,"1 Outline",b.length?`${(ha*HA_AC).toFixed(2)} ac (${ha.toFixed(2)} ha)`:"Not made yet",B("pwGo_('outline')",b.length?"Change the outline…":"Make the outline ▸",!b.length))+
+      row(pcs.length&&chk.ok,"2 Compartments",!b.length?"Make the outline first":!pcs.length?"Not divided yet":(nComp+" compartment"+(nComp===1?"":"s")+(pcs.length!==nComp?" ("+pcs.length+" pieces)":""))+(chk.ok?"":` — <span style="color:#ffd24a">${chk.over?"some pieces overlap":"they no longer fit the outline"}</span>`),
+        pcs.length?B("pwGo_('cut')","✂ Cut, join or move corners")+B("pwCutAgain_()","Start again"):B("pwGo_('divide')","Divide it ▸",true,!b.length))+
+      row(pcs.length&&!unnamed&&!noCls,"3 Names & MFTIP class",!pcs.length?"Divide it first":(unnamed?unnamed+" not named yet":"All named")+" · "+(noCls?noCls+" without a class":"every one has a class")+(byCls?`<br>${byCls}`:""),B("pwGo_('names')","🏷 Names & classes",!!pcs.length&&(unnamed||noCls),!pcs.length))+
+      `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">`+B("pwClose_();_ppTract=propActiveTract_();openPropSheet_(propActiveTract_())","🏠 Owner, roll no. & more")+B("pwClose_();mmMenuShow_()","🖨 Make a map",false,!b.length)+`</div>`+
+      `<div style="display:flex;gap:6px;margin-top:6px">`+B("pwFit_()","🔍 Zoom to it")+B("pwClose_()","✓ Close",true)+`</div>`; }
+  bar.innerHTML=h; if(bar.getAttribute("data-top")!==st){ bar.scrollTop=0; bar.setAttribute("data-top",st); }
+  if(st==="names") setTimeout(pwLabels_,0);
+  if(st==="start") setTimeout(()=>{ const i=$("pwNewName"); if(i) try{ i.focus(); }catch(e){} },50);
+}
 const CS_FILL={MFTIP:"#4caf50", CLTIP:"#1e8a3c", INELIGIBLE:"#9e9e9e", "":"#ffd24a"};
 /* v444: what the compartment outlines on the map were drawn from — the pieces (by identity of their shapes) and the style */
 let _csSig=null; const _csRid=new WeakMap(); let _csRn=0;
@@ -16036,6 +16231,7 @@ function csRender_(){
       :{color:MAP_STYLE.compColor, weight:MAP_STYLE.compWidth, fillColor:MAP_STYLE.compFill, fillOpacity:(typeof MAP_ALPHA!=="undefined"?MAP_ALPHA.fill:10)/100, smoothFactor:2, interactive:false}).addTo(csLayer);
     const ctr=c.rings[0].reduce((a,p)=>[a[0]+p[0]/c.rings[0].length,a[1]+p[1]/c.rings[0].length],[0,0]);
     if(!_csEd){ try{ if(vb&&vb.contains&&!vb.contains(ctr)) return; }catch(e){} if(++nLbl>400) return; }      // v436: names in view only
+    if(_csEd&&_csEd.mode==="pw") return;      // v465: ＋ Set up's names step draws the names being typed
     L.marker(ctr,{interactive:false,keyboard:false,icon:L.divIcon({className:"",iconSize:[120,20],iconAnchor:[60,10],
       html:`<div style="text-align:center;font:700 12px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000">${esc(c.name)}</div>`})}).addTo(csLayer); });   // v418: no " ·?" after a piece without a class (read as an error, Chris 2026-10-13)
   if(_csEd&&_csEd.mode==="move"){
