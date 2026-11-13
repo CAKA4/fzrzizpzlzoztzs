@@ -1376,7 +1376,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-12 · v466";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-13 · v467";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -6924,6 +6924,7 @@ function sizeClassHtml_(s, area){
 }
 function renderSummary(){
   { const t=$("sumFreshTxt"); if(t) t.innerHTML=freshnessLine_(); }
+  try{ rgPrescFetch_([...new Set(sumPlots_().map(sumTractOf_).filter(Boolean))]); }catch(e){}      // v467: the Sheet's plantation prescriptions
   const inclSmall=summaryInclSmall;
   const base=sumPlots_();
   const v=$("summaryStand").value, plots = v==="__all__"?base.slice():base.filter(p=>p.STANDID===v), s=computeStand(plots, inclSmall);
@@ -6946,10 +6947,95 @@ function renderSummary(){
       <div class="metric"><div class="k">Total vol/ha</div><div class="v">${f(s.vol,0)}<small> m³</small></div></div>
     </div>
     <div style="margin-top:4px"><b>Species — by basal area</b>${comp}</div>
+    ${rgHtml_(plots, v)}
     ${sizeClassHtml_(s)}
     ${hab}
     <div class="note">Live-tree metrics (BA, stems, QMD, composition, volume): DBH ≥ ${inclSmall?"6":"10"} cm. BAF ${BAF.toFixed(1)} variable-radius plots. Volume = Pettawawa total stem volume — height modelled from DBH per species (Bonnor &amp; Magnussen 1986)${s.vol?` · ≈ ${(s.vol*M3_TO_CORDS).toFixed(1)} cords/ha`:""}. Species outside the equation set default to Pr (conifer) or Mh (hardwood).${_sumExcluded?` <b>${_sumExcluded} plot${_sumExcluded>1?"s":""} left out</b> (marked no data collected).`:""}</div>`;
 }
+/* ================= v467 — regeneration and survival in the Stand summary (Chris, 2026-11-13) =================
+   "add the regeneration data/survival assessment results to the stand summary of the view analysis in the tools menu."
+   Worked out on the phone from the plots, by the Sheet's own rules (summarizeStand_ / plantStats_ in Code.gs):
+   - the 10 m² sub-plot: stems × 1000 per ha; a plot with no regeneration counts as 0;
+   - buckthorn (Bt) is counted and shown but never toward stocking;
+   - saplings 6–8 cm from the prism tally (BAF / tree basal area);
+   - stocking index = advance × 0.5 + early × 0.33 + saplings; ≥ 2000 Adequately, ≥ 1000 Moderately, else Understocked;
+   - survival, only for a compartment with a prescribed density (the Sheet's Plantation Prescriptions, or the one typed in
+     the report panel): the mean stems/ha of its plots — of the planted species when they are listed — with a 95 %
+     confidence interval (t), as a percentage of the prescription. */
+const RG_EXCL_={Bt:1, bt:1};
+const RG_T975_=[0,12.706,4.303,3.182,2.776,2.571,2.447,2.365,2.306,2.262,2.228,2.201,2.179,2.160,2.145,2.131,2.120,2.110,2.101,2.093,2.086,2.080,2.074,2.069,2.064,2.060,2.056,2.052,2.048,2.045,2.042];
+function rgT975_(df){ return df<=0?NaN:df<=30?RG_T975_[df]:df<=40?2.021:df<=60?2.000:df<=120?1.980:1.960; }
+function rgMeanCi_(v){ const n=v.length; if(!n) return {n:0,mean:null,lo:null,hi:null}; const m=v.reduce((a,b)=>a+b,0)/n; if(n<2) return {n,mean:m,lo:null,hi:null};
+  const sd=Math.sqrt(v.reduce((a,b)=>a+(b-m)*(b-m),0)/(n-1)), h=rgT975_(n-1)*sd/Math.sqrt(n); return {n,mean:m,lo:Math.max(0,m-h),hi:m+h}; }
+/* one plot's regeneration: {adv:{sp:sph}, ear:{sp:sph}} */
+function rgPlot_(p){ const o={adv:{},ear:{}};
+  [["ADRGN","adv"],["EARGN","ear"]].forEach(([k,w])=>{ for(let i=1;i<=5;i++){ const sp=String(p[k+"SP"+i]||"").trim(), c=parseInt(p[k+"N"+i],10); if(sp&&c>0) o[w][sp]=(o[w][sp]||0)+c*1000; } });
+  return o; }
+function rgStand_(plots){ const n=plots.length; const adv={}, ear={}; let sap=0, withRegen=0;
+  plots.forEach(p=>{ const r=rgPlot_(p); let any=false;
+    Object.keys(r.adv).forEach(s=>{ adv[s]=(adv[s]||0)+r.adv[s]; if(!RG_EXCL_[s]) any=true; }); Object.keys(r.ear).forEach(s=>{ ear[s]=(ear[s]||0)+r.ear[s]; if(!RG_EXCL_[s]) any=true; });
+    try{ plotTrees(p).forEach(t=>{ if(t.dbh!=null&&t.dbh>=6&&t.dbh<=8&&!structBucket_(t.sp)) sap+=BAF/treeBA(t.dbh); }); }catch(e){}
+    if(any) withRegen++; });
+  const per=o=>{ const out={}; Object.keys(o).forEach(s=>out[s]=n?Math.round(o[s]/n):0); return out; };
+  const A=per(adv), E=per(ear), sum=(o,ex)=>Object.keys(o).reduce((t,s)=>t+(!!RG_EXCL_[s]===!!ex?o[s]:0),0);
+  const advSph=sum(A,false), earSph=sum(E,false), btSph=sum(A,true)+sum(E,true), sapSph=n?Math.round(sap/n):0;
+  const si=Math.round(advSph*0.5+earSph*0.33+sapSph);
+  return {n, adv:A, ear:E, advSph, earSph, btSph, sapSph, si, withRegen, cls:si>=2000?"Adequately Stocked":si>=1000?"Moderately Stocked":"Understocked",
+    any:advSph+earSph+btSph+sapSph>0 || plots.some(p=>[1,2,3,4,5].some(i=>String(p["ADRGNSP"+i]||p["EARGNSP"+i]||"").trim())) }; }
+/* the prescription: "Pw 800; Or 600" (densities) or "Ce Ta Pw Sw" (the planted species, counted against the total) — plantByParse_ in Code.gs */
+function rgByParse_(t){ const by={}, re=/([A-Za-z]{1,4})\s*[:=]?\s*(\d[\d,]*(?:\.\d+)?)?/g; let m; const s=String(t||"");
+  while((m=re.exec(s))){ const v=m[2]?parseFloat(m[2].replace(/,/g,"")):0; if(!(v>=0)) continue;
+    if(!m[2]&&/^(or|and|of|the|with|plus|also|only)$/.test(m[1])) continue;
+    const K=(SPECIES.map(x=>x[0]).find(x=>x&&x.toLowerCase()===m[1].toLowerCase()))||(/^[A-Z]/.test(m[1])?m[1]:""); if(K) by[K]=Math.max(by[K]||0,v); }
+  return by; }
+let _rgPresc={}, _rgPrescAt={};
+function rgPresc_(tract, sid){ const t=String(tract||"").toLowerCase(), k=String(sid||"").toLowerCase();
+  const loc=repPrescLocal_(t), sh=_rgPresc[t]||{}; const pick=o=>{ const key=Object.keys(o||{}).find(x=>x.toLowerCase()===k); return key?o[key]:null; };
+  const p=pick(loc)||pick(sh); if(!p||!(+p.sph>0)) return null; return {sph:+p.sph, by:rgByParse_(p.by), byTxt:String(p.by||"")}; }
+/* the Sheet's prescriptions for the tracts in view, once in a while */
+function rgPrescFetch_(tracts){ if(!connected||isOffline()) return; const now=Date.now();
+  tracts.slice(0,6).forEach(t=>{ const k=String(t).toLowerCase(); if(_rgPrescAt[k] && now-_rgPrescAt[k]<10*60000) return; _rgPrescAt[k]=now;
+    try{ jsonpAction_("exportinfo&tract="+encodeURIComponent(t), r=>{ if(r&&r.ok){ _rgPresc[k]=r.presc||{}; try{ const m=$("standSummary"); if(m&&m.style.display!=="none") renderSummary(); }catch(e){} } }); }catch(e){} }); }
+function rgSurvival_(plots, presc){
+  const prSp=Object.keys(presc.by||{}), use=prSp.length?new Set(prSp):null;
+  const per=plots.map(p=>{ const r=rgPlot_(p), o={}; ["adv","ear"].forEach(w=>Object.keys(r[w]).forEach(s=>{ if(!RG_EXCL_[s]) o[s]=(o[s]||0)+r[w][s]; })); return o; });
+  const tot=rgMeanCi_(per.map(o=>Object.keys(o).reduce((a,k)=>a+(!use||use.has(k)?o[k]:0),0))), all=rgMeanCi_(per.map(o=>Object.keys(o).reduce((a,k)=>a+o[k],0)));
+  const pc=x=>x==null?null:Math.round(x/presc.sph*100);
+  return {n:plots.length, presc:presc.sph, bySpecies:!!use, sp:prSp, tot, all, pct:pc(tot.mean), lo:pc(tot.lo), hi:pc(tot.hi)}; }
+/* the stands in the selection, by property and compartment */
+function rgGroups_(plots){ const g={}; plots.forEach(p=>{ const t=sumTractOf_(p), s=String(p.STANDID||"").trim()||"(no stand)", k=t.toLowerCase()+"\u0002"+s.toLowerCase(); (g[k]=g[k]||{tract:t,stand:s,plots:[]}).plots.push(p); });
+  return Object.values(g).sort((a,b)=>a.tract.localeCompare(b.tract)||a.stand.localeCompare(b.stand,undefined,{numeric:true})); }
+function rgHtml_(plots, standSel){
+  const R=rgStand_(plots), groups=rgGroups_(plots);
+  const surv=groups.map(g=>{ const pr=rgPresc_(g.tract,g.stand); return pr?Object.assign({g},rgSurvival_(g.plots,pr)):null; }).filter(Boolean);
+  if(!R.any && !surv.length) return "";
+  const n0=x=>Math.round(x).toLocaleString("en-US"), comp=o=>{ const ks=Object.keys(o).filter(s=>o[s]>0&&!RG_EXCL_[s]).sort((a,b)=>o[b]-o[a]);      /* buckthorn has its own line */ return ks.length?ks.slice(0,6).map(s=>`${esc(s)} ${n0(o[s])}`).join(" · ")+(ks.length>6?" …":""):"none"; };
+  const clsCol={"Adequately Stocked":"#7fd88a","Moderately Stocked":"#e8c45b","Understocked":"#ff8a80"}[R.cls];
+  const multi=new Set(groups.map(g=>g.tract.toLowerCase())).size>1;
+  let h=`<div style="margin-top:14px;border-top:1px solid #2a4030;padding-top:10px"><b>Regeneration</b> <span style="font-size:10px;color:#7a9a76">— 10 m² sub-plot · ${R.n} plot${R.n===1?"":"s"}, those with none count as 0</span></div>
+    <div class="big">
+      <div class="metric"><div class="k">Advance &gt;1.3 m</div><div class="v">${n0(R.advSph)}<small> /ha</small></div></div>
+      <div class="metric"><div class="k">Early &lt;1.3 m</div><div class="v">${n0(R.earSph)}<small> /ha</small></div></div>
+      <div class="metric"><div class="k">Stocking index</div><div class="v">${n0(R.si)}</div></div>
+    </div>
+    <div style="margin:2px 0 4px"><span style="display:inline-block;padding:2px 8px;border-radius:10px;background:${clsCol}22;border:1px solid ${clsCol};color:${clsCol};font-weight:700;font-size:12px">${R.cls}</span>
+      <span style="font-size:12px;color:#a9c9b0"> · regeneration in ${R.withRegen} of ${R.n} plots (${R.n?Math.round(R.withRegen/R.n*100):0}%)</span></div>
+    <div class="comp">Advance: ${comp(R.adv)}</div><div class="comp">Early: ${comp(R.ear)}</div>`+
+    (R.sapSph?`<div class="comp">Saplings 6–8 cm (from the tree tally): ${n0(R.sapSph)} /ha</div>`:"")+
+    (R.btSph?`<div class="comp" style="color:#e8c45b">Buckthorn ${n0(R.btSph)} /ha — counted, not toward stocking</div>`:"");
+  if(standSel==="__all__" && groups.length>1){
+    h+=`<div class="dtwrap" style="margin-top:8px;font-size:11px"><table class="dtable"><thead><tr>${multi?"<th>Property</th>":""}<th>Stand</th><th>Plots</th><th>Adv /ha</th><th>Early /ha</th><th>Index</th><th>Class</th></tr></thead><tbody>`+
+      groups.map(g=>{ const r=rgStand_(g.plots); return `<tr>${multi?`<td>${esc(g.tract)}</td>`:""}<td>${esc(g.stand)}</td><td>${r.n}</td><td>${n0(r.advSph)}</td><td>${n0(r.earSph)}</td><td>${n0(r.si)}</td><td>${r.cls.replace(" Stocked","")}</td></tr>`; }).join("")+`</tbody></table></div>`; }
+  if(surv.length){      /* one block per compartment: the survival % first and large — a table ran off the side of a phone */
+    h+=`<div style="margin-top:12px"><b>Survival assessment</b> <span style="font-size:10px;color:#7a9a76">— compartments with a prescribed density</span></div>`+
+      surv.map(s=>{ const col=s.pct==null?"#a9c9b0":s.pct>=80?"#7fd88a":s.pct>=60?"#e8c45b":"#ff8a80";
+        return `<div style="border:1px solid #2a4030;border-radius:8px;padding:8px;margin-top:6px">`+
+          `<div style="font-size:12px;color:#a9c9b0">${multi?esc(s.g.tract)+" · ":""}<b style="color:#e8f0e6">${esc(s.g.stand)}</b> · ${s.n} plot${s.n===1?"":"s"}</div>`+
+          `<div style="margin:2px 0"><span style="font:800 22px system-ui;color:${col}">${s.pct==null?"—":s.pct+"%"}</span> <span style="font-size:12px;color:#cfe3d2">of ${n0(s.presc)} /ha prescribed${s.lo!=null?` · 95% CI ${s.lo}–${s.hi}%`:""}</span></div>`+
+          `<div style="font-size:12px;color:#cfe3d2">Observed ${s.tot.mean==null?"—":n0(s.tot.mean)} /ha${s.tot.lo!=null?` (${n0(s.tot.lo)}–${n0(s.tot.hi)})`:""}${s.n<2?" · one plot, no confidence interval":""}</div>`+
+          (s.bySpecies?`<div style="font-size:11px;color:#8fae95;margin-top:2px">Counts the planted species ${esc(s.sp.join(", "))} · all regeneration incl. others: ${n0(s.all.mean||0)} /ha</div>`:"")+`</div>`; }).join(""); }
+  h+=`<div class="note">Stocking index = advance × 0.5 + early × 0.33 + saplings 6–8 cm (≥ 2000 adequately, ≥ 1000 moderately stocked) — the Sheet's rule. Survival = mean stems/ha of the compartment's plots${surv.some(s=>s.bySpecies)?" (of the planted species, where listed)":""} ÷ the prescribed density; prescriptions come from the Sheet's Plantation Prescriptions tab or the report panel's survival boxes.</div>`;
+  return h; }
 function closeSummary(){ $("standSummary").style.display="none"; }
 function exportSummaryCSV(){
   /* Export exactly what is on screen. This used to build from saved.slice(), which (a) skipped the
@@ -6962,13 +7048,16 @@ function exportSummaryCSV(){
   const stands=[...new Set(base.map(p=>p.STANDID).filter(Boolean))].sort();
   const groups=[["All plots",base.slice()]].concat(stands.map(s=>[s,base.filter(p=>p.STANDID===s)]));
   const inclSmall=summaryInclSmall;
-  const head=["Scope","LiveDBHmin_cm","Plots","BA_m2_per_ha","Stems_per_ha","QMD_cm","MeanAge_yr","MeanHt_m","TotalVol_m3_per_ha","Cords_per_ha","Species_by_BA","HabitatFeatures"];
+  const head=["Scope","LiveDBHmin_cm","Plots","BA_m2_per_ha","Stems_per_ha","QMD_cm","MeanAge_yr","MeanHt_m","TotalVol_m3_per_ha","Cords_per_ha","Species_by_BA","HabitatFeatures",
+    "Regen_adv_sph","Regen_early_sph","Saplings_6_8_sph","Buckthorn_sph","Stocking_index","Regen_class","Plots_with_regen","Prescribed_sph","Observed_sph","Observed_CI","Survival_pct","Survival_CI"];      // v467
   const f=(x,d)=>x==null?"":x.toFixed(d);
   const rows=[head];
   groups.forEach(([name,plots])=>{ const s=computeStand(plots, inclSmall);
     const comp=s.comp.map(c=>`${c.sp||"?"} ${Math.round(c.pct)}%`).join("; ");
     const hab=(s.hab||[]).map(h=>`${h.label} ${h.perHa.toFixed(0)}/ha (${h.count})`).join("; ");
-    rows.push([name,inclSmall?6:10,s.nplots,f(s.baHa,1),f(s.stemsHa,0),f(s.qmd,1),f(s.meanAge,0),f(s.meanHt,1),f(s.vol,0),f(s.vol*M3_TO_CORDS,1),comp,hab]);
+    const r=rgStand_(plots), gs=rgGroups_(plots), one=gs.length===1?gs[0]:null, pr=one?rgPresc_(one.tract,one.stand):null, sv=pr?rgSurvival_(plots,pr):null, R0=x=>x==null?"":Math.round(x);
+    rows.push([name,inclSmall?6:10,s.nplots,f(s.baHa,1),f(s.stemsHa,0),f(s.qmd,1),f(s.meanAge,0),f(s.meanHt,1),f(s.vol,0),f(s.vol*M3_TO_CORDS,1),comp,hab,
+      r.advSph,r.earSph,r.sapSph,r.btSph,r.si,r.cls,r.withRegen, sv?sv.presc:"", sv?R0(sv.tot.mean):"", sv&&sv.tot.lo!=null?R0(sv.tot.lo)+"-"+R0(sv.tot.hi):"", sv&&sv.pct!=null?sv.pct:"", sv&&sv.lo!=null?sv.lo+"-"+sv.hi:""]);
   });
   /* Say on the face of the file which plots it covers, so a CSV that has been emailed on still
      explains itself. Whoever opens it should not have to guess what was filtered out. */
