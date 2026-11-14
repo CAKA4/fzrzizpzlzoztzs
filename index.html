@@ -1375,7 +1375,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-13 · v468";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-13 · v469";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -7705,7 +7705,7 @@ function renderLayerList(){
    `sheet` is the crew layer: every plot in the Sheet. It had no switch at all before v350 — the
    map chip said "always on" and toggleCrewPlots() only refreshed — so on a property with 400-odd
    submitted plots there was no way to see the boundaries underneath them. */
-var layerVis={ mine:true, imported:true, sheet:true, bound:true, ref:true, photo:true, track:true };
+var layerVis={ mine:true, imported:true, sheet:true, bound:true, ref:true, photo:true, track:true, sample:true };      // v469: sample = ⊞ sample points (own switch)
 try{ if(typeof STORE!=="undefined"&&STORE) Object.assign(layerVis, JSON.parse(STORE.getItem("fi_layervis"))||{}); }catch(e){}
 function layerGroupFor_(k){ return {mine:fpins, imported:fauditpins, sheet:crewLayer, bound:fboundLayer, ref:refLayer, photo:photoLayer}[k]; }
 /* The three plot layers, for the master "All plots" switch. */
@@ -7740,16 +7740,18 @@ function applyLayerVis_(){
 }
 function toggleLayerVis(k){ layerVis[k]=!(layerVis[k]!==false); try{ STORE&&STORE.setItem("fi_layervis",JSON.stringify(layerVis)); }catch(e){}
   if(k==="track"){ trackShown=layerVis.track; setTrackBtn(); }
+  if(k==="sample"){ try{ spRender_(); }catch(e){} }
   if(k==="sheet"){ crewShown=layerVis.sheet!==false; setCrewBtn();
     const row=$("plotLabelRow"); if(row) row.style.display = crewShown ? "block" : "none"; }
   applyLayerVis_(); renderLayerVis_(); updateLayerStatus(); }
 
 // Labels on/off, per label layer (boundary stand names, imported-point labels). Persisted.
-var labelVis={ bound:true, ref:true, ov:true, pts:true, tw:true };
+var labelVis={ bound:true, ref:true, ov:true, pts:true, tw:true, sample:true };
 try{ if(typeof STORE!=="undefined"&&STORE) Object.assign(labelVis, JSON.parse(STORE.getItem("fi_labelvis"))||{}); }catch(e){}
 function toggleLabels(k){ labelVis[k]=!(labelVis[k]!==false); try{ STORE&&STORE.setItem("fi_labelvis",JSON.stringify(labelVis)); }catch(e){}
   if(k==="bound"){ if(typeof renderLabels==="function") renderLabels(); }
-  if(k==="ref"){ if(typeof renderRefLabels==="function") renderRefLabels(); try{ spRender_(); }catch(e){} }      // v468: sample points are reference points
+  if(k==="ref"){ if(typeof renderRefLabels==="function") renderRefLabels(); }
+  if(k==="sample"){ try{ spRender_(); }catch(e){} }      // v469: sample-point numbers have their own 🏷
   if(k==="ov"){ if(typeof ovRender_==="function") ovRender_(); else if(typeof ovLabels_==="function") ovLabels_(); const el=$("ovLblChk"); if(el) el.checked=labelVis.ov!==false; }
   if(k==="pts"){ if(typeof ftRender_==="function") ftRender_(); }
   if(k==="tw"){ try{ twMapRender_(); }catch(e){} try{ twBtn_(); }catch(e){} if(typeof toast==="function") toast(labelVis.tw!==false?"Town and city names shown (zoomed out)":"Town and city names hidden"); }
@@ -7764,6 +7766,7 @@ function zoomToLayer(k){
   else if(k==="sheet") (typeof crewData!=="undefined"?crewData:[]).forEach(r=>{ const y=parseFloat(r.lat),x=parseFloat(r.lon); if(isFinite(y)&&isFinite(x)) b.push([y,x]); });
   else if(k==="bound"){ if(typeof BOUND!=="undefined"&&BOUND&&BOUND.features) collectCoords_(BOUND.features,b); }
   else if(k==="ref") (refLabels||[]).forEach(r=>{ if(isFinite(r.lat)&&isFinite(r.lng)) b.push([r.lat,r.lng]); });
+  else if(k==="sample"){ try{ spGrids_().forEach(G=>G.pts.forEach(p=>b.push([p[0],p[1]]))); }catch(e){} }
   else if(k==="track") b=(trackLog||[]).slice();
   else if(k==="pdf"&&pdfBounds){ try{ fmap.fitBounds(pdfBounds,{padding:[30,30]}); closeLayersMenu(); return; }catch(e){} }
   if(!b.length){ toast("Nothing to zoom to in that layer",true); return; }
@@ -7777,6 +7780,7 @@ function renderLayerVis_(){
   const box=$("layerVisList"); if(!box) return;
   const refN=(typeof refFeatCount!=="undefined"&&refFeatCount)?refFeatCount:((typeof refLabels!=="undefined"&&refLabels)?refLabels.length:0);      // v430: lines count too (a file of trails had no switch)
   const trkN=(typeof trackLog!=="undefined"&&trackLog)?trackLog.length:0;
+  let spG=[]; try{ spG=spGrids_(); }catch(e){} const spN=spG.reduce((a,G)=>a+G.pts.length,0);
   const bndN=(typeof BOUND!=="undefined"&&BOUND&&BOUND.features)?BOUND.features.length:0;
   const hasPdf=(typeof pdfOverlay!=="undefined"&&pdfOverlay);
   const impN=(typeof auditPlots!=="undefined"&&auditPlots)?auditPlots.length:0;
@@ -7787,6 +7791,7 @@ function renderLayerVis_(){
              ["sheet","👥 Plots from the Sheet", shtN, false],
              ["bound","▧ Stand boundaries", bndN, true],
              ["ref","• Imported points/lines", refN, true],
+             ["sample","⊞ Sample points", spN, true],
              ["track","〰 Track log", trkN, false],
              ["pdf","🗺 PDF map", hasPdf?1:0, false]]
     .filter(r=>r[0]==="mine"||r[0]==="track"||r[2]>0);
@@ -7802,11 +7807,13 @@ function renderLayerVis_(){
     const on=(k==="pdf")?(typeof pdfVisible==="undefined"?true:pdfVisible):(layerVis[k]!==false);
     const onTap=(k==="pdf")?"togglePDF();renderLayerVis_()":`toggleLayerVis('${k}')`;
     const lblBtn = canLabel ? `<button type="button" class="visbtn ${labelVis[k]!==false?"on":""}" title="Labels on/off" onclick="event.stopPropagation();toggleLabels('${k}')">🏷</button>` : "";
-    const rmBtn = (k==="imported"&&cnt) ? `<button type="button" class="visbtn" title="Remove imported plots from this device" onclick="event.stopPropagation();clearAuditPlots()">🗑</button>` : "";
-    return `<div class="visrow"><span onclick="${onTap}" style="flex:1;cursor:pointer">${esc(label)}${cnt&&k!=="pdf"?` <small>(${cnt})</small>`:""}</span>`+
+    const rmBtn = (k==="imported"&&cnt) ? `<button type="button" class="visbtn" title="Remove imported plots from this device" onclick="event.stopPropagation();clearAuditPlots()">🗑</button>`
+      : (k==="sample"&&cnt) ? `<button type="button" class="visbtn ${_spRmOpen?"on":""}" title="Remove sample points" onclick="event.stopPropagation();_spRmOpen=!_spRmOpen;renderLayerVis_()">🗑</button>` : "";
+    const sub = (k==="sample"&&cnt&&_spRmOpen) ? spRmRows_(spG) : "";
+    return `<div class="visrow"><span onclick="${onTap}" style="flex:1;cursor:pointer${k==="sample"?";white-space:normal":""}">${esc(label)}${cnt&&k!=="pdf"?` <small>(${cnt})</small>`:""}</span>`+
       `<button type="button" class="visbtn" title="Zoom to this layer" onclick="event.stopPropagation();zoomToLayer('${k}')">⤢</button>`+
       lblBtn+rmBtn+
-      `<span class="visdot ${on?"on":""}" onclick="${onTap}" style="cursor:pointer">${on?"ON":"OFF"}</span></div>`;
+      `<span class="visdot ${on?"on":""}" onclick="${onTap}" style="cursor:pointer">${on?"ON":"OFF"}</span></div>`+sub;
   }).join("") : "";
 }
 function normalizeFC(gj){
@@ -16113,19 +16120,34 @@ function csRemove_(id){ const c=(PROPS.shapes||{})[id]; if(!c) return; const ha=
    NOTE says where its numbering starts), so it travels with the property like the trails do. Its points look and act like
    reference points: white, ringed, "Place plot here ›" fills the plot number. */
 const SP_MAXROW=1500;
+var _spRmOpen=false;      // v469: the Layers list's 🗑 on ⊞ Sample points opens the list of grids to remove
+var SP_SET={mode:"density", val:"", plot:"10", edge:"0"};      // v469: the last settings used, kept on this phone
+try{ if(typeof STORE!=="undefined"&&STORE) Object.assign(SP_SET, JSON.parse(STORE.getItem("fi_spset"))||{}); }catch(e){}
+function spSetSave_(){ try{ ["mode","val","plot","edge"].forEach(k=>{ if(_sp&&_sp[k]!=null) SP_SET[k]=String(_sp[k]); }); STORE&&STORE.setItem("fi_spset",JSON.stringify(SP_SET)); }catch(e){} }
+/* Layers list: one row per grid under ⊞ Sample points, each with 🗑, and "Remove all" */
+function spRmRows_(gs){ const all=gs.length>1?`<div class="visrow" style="margin-left:18px;background:#2a1414;border-color:#5b2b2b" onclick="spRemoveAll_()"><span style="flex:1">Remove all ${gs.length} grids</span><span>🗑</span></div>`:"";
+  return gs.map(G=>`<div class="visrow" style="margin-left:18px"><span style="flex:1;white-space:normal" onclick="zoomToGrid_('${G.gid}')">${esc(G.tract||"")} · <b>${esc(G.stand||"—")}</b> <small>(${G.pts.length}${G.spacing?" · "+G.spacing.toFixed(0)+" m":""}${G.edge?" · "+G.edge+" m in":""})</small></span>`+
+    `<button type="button" class="visbtn" title="Remove these sample points" onclick="event.stopPropagation();spDeleteGrid_('${G.gid}')">🗑</button></div>`).join("")+all; }
+function zoomToGrid_(gid){ const G=spGrids_().find(x=>x.gid===gid); if(!G||!fmap) return; try{ fmap.fitBounds(G.pts.map(p=>[p[0],p[1]]),{padding:[40,40],maxZoom:18}); closeLayersMenu(); }catch(e){} }
+function spRemoveAll_(){ const gs=spGrids_(); if(!gs.length) return; const n=gs.reduce((a,G)=>a+G.pts.length,0);
+  if(!confirm(`Remove all ${gs.length} sample-point grids (${n.toLocaleString()} points)? They go from every crew phone. Plots already made at them stay.`)) return;
+  gs.forEach(G=>spDeleteGrid_(G.gid,true)); _spRmOpen=false; toast("Sample points removed"); try{ renderLayerVis_(); }catch(e){} }
 let _sp=null, _spBarEl=null, _spTmp=[], spLayer=null;
 function spAll_(){ return Object.values(PROPS.lines||{}).filter(l=>l&&l.id&&l.kind==="sample"&&Array.isArray(l.pts)&&l.pts.length); }
 function spMeta_(l){ const o={}; String(l.note||"").replace(/(\w+)=([^\s;]+)/g,(m,k,v)=>{ o[k]=decodeURIComponent(v); return m; }); return o; }
 /* the grids, each with its points numbered: [{gid, tract, stand, spacing, pts:[[lat,lon,num]], ids:[row ids]}] */
 function spGrids_(tract){ const g={}; spAll_().filter(l=>!tract||propK_(l.tract)===propK_(tract)).forEach(l=>{ const m=spMeta_(l), gid=m.grid||l.id;
-    const G=g[gid]=g[gid]||{gid, tract:l.tract, stand:m.stand||l.name||"", spacing:+m.spacing||0, made:m.made||"", pts:[], ids:[]};
+    const G=g[gid]=g[gid]||{gid, tract:l.tract, stand:m.stand||l.name||"", spacing:+m.spacing||0, edge:+m.edge||0, made:m.made||"", pts:[], ids:[]};
     const s=+m.start||1; if(m.n==="1") l.pts.slice(0,1).forEach((p,i)=>G.pts.push([+p[0],+p[1],s+i])); else l.pts.forEach((p,i)=>G.pts.push([+p[0],+p[1],s+i])); G.ids.push(l.id); });
   return Object.values(g).map(G=>{ G.pts.sort((a,b)=>a[2]-b[2]); return G; }).sort((a,b)=>a.tract.localeCompare(b.tract)||String(a.stand).localeCompare(String(b.stand),undefined,{numeric:true})); }
 /* ---- the grid itself ---- */
-function spGrid_(polys, spacing, ox, oy){      // polys: [[ring lat/lon, hole, …], …]; returns [[lat,lon], …] in walking order
+function spGrid_(polys, spacing, ox, oy, edge){      // polys: [[ring lat/lon, hole, …], …]; returns [[lat,lon], …] in walking order; edge = metres kept clear of every boundary line (v469)
   const p0=polys[0][0][0], P=cgProj_(p0[0],p0[1]), R=polys.map(pg=>pg.map(r=>r.map(P.xy)));
   let w=1/0,e=-1/0,s=1/0,n=-1/0; R.forEach(pg=>pg[0].forEach(q=>{ w=Math.min(w,q[0]); e=Math.max(e,q[0]); s=Math.min(s,q[1]); n=Math.max(n,q[1]); }));
-  const inside=(x,y)=>R.some(pg=>cgInRing_(x,y,pg[0]) && !pg.slice(1).some(h=>cgInRing_(x,y,h)));
+  const E=+edge||0, segs=[]; if(E>0) R.forEach(pg=>pg.forEach(r=>{ for(let i=0;i<r.length;i++){ const a=r[i], b=r[(i+1)%r.length]; if(a[0]!==b[0]||a[1]!==b[1]) segs.push([a[0],a[1],b[0],b[1]]); } }));
+  const far=(x,y)=>{ const E2=E*E; for(const q of segs){ const dx=q[2]-q[0], dy=q[3]-q[1], L2=dx*dx+dy*dy; let t=L2?((x-q[0])*dx+(y-q[1])*dy)/L2:0; t=t<0?0:t>1?1:t;
+      const ex=q[0]+t*dx-x, ey=q[1]+t*dy-y; if(ex*ex+ey*ey<E2) return false; } return true; };
+  const inside=(x,y)=>R.some(pg=>cgInRing_(x,y,pg[0]) && !pg.slice(1).some(h=>cgInRing_(x,y,h))) && (E<=0 || far(x,y));
   const rows=[]; for(let y=n-oy; y>=s; y-=spacing){ const row=[]; for(let x=w+ox; x<=e; x+=spacing) if(inside(x,y)) row.push([x,y]); if(row.length) rows.push(row); if(rows.length>4000) break; }
   const out=[]; rows.forEach((row,i)=>{ (i%2?row.slice().reverse():row).forEach(q=>out.push(P.ll(q))); });
   return out; }
@@ -16143,7 +16165,7 @@ function spPickAt_(ll){ const lat=ll.lat, lon=ll.lng;
 function spOpen_(){ if(_sp){ spClose_(); return; }
   try{ propBarClose_(); }catch(e){} try{ findClose_(); }catch(e){} try{ if(_pw) pwClose_(); }catch(e){} try{ mnCancel_(true); ftCancel_(true); lnCancel_(true); }catch(e){}
   if(_csEd){ toast("Finish the compartment editor first (✓ Done on its bar)",true); return; }
-  _sp={step:"pick", pts:[]}; const b=$("toolSample"); if(b) b.classList.add("on"); setTimeout(()=>{ try{ railEditToggle_(false); }catch(e){} },0); spBar_(); }      // the tools row folds away so the map is clear (after the row's own tap handler)
+  _sp={step:"pick", pts:[], mode:SP_SET.mode||"density", val:SP_SET.val||"", plot:SP_SET.plot||"10", edge:SP_SET.edge||"0"}; const b=$("toolSample"); if(b) b.classList.add("on"); setTimeout(()=>{ try{ railEditToggle_(false); }catch(e){} },0); spBar_(); }      // the tools row folds away so the map is clear (after the row's own tap handler)
 function spClose_(){ spTmpClear_(); try{ document.body.classList.remove("bar-open","pw-open"); }catch(e){} const bar=$("spBar")||_spBarEl; _spBarEl=null; try{ if(bar&&bar.parentNode) bar.parentNode.removeChild(bar); }catch(e){}
   _sp=null; const b=$("toolSample"); if(b) b.classList.remove("on"); }
 function spTmpClear_(){ try{ _spTmp.forEach(m=>fmap.removeLayer(m)); }catch(e){} _spTmp=[]; }
@@ -16172,12 +16194,13 @@ function spSpacing_(){ const mode=_sp.mode||"density", v=parseFloat(_sp.val);
   const plot=parseFloat(_sp.plot)||10; return Math.sqrt(plot*100/v); }      // % of the area in plots of `plot` m²
 function spPreview_(){ spTmpClear_(); if(!_sp||!_sp.area) return; const s=spSpacing_();
   try{ _sp.area.polys.forEach(pg=>_spTmp.push(L.polygon(pg,{color:"#ffd24a",weight:3,fill:false,interactive:false}).addTo(fmap))); }catch(e){}
-  _sp.grid=[]; if(s>=2){ const ox=_sp.ox*s, oy=_sp.oy*s; _sp.grid=spGrid_(_sp.area.polys, s, ox, oy); }
+  _sp.grid=[]; if(s>=2){ const ox=_sp.ox*s, oy=_sp.oy*s; _sp.grid=spGrid_(_sp.area.polys, s, ox, oy, spEdge_()); }
   const many=_sp.grid.length>3000;
   if(!many) try{ _sp.grid.forEach((q,i)=>_spTmp.push(L.circleMarker(q,{radius:4,color:"#1c2b1e",weight:1.5,fillColor:"#ffd24a",fillOpacity:1,interactive:false}).addTo(fmap))); }catch(e){}
   spBar_(); }
 function spReroll_(){ _sp.ox=Math.random(); _sp.oy=Math.random(); spPreview_(); }
 function spSet_(k,v){ _sp[k]=v; if(k==="mode"){ _sp.val=""; } spPreview_(); }
+function spEdge_(){ const e=parseFloat(_sp&&_sp.edge); return e>0?e:0; }
 function spMake_(){ const A=_sp.area, s=spSpacing_(), pts=_sp.grid||[];
   if(!pts.length){ toast("No grid point falls inside — use a closer spacing, or 🎲 a new start",true); return; }
   if(pts.length>20000){ toast("That is "+pts.length.toLocaleString()+" points — use a wider spacing",true); return; }
@@ -16188,26 +16211,28 @@ function spMake_(){ const A=_sp.area, s=spSpacing_(), pts=_sp.grid||[];
   const gid=lnNewId_(), made=new Date().toISOString().slice(0,10);
   for(let i=0;i<pts.length;i+=SP_MAXROW){ const part=pts.slice(i,i+SP_MAXROW), one=part.length===1;
     lnTouch_({id:i?lnNewId_():gid, tract:t, kind:"sample", pts:one?[part[0],part[0]]:part, name:String(A.stand||"").slice(0,60),
-      note:`SAMPLE grid=${gid} stand=${encodeURIComponent(A.stand||"")} spacing=${s.toFixed(2)} start=${i+1} made=${made}`+(one?" n=1":"")}, true); }
-  spTmpClear_(); spRender_(); _sp.made={stand:A.stand, n:pts.length, s, gid, tract:t}; _sp.step="done"; spBar_();
+      note:`SAMPLE grid=${gid} stand=${encodeURIComponent(A.stand||"")} spacing=${s.toFixed(2)}`+(spEdge_()?` edge=${spEdge_()}`:"")+` start=${i+1} made=${made}`+(one?" n=1":"")}, true); }
+  spSetSave_();
+  spTmpClear_(); spRender_(); _sp.made={stand:A.stand, n:pts.length, s, gid, tract:t, edge:spEdge_()}; _sp.step="done"; spBar_();
   toast(`${pts.length} sample points made in ${A.stand||"the compartment"} — on every crew phone once sent`); }
 function spDeleteGrid_(gid, quiet){ const G=spGrids_().find(x=>x.gid===gid); if(!G) return;
   if(!quiet && !confirm(`Delete the ${G.pts.length} sample points in ${G.stand||"this compartment"}? (Plots already made at them stay.)`)) return;
   G.ids.forEach(id=>{ delete PROPS.lines[id]; if(propDirty.lines) delete propDirty.lines[id]; (propDirty.lineDel=propDirty.lineDel||[]).push(id); });
-  propPersist_(); spRender_(); if(propBackendOk) propPush_().then(()=>{}); if(!quiet){ toast("Sample points deleted"); if(_sp) spBar_(); } }
+  propPersist_(); spRender_(); if(propBackendOk) propPush_().then(()=>{}); if(!quiet){ toast("Sample points deleted"); if(_sp) spBar_(); }
+  try{ if(!spGrids_().length) _spRmOpen=false; renderLayerVis_(); }catch(e){} }
 /* ---- on the map: like reference points (white, dark ring); the number shows when zoomed in ---- */
 function spRender_(){ if(!fmap||!window.L) return; if(!spLayer){ spLayer=L.layerGroup().addTo(fmap); fmap.on("moveend zoomend",()=>{ try{ spRender_(); }catch(e){} }); } spLayer.clearLayers();
-  let vis=true; try{ vis=layerVis.ref!==false; }catch(e){} if(!vis) return;
+  let vis=true, lbl=true; try{ vis=layerVis.sample!==false; lbl=labelVis.sample!==false; }catch(e){} if(!vis) return;      // v469: its own switch in Layers
   const z=fmap.getZoom(), vb=fmap.getBounds().pad(0.2); let nLbl=0;
   spGrids_().forEach(G=>G.pts.forEach(p=>{ if(!vb.contains([p[0],p[1]])) return;
     L.circleMarker([p[0],p[1]],{radius:4,color:"#1c2b1e",weight:1.5,fillColor:"#ffffff",fillOpacity:.9}).addTo(spLayer)
       .bindPopup(`<div style="font-family:monospace;font-size:11px;color:#16271a"><b>Sample point ${p[2]}</b>${G.stand?" — "+esc(G.stand):""}<br>${G.spacing?G.spacing.toFixed(1)+" m grid · ":""}${p[0].toFixed(5)}, ${p[1].toFixed(5)}<br><a href="javascript:void(0)" onclick="placeFromRef(${p[0]},${p[1]},'${p[2]}')">Place plot here ›</a></div>`);
-    if(z>=17 && nLbl++<400) L.marker([p[0],p[1]],{interactive:false,keyboard:false,icon:L.divIcon({className:"",iconSize:[40,14],iconAnchor:[-5,7],html:`<div style="font:700 11px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000">${p[2]}</div>`})}).addTo(spLayer); })); }
+    if(lbl && z>=17 && nLbl++<400) L.marker([p[0],p[1]],{interactive:false,keyboard:false,icon:L.divIcon({className:"",iconSize:[40,14],iconAnchor:[-5,7],html:`<div style="font:700 11px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000">${p[2]}</div>`})}).addTo(spLayer); })); }
 /* ---- export: shapefile (UTM 17N), GPX (waypoints named by number), CSV ---- */
 function spExport_(gid, fmt){ const G=spGrids_().find(x=>x.gid===gid); if(!G) return; const base=("FRIsample_"+(G.tract||"")+"_"+(G.stand||"")).replace(/[^A-Za-z0-9_-]+/g,"_");
   const dl=(name,data,type)=>{ const blob=new Blob([data],{type}), url=URL.createObjectURL(blob), a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),4000); };
   const stamp=nowStr().replace(/[: ]/g,"-");
-  if(fmt==="shp"){ const head=["PLOT","STAND","TRACT","SPACING_M","LAT","LON"], rows=G.pts.map(p=>[p[2],G.stand,G.tract,G.spacing?+G.spacing.toFixed(2):"",p[0].toFixed(7),p[1].toFixed(7)]);
+  if(fmt==="shp"){ const head=["PLOT","STAND","TRACT","SPACING_M","EDGE_M","LAT","LON"], rows=G.pts.map(p=>[p[2],G.stand,G.tract,G.spacing?+G.spacing.toFixed(2):"",G.edge||0,p[0].toFixed(7),p[1].toFixed(7)]);
     shpFromRows_(base, head, rows, "LAT", "LON"); return; }
   if(fmt==="gpx"){ const x=`<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="FRI Plot Card" xmlns="http://www.topografix.com/GPX/1/1">\n`+
       G.pts.map(p=>`<wpt lat="${p[0].toFixed(7)}" lon="${p[1].toFixed(7)}"><name>${p[2]}</name><desc>${esc(G.stand)} ${esc(G.tract)}</desc></wpt>`).join("\n")+`\n</gpx>\n`;
@@ -16226,7 +16251,7 @@ function spBar_(){ if(!_sp) return;
   if(st==="pick"){ const gs=spGrids_(propActiveTract_());
     h=head("⊞ Sample points")+`<div style="color:#cfe3d2;line-height:1.45;margin-bottom:8px">A grid of reference points in a compartment, to walk to and put plots on. <b>Tap the compartment</b> on the map — or draw one.</div>`+
       `<div style="display:flex;gap:6px">`+B("_sp.step='draw';_sp.pts=[];spBar_()","✏ Draw one")+`</div>`+
-      (gs.length?`<div style="border-top:1px solid #2a4030;margin:10px 0 4px;padding-top:8px;color:#a9c9b0">Sample points on ${esc(propActiveTract_())}</div>`+gs.map(G=>`<div style="display:flex;align-items:center;gap:6px;margin:4px 0;font-size:12px"><span style="flex:1"><b>${esc(G.stand||"—")}</b> · ${G.pts.length} pts${G.spacing?" · "+G.spacing.toFixed(1)+" m":""}</span>`+
+      (gs.length?`<div style="border-top:1px solid #2a4030;margin:10px 0 4px;padding-top:8px;color:#a9c9b0">Sample points on ${esc(propActiveTract_())}</div>`+gs.map(G=>`<div style="display:flex;align-items:center;gap:6px;margin:4px 0;font-size:12px"><span style="flex:1"><b>${esc(G.stand||"—")}</b> · ${G.pts.length} pts${G.spacing?" · "+G.spacing.toFixed(1)+" m":""}${G.edge?" · "+G.edge+" m from edge":""}</span>`+
         `<select onchange="if(this.value){ spExport_('${G.gid}',this.value); this.value=''; }" style="font-size:13px;padding:4px;border-radius:6px;background:#16271a;color:#e8f0e6;border:1px solid #33623a"><option value="">Export…</option><option value="shp">Shapefile</option><option value="gpx">GPX</option><option value="csv">CSV</option></select>`+
         `<button type="button" onclick="spDeleteGrid_('${G.gid}')" title="Delete" style="padding:4px 8px;border-radius:6px;border:1px solid #7a2f2f;background:#3a1212;color:#ffb4a9">🗑</button></div>`).join(""):""); }
   else if(st==="draw"){ const n=_sp.pts.length;
@@ -16239,11 +16264,12 @@ function spBar_(){ if(!_sp) return;
       `<div style="display:flex;gap:4px;margin-bottom:6px">${[["density","Points per ha"],["spacing","Spacing"],["pct","% of area"]].map(([k,l])=>`<button type="button" onclick="spSet_('mode','${k}')" style="flex:1;padding:7px 4px;border-radius:8px;border:1px solid ${m===k?"#4caf50":"#2a4030"};background:${m===k?"#1f5a2c":"#14201a"};color:#e8f0e6;font-size:12px">${l}</button>`).join("")}</div>`+
       `<div>${opts.map(([v,l])=>chip("val",v,l,String(_sp.val)===v)).join("")}<input type="number" inputmode="decimal" min="0" step="any" placeholder="${m==="spacing"?"other m":m==="density"?"other /ha":"other %"}" value="${opts.some(o=>o[0]===String(_sp.val))?"":esc(_sp.val||"")}" onchange="spSet_('val',this.value)" style="width:90px;font-size:15px;padding:5px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></div>`+
       (m==="pct"?`<div style="font-size:12px;color:#cfe3d2;margin:2px 0 4px">Plot size: ${[["10","10 m² (regen)"],["100","100 m²"],["400","400 m²"]].map(([v,l])=>chip("plot",v,l,String(_sp.plot||"10")===v)).join("")}</div>`:"")+
-      `<div style="margin:6px 0;padding:8px;border-radius:8px;background:#0f2412;border:1px solid #2a4030;font-size:13px">${s>0?`<b style="font-size:16px;color:#ffd24a">${n.toLocaleString()}</b> point${n===1?"":"s"} · <b>${s.toFixed(1)} m</b> apart · ${per.toFixed(per<10?1:0)}/ha${n>3000?" · too many to preview":""}`:"Choose a density, a spacing or a %"}${s>0&&!n?`<div style="color:#ffd24a;margin-top:3px">No grid point falls inside — closer spacing, or 🎲</div>`:""}</div>`+
+      `<div style="font-size:12px;color:#cfe3d2;margin:4px 0 2px">Keep from the edge: ${[["0","None"],["10","10 m"],["20","20 m"],["30","30 m"]].map(([v,l])=>chip("edge",v,l,String(_sp.edge||"0")===v)).join("")}<input id="spEdgeOther" type="number" inputmode="decimal" min="0" step="any" placeholder="other m" value="${["0","10","20","30"].includes(String(_sp.edge||"0"))?"":esc(_sp.edge)}" onchange="spSet_('edge',this.value)" style="width:80px;font-size:15px;padding:5px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></div>`+
+      `<div style="margin:6px 0;padding:8px;border-radius:8px;background:#0f2412;border:1px solid #2a4030;font-size:13px">${s>0?`<b style="font-size:16px;color:#ffd24a">${n.toLocaleString()}</b> point${n===1?"":"s"} · <b>${s.toFixed(1)} m</b> apart · ${per.toFixed(per<10?1:0)}/ha${spEdge_()?` · ${spEdge_()} m in from the edge`:""}${n>3000?" · too many to preview":""}`:"Choose a density, a spacing or a %"}${s>0&&!n?`<div style="color:#ffd24a;margin-top:3px">No grid point falls inside${spEdge_()?" "+spEdge_()+" m from the edge — less edge distance,":" —"} closer spacing, or 🎲</div>`:""}</div>`+
       `<div style="display:flex;gap:6px">`+B("spMake_()","✓ Make points",true,!n)+B("spReroll_()","🎲 New start",false,!(s>0))+B("_sp.step='pick';_sp.area=null;spTmpClear_();spBar_()","◂ Back")+`</div>`+
-      `<div style="color:#8fae95;font-size:11px;margin-top:6px;line-height:1.4">🎲 shifts the grid to a new random start. Rows run west–east; numbers follow the walking order (snaking down the rows from the north-west). Every crew phone gets them; tap a point → Place plot here.</div>`; }
+      `<div style="color:#8fae95;font-size:11px;margin-top:6px;line-height:1.4">🎲 shifts the grid to a new random start. Rows run west–east; numbers follow the walking order (snaking down the rows from the north-west). Every crew phone gets them; tap a point → Place plot here. Your choices are kept for next time. Layers → ⊞ Sample points switches them on/off or removes them.</div>`; }
   else if(st==="done"){ const d=_sp.made;
-    h=head("⊞ Sample points made")+`<div style="color:#cfe3d2;line-height:1.45;margin-bottom:8px"><b>${d.n.toLocaleString()}</b> points in <b>${esc(d.stand||"the area")}</b>, ${d.s.toFixed(1)} m apart, numbered 1–${d.n} in walking order. They go to every crew phone with the next sync.</div>`+
+    h=head("⊞ Sample points made")+`<div style="color:#cfe3d2;line-height:1.45;margin-bottom:8px"><b>${d.n.toLocaleString()}</b> points in <b>${esc(d.stand||"the area")}</b>, ${d.s.toFixed(1)} m apart${d.edge?`, at least ${d.edge} m in from the edge`:""}, numbered 1–${d.n} in walking order. They go to every crew phone with the next sync.</div>`+
       `<div style="display:flex;gap:6px;margin-bottom:6px">`+B(`spExport_('${d.gid}','shp')`,"⬇ Shapefile")+B(`spExport_('${d.gid}','gpx')`,"⬇ GPX")+B(`spExport_('${d.gid}','csv')`,"⬇ CSV")+`</div>`+
       `<div style="display:flex;gap:6px">`+B("_sp.step='pick';_sp.area=null;spBar_()","Another compartment")+B("spClose_()","✓ Close",true)+`</div>`; }
   bar.innerHTML=h; }
