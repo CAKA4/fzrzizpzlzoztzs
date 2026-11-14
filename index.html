@@ -120,6 +120,41 @@ try{ (function(){
   .map-load.accent{ background:#e8b84b; border:1px solid #f0c860; color:#1a1000; font-weight:700; font-size:13px; padding:8px 14px; box-shadow:0 2px 8px rgba(0,0,0,.4); }
   .map-load.tools{ background:linear-gradient(180deg,#37b06a,#2b9457); border:1px solid #4cc37e; color:#06220f; font-weight:700; font-size:13px; padding:8px 14px; box-shadow:0 2px 8px rgba(0,0,0,.4); }
   .map-load.accent.has{ background:#e8b84b; color:#1a1000; }
+  .map-quick a{ font-size:19px !important; }
+  /* v470 — readability outdoors: the smallest grey text was 10–11 px on dark green. Raised everywhere it is set inline. */
+  [style*="font-size:10px"]{ font-size:11.5px !important; }
+  [style*="font-size:10.5px"], [style*="font-size:11px"], [style*="font-size:11.5px"]{ font-size:12.5px !important; }
+  [style*="font:11px"]{ font-size:12.5px !important; }
+  [style*="color:#5a7a62"]{ color:#9cb8a2 !important; } [style*="color:#7a9a76"]{ color:#a6c0a2 !important; } [style*="color:#8fae95"]{ color:#b4cdb9 !important; }
+  .map-tool .mt-l{ font-size:11px; }
+  /* tap targets (gloves): at least ~44 px */
+  #layerVisList .visbtn{ width:42px !important; height:40px !important; font-size:16px !important; }
+  #layerVisList .visdot{ padding:9px 10px !important; min-width:48px !important; }
+  #layerVisList .visrow{ min-height:48px; }
+  #spBar button{ min-height:40px; }
+  /* ☀ Sunlight mode: black and white, bigger text — ☰ Menu → This device */
+  body.sun{ --bg:#000; --surface:#0a0a0a; --surface2:#111; --card:#0a0a0a; --text:#fff; --muted:#e6ece6; --faint:#c9d3cb; --line:#6a7a6c; --line2:#8a9a8c; }
+  body.sun [style*="color:#8fae95"], body.sun [style*="color:#a9c9b0"], body.sun [style*="color:#cfe3d2"], body.sun [style*="color:#5a7a62"], body.sun [style*="color:#7a9a76"], body.sun [style*="color:#dcefe0"], body.sun [style*="color:#a6c0a2"]{ color:#fff !important; }
+  body.sun [style*="font-size:12px"], body.sun [style*="font-size:12.5px"], body.sun [style*="font-size:13px"]{ font-size:14px !important; }
+  body.sun .bbar, body.sun #spBar, body.sun #propBar, body.sun #pwBar, body.sun .modal-card, body.sun .layers-menu{ background:#000 !important; border-color:#fff !important; }
+  body.sun .map-tool{ background:#000; border-color:#fff; color:#fff; }
+  body.sun .map-top{ background:#000; }
+  /* v470: one look for the bars that work with the map — at the bottom, the map stays in view */
+  .bbar{ position:fixed; left:8px; right:8px; bottom:10px; z-index:5450; max-height:50vh; overflow-y:auto; background:rgba(16,36,15,.97); border:1px solid #4caf50; border-radius:12px; padding:10px; color:#eafae8; font:14px system-ui; box-shadow:0 4px 18px rgba(0,0,0,.5); }
+  .bbar-hd{ display:flex; align-items:center; gap:8px; margin-bottom:6px; } .bbar-hd b{ flex:1; font-size:16px; }
+  .bbar-x, .bbar-q{ flex:none; min-width:40px; min-height:40px; border-radius:20px; border:1px solid #33623a; background:#16271a; color:#cdebcf; font:700 16px system-ui; }
+  .bbar-note{ color:#dcefe0; line-height:1.45; margin-bottom:8px; font-size:14px; }
+  .bbar-opt{ display:block; width:100%; text-align:left; padding:12px; margin:6px 0; border-radius:9px; border:1px solid #2f7a44; background:#123a1c; color:#eafae8; font:600 15px system-ui; min-height:48px; }
+  .bbar-opt div{ color:#cfe3d2; font:400 13px system-ui; margin-top:3px; }
+  .bbar-row{ display:flex; gap:6px; } .bbar-row .btn{ flex:1; min-width:0; min-height:46px; padding:9px 6px; font-size:14px; }
+  /* v470: connection / sending status — one quiet chip instead of red messages in the middle of the screen */
+  .netstat{ flex:none; display:inline-flex; align-items:center; gap:5px; min-width:34px; min-height:34px; justify-content:center; padding:4px 8px; border-radius:17px; border:1px solid #33623a; background:#16271a; color:#cdebcf; font:600 12px system-ui; cursor:pointer; }
+  .netstat .nd{ width:11px; height:11px; border-radius:50%; background:#4cc079; box-shadow:0 0 0 2px rgba(0,0,0,.35); }
+  .netstat.q .nd{ background:#e0a33a; } .netstat.off .nd{ background:#e0a33a; } .netstat.bad .nd{ background:#f2792e; }
+  .netstat .nt:empty{ display:none; }
+  #layerVisList .visrow span:first-child{ white-space:normal !important; overflow:visible !important; }
+  @media (max-width:440px){ .map-brand{ display:none; } }
+  @media (max-width:400px){ .map-brand{ display:none; } .map-top{ gap:6px !important; } .map-load.accent, .map-load.tools{ padding:8px 10px; } .map-back{ padding-left:9px; padding-right:9px; } }
   .layers-menu{ position:fixed; top:calc(54px + env(safe-area-inset-top)); bottom:calc(10px + env(safe-area-inset-bottom)); right:10px; z-index:5300; background:#0f1e0d; border:1px solid var(--line2,#33623a);
     border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,.6); width:min(82vw,300px); display:flex; flex-direction:column; gap:6px; padding:8px; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; touch-action:pan-y; }
   .layers-scroll{ display:contents; }
@@ -199,7 +234,12 @@ try{ (function(){
   .rail-gap{ height:6px; flex:none; }
   .rail-item{ position:relative; }
   .rail-sub{ display:none; position:absolute; right:58px; top:0; grid-template-columns:repeat(3,52px); gap:6px; padding:5px; border-radius:12px; background:rgba(15,30,13,.72); }
-  .map-rail.edit-open .rail-sub{ display:grid; }
+  .map-rail.edit-open #railEdit, .map-rail.field-open #railField{ display:grid; }
+  .map-rail.field-open #toolField{ border-color:#c8952a; color:#e8b84b; background:#1c2e14; }
+  #toolField.has-on{ border-color:#c8952a; color:#e8b84b; }
+  #toolField{ position:relative; }
+  .rail-rec{ position:absolute; top:-6px; right:-6px; background:#d33; color:#fff; font:700 9px/1 system-ui; padding:3px 4px; border-radius:6px; box-shadow:0 0 0 2px rgba(0,0,0,.5); }
+  #railField{ grid-template-columns:repeat(2,52px); }
   body.bar-open .toast{ bottom:150px; }   /* above an editing bar, not on it */
   body.pw-open .toast{ bottom:auto; top:calc(64px + env(safe-area-inset-top)); }   /* v465: ＋ Set up's bar is taller — messages at the top */
   .map-rail.edit-open #toolEdit{ border-color:#c8952a; color:#e8b84b; background:#1c2e14; }
@@ -434,6 +474,13 @@ try{ (function(){
   .actionbar{ position:fixed; left:0; right:0; bottom:0; z-index:25; background:#0c100e;
     border-top:1px solid var(--line2); padding:10px 12px calc(10px + env(safe-area-inset-bottom)); }
   .actionbar .inner{ max-width:760px; margin:0 auto; display:flex; gap:9px; align-items:center }
+  .actionbar .btn.discard{ flex:none; padding:8px 10px; font-size:13px; opacity:.85; min-height:44px; }
+  .actionbar #submitBtn{ flex:1 1 auto; min-height:52px; font-size:17px; }
+  .actionbar .liveread{ flex:0 1 auto; }
+  /* v470: the Sheet's column codes (TRACT, STANDID, X …) only when asked for — ☰ Menu → This device */
+  label .code{ display:none; } body.show-codes label .code{ display:inline; }
+  .sec > summary .sec-done{ margin-left:8px; font:600 11.5px var(--mono); color:#8fe6a0; letter-spacing:0; text-transform:none; }
+  .sec-next{ display:block; width:100%; margin:14px 0 4px; padding:12px; border-radius:10px; border:1px solid #2f7a44; background:#123a1c; color:#eafae8; font:600 15px system-ui; min-height:48px; }
   .liveread{ font-family:var(--mono); font-size:11.5px; color:var(--muted); flex:1; line-height:1.3 }
   .liveread b{ color:var(--text); font-size:14px }
   .liveread .dot{ display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--faint); margin-right:5px; vertical-align:middle }
@@ -465,6 +512,7 @@ try{ (function(){
   .editbanner a{ color:#7fd0a0; font-weight:700; text-decoration:underline; margin-left:4px }
   .cruiserbar{ display:flex; align-items:center; gap:8px; font-size:13px; color:var(--muted); margin-bottom:12px }
   .cruiserbar b{ color:var(--text) }
+  .cruiserbar.unset{ border:1px solid #c8952a; background:#2a2310; border-radius:10px; padding:8px 10px; cursor:pointer; } .cruiserbar.unset b{ color:#ffd27a }
   .cruiserbar .btn-mini{ margin-left:auto }
   .chips{ display:flex; flex-wrap:wrap; gap:7px }
   .chip-tog{ border:1px solid var(--line2); background:var(--field); color:var(--muted); border-radius:999px;
@@ -518,7 +566,8 @@ try{ (function(){
     font-size:10px; padding:0 4px; border-radius:4px }
   .toast{ position:fixed; left:50%; bottom:98px; transform:translateX(-50%) translateY(20px); opacity:0;
     background:#05221350; background:#0a3320; border:1px solid #2f9d59; color:#dffbe9; padding:11px 18px; border-radius:999px;
-    font-size:13.5px; font-weight:600; z-index:5700; transition:opacity .25s,transform .25s; pointer-events:none; box-shadow:0 8px 26px rgba(0,0,0,.5) }
+    font-size:13.5px; font-weight:600; z-index:5700; transition:opacity .25s,transform .25s; pointer-events:none; box-shadow:0 8px 26px rgba(0,0,0,.5);
+    border-radius:12px; width:max-content; max-width:min(92vw,520px); text-align:center; line-height:1.4; }      /* v470: a bar, not a big oval
   .toast.show{ opacity:1; transform:translateX(-50%) translateY(0) }
   .toast.err{ background:#2a1813; border-color:#5a3324; color:#ffd9c9 }
   @media (max-width:480px){
@@ -536,6 +585,7 @@ try{ (function(){
       <button class="mapbtn mapgo" type="button" onclick="openMap()" title="Open the map">Map</button>
       <button class="mapbtn" type="button" onclick="showFormHelp()" title="How to use the form">?</button>
       <span class="chip" id="savedChip" style="flex:none">0 saved</span>
+      <button class="netstat" type="button" id="netStatForm" onclick="netStatOpen_()" title="Connection and sending status"><span class="nd"></span><span class="nt" id="netStatTxt"></span></button>
     </div>
   </div>
   <div class="buildstamp" id="buildStamp" role="button" tabindex="0" title="Tap to update to the latest version" onclick="forceUpdate()"></div>
@@ -755,10 +805,9 @@ try{ (function(){
 
 <div class="actionbar"><div class="inner">
   <div class="liveread"><span class="dot" id="netDot"></span><b id="liveStems">0</b> stems · <b id="liveSaved">0</b> saved <span id="liveQueued"></span></div>
-  <button class="btn ghost" type="button" onclick="exportCSV()">CSV</button>
-  <button class="btn ghost" type="button" onclick="exportShapefile()">SHP</button>
-  <button class="btn ghost" type="button" onclick="cancelPlot()" title="Discard this entry">✕ Cancel</button>
-  <button class="btn submit" type="button" onclick="submitPlot()">Submit plot</button>
+  <!-- v470: CSV / SHP moved to ☰ Menu → Send & export; Discard is small and asks first; Submit gets the room -->
+  <button class="btn ghost discard" type="button" onclick="cancelPlot()" title="Discard this entry (asks first)">✕ Discard</button>
+  <button class="btn submit" id="submitBtn" type="button" onclick="submitPlot()">Submit plot</button>
 </div></div>
 
 <div id="mapView">
@@ -766,8 +815,9 @@ try{ (function(){
     <span class="map-brand">🌲 FRI</span>
     <button class="map-back" type="button" onclick="closeMap()">‹ Form</button>
     <div class="map-standpill" id="mapStandPill"><span class="k">In stand</span><b id="mapStandVal">—</b></div>
-    <button class="map-load accent" type="button" onclick="toggleLayersMenu()">＋ Layers</button>
-    <button class="map-load tools" type="button" onclick="openMore()" title="Tools & menu">⋯ Tools</button>
+    <button class="map-load accent" type="button" onclick="toggleLayersMenu()" title="What shows on the map: layers on and off, the property, style, files">◫ Layers</button>
+    <button class="map-load tools" type="button" onclick="openMore()" title="Menu: analysis, reports, exports, this device">☰ Menu</button>
+    <button class="netstat" type="button" id="netStatMap" onclick="netStatOpen_()" title="Connection and sending status"><span class="nd"></span></button>
   </div>
   <div class="layers-menu" id="layersMenu" style="display:none">
     <div class="layers-scroll">
@@ -885,8 +935,7 @@ try{ (function(){
       <div class="lgroup-body">
         <div class="map-field"><label>Property shown on the map (picking one zooms to it)</label><select id="propActiveSel" onchange="propPickActive_(this.value)"></select></div>
         <div id="mmMenuBox"></div>
-        <label style="display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:13px;color:#e8f0e6"><input type="checkbox" id="ovLblChk" checked onchange="toggleLabels('ov')" style="width:18px;height:18px"> Property names on the zoomed-out map</label>
-        <label style="display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:13px;color:#e8f0e6"><input type="checkbox" id="twLblChk" checked onchange="toggleLabels('tw')" style="width:18px;height:18px"> Town &amp; city names on the zoomed-out map</label>
+        <!-- v470: the property-name and town-name switches are in the Layers tab → On the map -->
         <button type="button" onclick="closeLayersMenu();propZoomTo_()">🔍 Zoom to this property</button>
         <button type="button" onclick="closeLayersMenu();mapOnlyClear_()">👁 Show all properties (after a Find showed only one)</button>
         <button type="button" onclick="closeLayersMenu();toast('Fetching every property…');propSync_(function(ok,why){ toast(ok?'Every property is up to date on this phone':propSyncWhyMsg_(why),!ok); },{all:true})">⟳ Sync all properties (normally only the chosen one is fetched)</button>
@@ -950,8 +999,7 @@ try{ (function(){
     <button class="map-tool" id="toolSetup" type="button" onclick="pwOpen_()" title="Add a property, or change one: its outline, compartments, names and MFTIP classes"><span class="mt-i">＋</span><span class="mt-l">Set up</span></button>
     <button class="map-tool" id="toolFind" type="button" onclick="findOpen_()" title="Find an address or a property"><span class="mt-i">🔎</span><span class="mt-l">Find</span></button>
     <button class="map-tool" id="toolProp" type="button" onclick="propBarOpen_()" title="The property shown on the map: pick it, its details, its maps"><span class="mt-i">🏠</span><span class="mt-l">Property</span></button>
-    <button class="map-tool on" id="toolNames" type="button" onclick="namesToggle_()" title="Property names and point symbols on or off"><span class="mt-i">🏷</span><span class="mt-l">Names</span></button>
-    <button class="map-tool on" id="toolTowns" type="button" onclick="toggleLabels('tw')" title="Town and city names on the zoomed-out map, on or off"><span class="mt-i">🏙</span><span class="mt-l">Towns</span></button>
+    <!-- v470: 🏷 Names and 🏙 Towns are switches in ◫ Layers now (they looked like active tools, and the rail ran off small phones) -->
     <div class="rail-gap"></div>
     <div class="rail-item">
       <button class="map-tool" id="toolEdit" type="button" onclick="railEditToggle_()" title="Map tools: text, points and lines for the maps, sample points, measuring"><span class="mt-i">🧰</span><span class="mt-l">Map tools</span></button>
@@ -964,10 +1012,15 @@ try{ (function(){
       </div>
     </div>
     <div class="rail-gap"></div>
-    <button class="map-tool" id="toolTrack" type="button" onclick="toggleTrack()" title="Record where you walk"><span class="mt-i">⏺</span><span class="mt-l">Track</span></button>
-    <button class="map-tool" id="toolRoute" type="button" onclick="toggleRoute()" title="Lay out a cruise line to follow"><span class="mt-i">〰️</span><span class="mt-l">Route</span></button>
-    <button class="map-tool" id="toolCount" type="button" onclick="openCount_()" title="Count plots and reference points"><span class="mt-i">#️⃣</span><span class="mt-l">Count</span></button>
-    <button class="map-tool" id="toolSelect" type="button" onclick="toggleSelect()" title="Pick out plots to delete, export or email"><span class="mt-i">☒</span><span class="mt-l">Select</span></button>
+    <div class="rail-item">
+      <button class="map-tool" id="toolField" type="button" onclick="railFieldToggle_()" title="Field: record a track, lay out a route, count plots, select plots"><span class="mt-i">🥾</span><span class="mt-l">Field</span><span class="rail-rec" id="railRec" style="display:none">REC</span></button>
+      <div class="rail-sub" id="railField">
+        <button class="map-tool" id="toolTrack" type="button" onclick="toggleTrack()" title="Record where you walk"><span class="mt-i">⏺</span><span class="mt-l">Track</span></button>
+        <button class="map-tool" id="toolRoute" type="button" onclick="toggleRoute()" title="Lay out a cruise line to follow"><span class="mt-i">〰️</span><span class="mt-l">Route</span></button>
+        <button class="map-tool" id="toolCount" type="button" onclick="railFieldToggle_(false);openCount_()" title="Count plots and reference points"><span class="mt-i">#️⃣</span><span class="mt-l">Count</span></button>
+        <button class="map-tool" id="toolSelect" type="button" onclick="railFieldToggle_(false);toggleSelect()" title="Pick out plots to delete, export or email"><span class="mt-i">☒</span><span class="mt-l">Select</span></button>
+      </div>
+    </div>
     <button class="map-tool" id="toolPdf" type="button" onclick="togglePDF()" title="Show or hide the PDF map" style="display:none"><span class="mt-i">🗺</span><span class="mt-l">PDF</span></button>
     <button class="map-tool" id="toolHelp" type="button" onclick="mapToolHelp_()" title="What do these do?"><span class="mt-i">？</span><span class="mt-l">Help</span></button>
   </div>
@@ -987,8 +1040,8 @@ try{ (function(){
     <div id="findResults" style="margin-top:6px;max-height:40vh;overflow-y:auto;-webkit-overflow-scrolling:touch"></div>
   </div>
   <!-- v413: the property, one tap from the map -->
-  <div id="propBar" style="display:none;position:absolute;left:10px;right:72px;top:calc(64px + env(safe-area-inset-top));z-index:5450;background:rgba(15,30,13,.96);border:1px solid #33623a;border-radius:10px;padding:8px;box-shadow:0 2px 12px rgba(0,0,0,.5)">
-    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><div style="flex:1;font-weight:700;color:#eafae8;font-size:14px">Property</div><button type="button" onclick="propBarClose_()" style="flex:none;padding:6px 10px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#cdebcf;font:inherit;font-size:13px">✕</button></div>
+  <div id="propBar" style="display:none;position:absolute;left:8px;right:8px;bottom:10px;max-height:60vh;overflow-y:auto;z-index:5450;background:rgba(15,30,13,.96);border:1px solid #33623a;border-radius:10px;padding:8px;box-shadow:0 2px 12px rgba(0,0,0,.5)">
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><div style="flex:1;font-weight:700;color:#eafae8;font-size:16px">Property</div><button type="button" class="bbar-q" onclick="helpOne_('prop')" title="What does this do?">?</button><button type="button" onclick="propBarClose_()" style="flex:none;padding:6px 10px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#cdebcf;font:inherit;font-size:13px">✕</button></div>
     <select id="propBarSel" onchange="propBarPick_(this.value)" style="width:100%;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></select>
     <div id="propBarBtns" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px"></div>
   </div>
@@ -1028,12 +1081,7 @@ try{ (function(){
     <button type="button" onclick="clearPoly()">Clear</button>
   </div>
   <div class="map-chips" id="mapChips">
-    <button type="button" onclick="zoomToMe_()" title="Center on my GPS">◎ Me</button>
-    <button type="button" onclick="fitAllLayers_()" title="Zoom to fit everything">⤢ Fit all</button>
-    <button type="button" onclick="openSearch()" title="Search stands or filter the plots by an attribute">⊙ Plots</button>
-    <button type="button" onclick="openMyLabel()" title="Label plot dots by analysis">🏷 Label</button>
-    <button type="button" onclick="openMapExport()" title="Export plots / compartments + analysis to shapefile">📤 Export</button>
-    <button type="button" id="crewWhereBtn" onclick="toggleCrewWhere()" title="Show or hide where the crew are, and where they were last seen">👤 Crew</button>
+    <!-- v470: ◎ Me and ⤢ Fit sit with the zoom buttons; Plots, Label and Crew are in ◫ Layers; Export is in ☰ Menu → Send & export -->
     <button type="button" id="pfClearBtn" style="display:none;background:#3a1030;border-color:#ff36c0;color:#ffd7f2" onclick="pfClear_()" title="Remove the crew &amp; date highlight">✕ Clear highlight</button>
   </div>
   <div class="map-drop" id="mapDrop">
@@ -1092,7 +1140,7 @@ try{ (function(){
 
 <div class="modal" id="moreMenu" style="display:none" onclick="if(event.target===this)closeMore()">
   <div class="modal-card">
-    <div class="modal-title" style="display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--card);padding:6px 0 12px;margin:0 0 8px;z-index:2">Tools <button type="button" onclick="closeMore()" style="background:#16271a;border:1px solid #33623a;border-radius:8px;color:#cdebcf;width:40px;height:40px;font-size:20px;line-height:1;cursor:pointer;flex:none" aria-label="Close">✕</button></div>
+    <div class="modal-title" style="display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--card);padding:6px 0 12px;margin:0 0 8px;z-index:2">Menu <button type="button" onclick="closeMore()" style="background:#16271a;border:1px solid #33623a;border-radius:8px;color:#cdebcf;width:40px;height:40px;font-size:20px;line-height:1;cursor:pointer;flex:none" aria-label="Close">✕</button></div>
       <details class="mgroup" open><summary>📈 View the analysis</summary>
         <button type="button" onclick="closeMore();openSummary()">📊 Stand summary — quick totals per stand</button>
         <button type="button" onclick="closeMore();openFullAnalysis('main')">📈 Full analysis — every summary tab</button>
@@ -1112,6 +1160,9 @@ try{ (function(){
              below do offer email, but only afterwards, in the panel that appears once the file is
              built — which is easy to miss and impossible to guess from here. Moved down, renamed for
              what it actually attaches, and the shapefile group now says where its email lives. -->
+        <button type="button" onclick="closeMore();exportCSV()">📋 Plots on this phone → CSV</button>
+        <button type="button" onclick="closeMore();exportShapefile()">📍 Plots on this phone → shapefile</button>
+        <button type="button" onclick="closeMore();openMap().then(()=>openMapExport())">📤 Plots or compartments + analysis → shapefile (choose)…</button>
         <button type="button" onclick="closeMore();exportPlotsRawShp()">📋 All plot data → shapefile (every column)</button>
         <button type="button" onclick="closeMore();exportPlotsFullSummaryShp()">📊 All plots + full summary → shapefile</button>
         <button type="button" onclick="closeMore();exportPlotsAnalysisShp('main')">📍 Plots + short analysis → shapefile</button>
@@ -1153,6 +1204,8 @@ try{ (function(){
       <details class="mgroup"><summary>⚙️ This device</summary>
         <button type="button" onclick="closeMore();openCruiser()">👤 Your name &amp; email — set this first</button>
         <button type="button" onclick="closeMore();accountPanel_()">🔐 Account — log in or sign out</button>
+        <button type="button" id="codesBtn" onclick="codesToggle_()">🔤 Show the Sheet's column codes on the form (office)</button>
+        <button type="button" id="sunBtn" onclick="sunToggle_()">☀ Sunlight mode — brighter, bigger text</button>
         <button type="button" onclick="closeMore();appStatus_()">ℹ️ App status — build, storage, connection</button>
         <button type="button" onclick="closeMore();storagePanel_()">🧮 Storage — what&rsquo;s using space, and free it</button>
         <button type="button" onclick="closeMore();bigStorePanel_()">📦 The phone&rsquo;s big store — photos, layers per property, tiles</button>
@@ -1375,7 +1428,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-13 · v469";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-14 · v470";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1667,7 +1720,7 @@ function capSeen_(c, full){
     _capTold=true;
     try{ showInfoSheet_("This account is at its plot limit",
       `<div style="font-size:13px;line-height:1.55;color:#e8f0e6">${esc(_capMsg)}<br><br><b>Nothing is lost:</b> your new plots are saved on this phone and will go to the Sheet as soon as there is room. Corrections to plots already in the Sheet still go through.`+
-      `<div style="color:#8fae95;font-size:12px;margin-top:10px">Tell whoever manages the Sheet. The phone tries again every ten minutes, or use Tools → Send queued plots.</div></div>`); }catch(e){}
+      `<div style="color:#8fae95;font-size:12px;margin-top:10px">Tell whoever manages the Sheet. The phone tries again every ten minutes, or use Menu → Send queued plots.</div></div>`); }catch(e){}
     return;
   }
   if(!c || !c.cap) return;
@@ -2160,7 +2213,16 @@ function fetchTracts(onList){
   document.body.appendChild(sc);
 }
 
-let toastT; function toast(msg,err){ const t=$("toast"); t.textContent=msg; t.className="toast show"+(err?" err":""); clearTimeout(toastT); toastT=setTimeout(()=>t.className="toast",2100); }
+/* v470 — connection trouble goes to the ● status chip in the header (tap it for the details), not as red messages in the
+   middle of the screen. A message the person is waiting on (an export, a send) still shows, in plain words. */
+var NET_LOG=[], _netBad=0, _netToastAt=0;
+const NET_SHEET_RE=/The Sheet didn't respond|No response from the Sheet/i;
+const NET_BG_RE=/Couldn't load crew (plots|routes)|Couldn't reach the provincial map service|Map needs a connection the first time/i;
+function netNote_(msg){ NET_LOG.unshift({t:Date.now(), msg:String(msg)}); NET_LOG=NET_LOG.slice(0,12); _netBad=Date.now(); try{ netStat_(); }catch(e){} }
+let toastT; function toast(msg,err){
+  if(err && NET_SHEET_RE.test(String(msg))){ netNote_(msg); if(Date.now()-_netToastAt<5*60000) return; _netToastAt=Date.now(); msg="The Sheet isn't answering — check your signal and try again. Your work is safe on this phone (tap ● at the top for details)."; }
+  else if(err && NET_BG_RE.test(String(msg))){ netNote_(msg); if(Date.now()-_netToastAt<5*60000) return; _netToastAt=Date.now(); msg="No connection to the Sheet or the map service right now — your work is safe on this phone"; err=false; }
+  const t=$("toast"); t.textContent=msg; t.className="toast show"+(err?" err":""); clearTimeout(toastT); toastT=setTimeout(()=>t.className="toast",2100); }
 
 opts($("TEXTURE"),DOM.TEXTURE); opts($("MOISTURE"),DOM.MOISTURE); opts($("DEPTH"),DOM.DEPTH);
 opts($("TOPOGRAPHY"),DOM.TOPOGRAPHY); opts($("ROCKINESS"),DOM.ROCKINESS);
@@ -3221,7 +3283,7 @@ function storageFailed_(){
          : ` This device also has no backup store, so <b>a plot is only safe once it reaches the Sheet</b>. Send them as soon as you have signal.`)+
     `</div>`+
     `<div style="font-size:12px;line-height:1.5;color:#8fae95;margin-top:10px">`+
-    `To free the main storage: <b>+ Layers</b> &rsaquo; unload the PDF map, or Tools &rsaquo; This device &rsaquo; storage, and clear what you no longer need. `+
+    `To free the main storage: <b>◫ Layers</b> &rsaquo; unload the PDF map, or Menu &rsaquo; This device &rsaquo; storage, and clear what you no longer need. `+
     `Your plots are never cleared by that.</div>`); }catch(e){}
 }
 
@@ -3891,7 +3953,22 @@ function undoDelete(){
   toast("Plot restored");
 }
 function undoDelete_OLD_REMOVED(){}
-function netDot(){ const q=saved.filter(p=>!p._sent).length; const d=$("netDot"); d.className="dot "+((!connected||isOffline()||q)?"off":"on"); }
+function netDot(){ const q=saved.filter(p=>!p._sent).length; const d=$("netDot"); d.className="dot "+((!connected||isOffline()||q)?"off":"on"); try{ netStat_(); }catch(e){} }
+/* v470: the ● chip — green: all sent; amber: offline or plots waiting; orange: the Sheet hasn't answered lately */
+function netStat_(){ const q=(saved||[]).filter(p=>!p._sent).length, off=isOffline(), bad=_netBad && Date.now()-_netBad<5*60000;
+  const cls=bad?"bad":off?"off":q?"q":"", txt=off?"Offline":q?q+" to send":bad?"Sheet?":"";
+  ["netStatForm","netStatMap"].forEach(id=>{ const b=$(id); if(!b) return; b.className="netstat"+(cls?" "+cls:""); b.title=(off?"Offline":bad?"The Sheet hasn't answered lately":q?q+" plot(s) waiting to send":"Online — everything sent")+" · tap for details"; });
+  const t=$("netStatTxt"); if(t) t.textContent=txt; }
+function netStatOpen_(){ const q=(saved||[]).filter(p=>!p._sent).length, off=isOffline();
+  const line=(c,h)=>`<div style="display:flex;gap:8px;align-items:center;margin:6px 0"><span style="width:11px;height:11px;border-radius:50%;background:${c};flex:none"></span><span>${h}</span></div>`;
+  let h=`<div style="font-size:14px;line-height:1.5;color:#eafae8">`+
+    (off?line("#e0a33a","<b>Offline</b> — the phone has no connection. Plots and changes are kept and go up when you're back in signal."):line("#4cc079","<b>Connected</b>"))+
+    (q?line("#e0a33a",`<b>${q}</b> plot${q===1?"":"s"} waiting to send`):line("#4cc079","Every plot on this phone has reached the Sheet"))+`</div>`;
+  if(q && !off) h+=`<button type="button" onclick="closeInfoSheet_();flushQueue(true)" style="width:100%;margin:6px 0;padding:12px;border-radius:9px;border:1px solid #2f7a44;background:#1f5a2c;color:#fff;font:600 14px system-ui">⬆ Send now</button>`;
+  if(NET_LOG.length) h+=`<div style="margin-top:10px;color:#cfe3d2;font-weight:600">Recent problems</div>`+NET_LOG.map(e=>`<div style="font-size:13px;color:#dcefe0;margin:4px 0"><span style="color:#a9c9b0">${new Date(e.t).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</span> ${esc(e.msg)}</div>`).join("")+
+    `<div style="margin-top:10px;font-size:12.5px;color:#a9c9b0;line-height:1.45">For the administrator: if the Sheet never answers right after the Apps Script code was changed, redeploy it — Deploy → Manage deployments → New version.</div>`;
+  showInfoSheet_("Connection", h); }
+try{ setInterval(()=>{ try{ netStat_(); }catch(e){} }, 30000); }catch(e){}
 
 /* ---------- offline queue: auto-send when signal returns ---------- */
 /* v452 — a backlog goes up in batches (Chris, 2026-11-02: 228 queued, "no change", no plots reaching the Sheet). Every queued
@@ -4889,7 +4966,7 @@ function reportSend_(){
   const text=String(($("reportText")||{}).value||"").trim();
   if(text.length<5){ say("Write a few words first."); return; }
   if(!connected || isOffline()){ say("No signal — this needs a connection. Your words are still here; send when you are back in range."); return; }
-  if(!authToken || authBlocked){ say("Log in first (Tools → Account) so the report says who sent it."); return; }
+  if(!authToken || authBlocked){ say("Log in first (Menu → Account) so the report says who sent it."); return; }
   if(_reportBusy) return; _reportBusy=true; say("Sending…");
   let about=""; try{ about="build "+APP_BUILD+"; "+(saved.filter(p=>!p._sent).length)+" plots waiting; "+String(navigator.userAgent||"").slice(0,120); }catch(e){}
   sheetPost_({_action:"report", text:text, about:about}).then(j=>{ _reportBusy=false;
@@ -5002,9 +5079,34 @@ function appStatus_(){
 /* ---------- data-entry person (per device): set once, stamped on every plot ---------- */
 let cruiser = (STORE && (()=>{ try{ return STORE.getItem("fi_cruiser")||""; }catch(e){ return ""; } })()) || "";
 let cruiserEmail = (STORE && (()=>{ try{ return STORE.getItem("fi_cruiser_email")||""; }catch(e){ return ""; } })()) || "";
-function renderCruiser(){ const el=$("cruiserName"); if(el) el.textContent = cruiser || "not set"; }
+function renderCruiser(){ const el=$("cruiserName"); if(el) el.textContent = cruiser || "not set — tap to add your name";
+  /* v470: "Later" used to leave "not set" quietly for good; the bar now stands out until a name is in */
+  const bar=document.querySelector(".cruiserbar"); if(bar){ bar.classList.toggle("unset", !cruiser); bar.onclick=cruiser?null:(e=>{ if(e.target.closest("button")) return; openCruiser(); }); } }
 function openCruiser(){ $("cruiserInput").value=cruiser; $("cruiserEmail").value=cruiserEmail; $("cruiserModal").style.display="flex"; setTimeout(()=>$("cruiserInput").focus(),40); }
-function closeCruiser(){ $("cruiserModal").style.display="none"; }
+function closeCruiser(){ $("cruiserModal").style.display="none"; if(_fr===1) frStep_(2); else gpsPendingShow_(); }
+/* v470 — first open, one thing at a time (it used to stack the name box over "Location is blocked"):
+   1 your name → 2 allow location → 3 a property to work in. */
+var _fr=0, _gpsPending=null;
+function frStart_(){ _fr=1; const t=document.querySelector("#cruiserModal .modal-title"); if(t) t.innerHTML=`<span style="display:block;color:#8fe6a0;font-size:12px;letter-spacing:.08em;margin-bottom:4px">WELCOME · STEP 1 OF 3</span>Who's entering data on this device?`; openCruiser(); }
+function frStep_(n){ _fr=n; const t=document.querySelector("#cruiserModal .modal-title"); if(t) t.textContent="Who's entering data on this device?";
+  const done=()=>{ _fr=0; try{ STORE&&STORE.setItem("fi_firstrun","1"); }catch(e){} frClose_(); gpsPendingShow_(); };
+  const B=(fn,t,main)=>`<button type="button" class="btn ${main?"submit":"ghost"}" style="width:100%;margin-top:8px;min-height:48px;font-size:15px" onclick="${fn}">${t}</button>`;
+  let h="";
+  if(n===2) h=`<div style="color:#8fe6a0;font-size:12px;letter-spacing:.08em">WELCOME · STEP 2 OF 3</div><div class="modal-title" style="margin-top:4px">Allow your location</div>`+
+      `<div class="hint" style="font-size:14px;line-height:1.5">The map shows where you are, and new plots take their position from your GPS. The phone will ask — choose <b>Allow</b>.</div>`+
+      B("frLocate_()","📍 Allow location",true)+B("frStep_(3)","Not now");
+  else if(n===3) h=`<div style="color:#8fe6a0;font-size:12px;letter-spacing:.08em">WELCOME · STEP 3 OF 3</div><div class="modal-title" style="margin-top:4px">A property to work in</div>`+
+      `<div class="hint" style="font-size:14px;line-height:1.5">Plots, maps and reports are kept by property.</div>`+
+      B("frDone_();openMap().then(()=>pwOpen_())","＋ Set up a new property",true)+
+      B("frDone_();openMap().then(()=>findOpen_())","🔎 Find one already in the Sheet")+
+      B("frDone_()","Just start entering plots");
+  if(!h) return done();
+  let m=$("frModal"); if(!m){ m=document.createElement("div"); m.id="frModal"; m.className="modal"; document.body.appendChild(m); }
+  m.innerHTML=`<div class="modal-card">${h}</div>`; m.style.display="flex"; }
+function frDone_(){ _fr=0; try{ STORE&&STORE.setItem("fi_firstrun","1"); }catch(e){} frClose_(); gpsPendingShow_(); }
+function frClose_(){ const m=$("frModal"); if(m) m.style.display="none"; }
+function frLocate_(){ try{ navigator.geolocation.getCurrentPosition(()=>{ toast("Location on"); frStep_(3); }, err=>{ frStep_(3); if(err&&err.code===1) _gpsPending=err; }, {enableHighAccuracy:true,timeout:15000}); }catch(e){ frStep_(3); } }
+function gpsPendingShow_(){ if(!_gpsPending||_fr) return; const e=_gpsPending; _gpsPending=null; _gpsErrShown=false; gpsTrouble_(e); }
 /* v460: "Hs" went onto 298 plots as the person who entered them — initials that are also a species code.
    A short name or a species code is questioned once; Save again keeps it. */
 let _cruiserWarned="";
@@ -7116,7 +7218,7 @@ $("STANDID").addEventListener("change", ()=>{
 });
 $("PLOTNUM").addEventListener("change", updateHdrAt_);
 $("PLOTNUM").addEventListener("input", updateHdrAt_);
-setNow(); renderGround([]); renderSaved(); updateTally(); netDot(); autoGPS(); updateHdrAt_();   // no auto first tree — the "＋ Add new tree" button starts the tally (matches the map-capture flow)
+setNow(); renderGround([]); renderSaved(); updateTally(); netDot(); autoGPS(); updateHdrAt_(); try{ setTimeout(secInit_,0); }catch(e){}   // no auto first tree — the "＋ Add new tree" button starts the tally (matches the map-capture flow)
 /* Restore anything the durable backup holds that localStorage has lost — a full quota, a cleared
    site, or a phone that died before the write landed. Runs after the first render so the list is
    already on screen, then refreshes it if plots come back. */
@@ -7202,7 +7304,7 @@ $("addModalInput").addEventListener("input",()=>{ if($("addModalCodeRow").style.
 $("addModalCode").addEventListener("input",()=>{ codeManual=true; });
 renderCruiser();
 if(navigator.storage && navigator.storage.persist){ navigator.storage.persist().catch(()=>{}); } // ask the browser not to evict our data
-if(!cruiser && $("draftRestore").style.display!=="flex") openCruiser(); // ask once on a new device
+if(!cruiser && $("draftRestore").style.display!=="flex"){ let fr=null; try{ fr=STORE&&STORE.getItem("fi_firstrun"); }catch(e){} if(!fr) frStart_(); else openCruiser(); } // ask once on a new device (v470: the welcome steps)
 // offline app: cache the page so it opens with no signal (live site only; no-op in sandbox)
 if("serviceWorker" in navigator){ try{ navigator.serviceWorker.register("./sw.js").catch(()=>{}); }catch(e){} }
 
@@ -7313,7 +7415,7 @@ function resumeSharing_(){
   }
   setCrewBtn(); setCrewRouteBtn(); setLiveBtn(); setCrewWhereBtn();
 }
-function closeMap(){ rememberMapView_(); $("mapView").style.display="none"; document.body.classList.remove("map-open"); stopMapGPS(); if(crewTimer){ clearInterval(crewTimer); crewTimer=null; } if(crewRoutesTimer){ clearInterval(crewRoutesTimer); crewRoutesTimer=null; }
+function closeMap(){ try{ if(_cnt) cntClose_(); }catch(e){} rememberMapView_(); $("mapView").style.display="none"; document.body.classList.remove("map-open"); stopMapGPS(); if(crewTimer){ clearInterval(crewTimer); crewTimer=null; } if(crewRoutesTimer){ clearInterval(crewRoutesTimer); crewRoutesTimer=null; }
   if(liveOn) pauseLive_();   // pause, don't switch off: resumeSharing_ picks it back up on reopen
   if(typeof moveMode_!=="undefined" && moveMode_){ try{ moveCancel_(); }catch(e){} }
   if(typeof placeMode!=="undefined" && placeMode){ placeMode=false; if(placeMarker){ fmap.removeLayer(placeMarker); placeMarker=null; } const tp=$("toolPlace"); if(tp) tp.classList.remove("on"); resetDropBar(); }
@@ -7331,6 +7433,9 @@ function initMap(){
   // is still there offline. See TILE_CACHE in sw.js.
   setImagery_(imageryId,true);      // v382: Esri, or York Region / Simcoe County photography (chosen under Layers)
   L.control.zoom({position:"bottomright"}).addTo(fmap);
+  try{ const Q=L.Control.extend({ options:{position:"bottomright"}, onAdd(){ const d=L.DomUtil.create("div","leaflet-bar map-quick");
+      d.innerHTML=`<a href="#" role="button" id="mqMe" title="Centre on my position" onclick="event.preventDefault();zoomToMe_()">◎</a><a href="#" role="button" id="mqFit" title="Zoom to fit everything" onclick="event.preventDefault();fitAllLayers_()">⤢</a>`;
+      L.DomEvent.disableClickPropagation(d); return d; } }); new Q().addTo(fmap); }catch(e){}      // v470: above the zoom buttons
   fpins=L.layerGroup().addTo(fmap); fauditpins=L.layerGroup().addTo(fmap); fboundLayer=L.layerGroup().addTo(fmap); flabelLayer=L.layerGroup().addTo(fmap); refLayer=L.layerGroup().addTo(fmap); freflabelLayer=L.layerGroup().addTo(fmap); crewLayer=L.layerGroup().addTo(fmap); liveLayer=L.layerGroup().addTo(fmap); crewRouteLayer=L.layerGroup().addTo(fmap); photoLayer=L.layerGroup().addTo(fmap);
   applyLayerVis_();
   fmap.on("moveend zoomend",rememberMapView_);
@@ -7339,6 +7444,7 @@ function initMap(){
      (Samsung Internet, WebViews) do not when a canvas renderer is under the finger, so a short, still touch that is not
      followed by a click within 450 ms is handled the same way (Chris, 2026-10-13: no popup on Android). */
   window.mapTapHandle_=function(ll){ try{
+    if(typeof cntTap_==="function" && cntTap_(ll)) return;                     // v470: #️⃣ Count — a compartment tapped, or an area drawn
     if(typeof spTap_==="function" && spTap_(ll)) return;                       // v468: ⊞ Sample points — picking or drawing the area
     if(typeof pwTap_==="function" && pwTap_(ll)) return;                       // v465: ＋ Set up — drawing the outline, or finding a compartment in the names list
     if(typeof rnTap_==="function" && rnTap_(ll)) return;                       // v384: placing a typed road label
@@ -7476,7 +7582,7 @@ function dlUploadFile_(f){
   if(!/\.(zip|shp|geojson|json|kml|kmz|csv|tsv|txt|pdf)$/i.test(f.name||"")){ toast("That is not a layer file the app can open",true); return; }
   if(f.size>DL_UP_MAX){ toast("That file is "+Math.round(f.size/1048576)+" MB — too big to send from the phone (the limit is about 6 MB).",true); return; }
   if(_dlUpBusy) return;
-  if(!authToken){ toast("Log in first (Tools → Account) to add a shared layer",true); return; }
+  if(!authToken){ toast("Log in first (Menu → Account) to add a shared layer",true); return; }
   _dlUpBusy=true;
   const b=$("dlUpBtn"); if(b){ b.disabled=true; b.style.opacity=.6; b.innerHTML="⬆ Sending "+esc(f.name)+"…"; }
   const fr=new FileReader();
@@ -7815,6 +7921,16 @@ function renderLayerVis_(){
       lblBtn+rmBtn+
       `<span class="visdot ${on?"on":""}" onclick="${onTap}" style="cursor:pointer">${on?"ON":"OFF"}</span></div>`+sub;
   }).join("") : "";
+  /* v470: Names and Towns were rail buttons; Plots, Label and Crew were chips under the map */
+  const sw=(on,lab,fn,id)=>`<div class="visrow" ${id?`id="${id}"`:""}><span onclick="${fn}" style="flex:1;cursor:pointer">${lab}</span><span class="visdot ${on?"on":""}" onclick="${fn}" style="cursor:pointer">${on?"ON":"OFF"}</span></div>`;
+  const go=(lab,fn,id)=>`<div class="visrow" id="${id}" onclick="${fn}"><span style="flex:1">${lab}</span><span style="color:#8fae95">›</span></div>`;
+  let cw=false; try{ cw=!!crewWhereOn; }catch(e){}
+  box.innerHTML += `<div class="layer-hd" style="margin-top:12px">On the map</div>`+
+    sw(labelVis.ov!==false&&labelVis.pts!==false, "🏷 Property names &amp; point symbols", "namesToggle_();renderLayerVis_()", "lvNames")+
+    sw(labelVis.tw!==false, "🏙 Town names (zoomed out)", "toggleLabels('tw');renderLayerVis_()", "lvTowns")+
+    sw(cw, "👤 Where the crew are", "toggleCrewWhere();renderLayerVis_()", "lvCrew")+
+    go("⊙ Find or filter plots…", "closeLayersMenu();openSearch()", "lvSearch")+
+    go("🏷 Label plot dots by…", "closeLayersMenu();openMyLabel()", "lvLabel");
 }
 function normalizeFC(gj){
   let feats=[]; const cols=Array.isArray(gj)?gj:[gj];
@@ -7939,7 +8055,7 @@ function sharedFieldsTell_(r, quiet){
   if(r.standWas && r.standWas!==r.standNow){
     try{ showInfoSheet_("Stand field changed by your crew",
       `<div style="font-size:13px;line-height:1.55;color:#e8f0e6">For <b>${esc(r.file)}</b> your crew's setting is now in use on this phone.<br><br>Stand names come from <b>${esc(r.standNow)}</b> (this phone was using <b>${esc(r.standWas)}</b>).`+
-      `<div style="color:#8fae95;font-size:12px;margin-top:10px">New plots take their stand from this field. If it is wrong, change it under + Layers — your change is then shared with the crew.</div></div>`); }catch(e){}
+      `<div style="color:#8fae95;font-size:12px;margin-top:10px">New plots take their stand from this field. If it is wrong, change it under ◫ Layers — your change is then shared with the crew.</div></div>`); }catch(e){}
   } else if(!quiet) toast("Using your crew's field settings for "+r.file);
 }
 function fieldsPost_(name, fields){
@@ -8207,7 +8323,7 @@ function rptReady_(f){
     `<button type="button" onclick="rptSave_('${esc(f.id)}')" style="display:block;width:100%;text-align:left;padding:12px;margin:0 0 7px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">⬇ Save to this device<div style="color:#8fae95;font-size:11px;margin-top:2px">No account needed</div></button>`+
     (mail
       ? `<button type="button" onclick="rptMail_('${esc(f.id)}')" style="display:block;width:100%;text-align:left;padding:12px;margin:0 0 7px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">✉️ Email it to me<div style="color:#8fae95;font-size:11px;margin-top:2px">${esc(mail)}</div></button>`
-      : `<div style="color:#e8a33a;font-size:11px;line-height:1.4;margin:0 0 7px">Set your email in Tools → This device to have reports sent to you.</div>`)+
+      : `<div style="color:#e8a33a;font-size:11px;line-height:1.4;margin:0 0 7px">Set your email in Menu → This device to have reports sent to you.</div>`)+
     (isLimited_()?"":`<a href="${esc(f.url)}" target="_blank" rel="noopener" style="display:block;padding:11px;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#a9c9b0;text-decoration:none;text-align:center;font-size:12px">📄 Open in Drive <span style="color:#5a7a62">— needs a Google account</span></a>`));
 }
 function rptSave_(id){
@@ -8528,6 +8644,7 @@ let _gpsErrShown=false;
 function gpsTrouble_(err){
   const code=err&&err.code, msg=(err&&err.message)||"";
   if(code===1){
+    if(_fr || ($("cruiserModal")&&$("cruiserModal").style.display==="flex")){ _gpsPending=err; return; }      // v470: not on top of the welcome steps
     showInfoSheet_("Location is blocked",
       `<div style="color:#a9c9b0;font-size:13px;line-height:1.55">`+
       `<p style="margin:0 0 8px">Safari isn't allowing this page to use your location. There are three separate settings on an iPhone and all of them have to be on:</p>`+
@@ -9553,16 +9670,17 @@ function updateLayerStatus(){
   const plural=(n,w)=>`${n} ${w}${n==1?"":"s"}`;
   const nMine=(typeof saved!=="undefined"&&saved)?saved.length:0;
   const nImp=(typeof auditPlots!=="undefined"&&auditPlots)?auditPlots.length:0;
+  /* v470: only what is loaded (it listed every layer with a 0) */
+  const nArea=polys.length+(polyPts.length>=3?1:0);
   const rows=[
     `${dot("#e8b84b")}<span>On this device: <b>${nMine}</b> ${nMine==1?"plot":"plots"}</span>`,
-  ].concat(nImp?[`${dot("#4aa3e0")}<span>Imported plots: <b>${nImp}</b> ${nImp==1?"plot":"plots"}</span>`]:[]).concat([
-    `${dot("#8fd18a")}<span>Stand boundaries: <b>${nb}</b> ${nb==1?"file":"files"} <span class="ls-muted">· ${plural(npoly,"polygon")}</span></span>`,
-    `${dot("#ffffff")}<span>Reference: <b>${nref}</b> ${nref==1?"feature":"features"} <span class="ls-muted">· ${plural(npt,"point")}</span></span>`,
-    `${dot("#90caf9")}<span>PDF map: <b>${pdfOverlay?"1":"0"}</b>${pdfOverlay&&pdfName?` <span class="ls-muted">· ${esc(pdfName)}</span>`:""}</span>`,
-    `${dot("#e8b84b")}<span>Track log: <b>${trackLog.length}</b> ${trackLog.length==1?"point":"points"}</span>`,
-    `${dot("#3fb7ff")}<span>Cruise route: <b>${routePts.length}</b> ${routePts.length==1?"point":"points"}${routePts.length>1?` <span class="ls-muted">· ${fmtDist_(routeLen())}</span>`:""}</span>`,
-    `${dot("#b56cff")}<span>Area polygons: <b>${polys.length+(polyPts.length>=3?1:0)}</b>${(polys.length||polyPts.length>=3)?` <span class="ls-muted">· ${fmtArea_(polys.reduce((a,pg)=>a+polyAreaOf_(pg.pts),0)+(polyPts.length>=3?polyAreaOf_(polyPts):0))} total</span>`:""}</span>`
-  ]);
+  ].concat(nImp?[`${dot("#4aa3e0")}<span>Imported plots: <b>${nImp}</b> ${nImp==1?"plot":"plots"}</span>`]:[])
+   .concat(nb?[`${dot("#8fd18a")}<span>Stand boundaries: <b>${nb}</b> ${nb==1?"file":"files"} <span class="ls-muted">· ${plural(npoly,"polygon")}</span></span>`]:[])
+   .concat(nref||npt?[`${dot("#ffffff")}<span>Reference: <b>${nref}</b> ${nref==1?"feature":"features"} <span class="ls-muted">· ${plural(npt,"point")}</span></span>`]:[])
+   .concat(pdfOverlay?[`${dot("#90caf9")}<span>PDF map: <b>1</b>${pdfName?` <span class="ls-muted">· ${esc(pdfName)}</span>`:""}</span>`]:[])
+   .concat(trackLog.length?[`${dot("#e8b84b")}<span>Track log: <b>${trackLog.length}</b> ${trackLog.length==1?"point":"points"}</span>`]:[])
+   .concat(routePts.length?[`${dot("#3fb7ff")}<span>Cruise route: <b>${routePts.length}</b> ${routePts.length==1?"point":"points"}${routePts.length>1?` <span class="ls-muted">· ${fmtDist_(routeLen())}</span>`:""}</span>`]:[])
+   .concat(nArea?[`${dot("#b56cff")}<span>Area polygons: <b>${nArea}</b> <span class="ls-muted">· ${fmtArea_(polys.reduce((a,pg)=>a+polyAreaOf_(pg.pts),0)+(polyPts.length>=3?polyAreaOf_(polyPts):0))} total</span></span>`]:[]);
   el.innerHTML=`<div class="ls-hd">Loaded layers</div>`+rows.map(r=>`<div class="ls-row">${r}</div>`).join("")
     +`<div class="ls-row ls-muted" style="margin-top:2px"><span>Saved offline ~${usedK} KB${near}</span><span style="flex:1"></span><span>${pct}%</span></div>`
     +`<div class="ls-bar"><i style="width:${pct}%;background:${barCol}"></i></div>`;
@@ -9712,16 +9830,39 @@ function startCapture(){
   show();
 }
 function endCapture_(){ captureMode=false; $("mapCrosshair").style.display="none"; resetDropBar(); }
+/* v470 — the form: each section ends with "Next: … ›", and its header shows what's filled in (✓ 12 trees, ✓ 3) */
+function secAll_(){ return [...document.querySelectorAll("details.sec")].filter(d=>d.id!=="savedSec"); }
+function secScroll_(d){ try{ const hb=document.querySelector(".appbar"), off=(hb?hb.getBoundingClientRect().height:0)+8; window.scrollTo({top:Math.max(0,d.getBoundingClientRect().top+window.scrollY-off),behavior:"smooth"}); }catch(e){} }
+function secGo_(i){ const L=secAll_(); if(L[i]) L[i].open=false; const n=L[i+1]; if(!n) return; n.open=true; setTimeout(()=>secScroll_(n),60); }
+function secFields_(d){ return [...d.querySelectorAll(".secbody input, .secbody select, .secbody textarea")].filter(el=>!/^(button|submit|file|hidden|search)$/.test(el.type||"")); }
+function secVal_(el){ return el.type==="checkbox"||el.type==="radio" ? (el.checked?"1":"") : String(el.value==null?"":el.value); }
+function secInit_(){ const L=secAll_();
+  L.forEach((d,i)=>{ const sm=d.querySelector("summary"); if(sm && !sm.querySelector(".sec-done")){ const sp=document.createElement("span"); sp.className="sec-done"; const arw=sm.querySelector(".arw"); sm.insertBefore(sp, arw||null); }
+    secFields_(d).forEach(el=>{ if(el.dataset.def==null) el.dataset.def=secVal_(el); });
+    const body=d.querySelector(".secbody"); if(body && i<L.length-1 && !body.querySelector(":scope > .sec-next")){ const nm=(L[i+1].querySelector("summary")||{}).childNodes; let t="";
+      try{ t=[...L[i+1].querySelector("summary").childNodes].filter(n=>n.nodeType===3).map(n=>n.textContent).join("").trim(); }catch(e){}
+      const b=document.createElement("button"); b.type="button"; b.className="sec-next"; b.textContent="Next: "+(t||"next section")+" ›"; b.onclick=()=>secGo_(i); body.appendChild(b); } });
+  secProgress_(); }
+function secProgress_(){ const L=secAll_(); L.forEach((d,i)=>{ const sp=d.querySelector("summary .sec-done"); if(!sp) return; let t="";
+    if(i===1){ let n=0; try{ n=liveTreeCount(); }catch(e){} t=n?`✓ ${n} tree${n===1?"":"s"}`:""; }
+    else if(i>0){ const n=secFields_(d).filter(el=>{ const v=secVal_(el); return v!=="" && v!==(el.dataset.def!=null?el.dataset.def:""); }).length; /* rows added later (regen, species) count from empty */ t=n?"✓ "+n:""; }
+    sp.textContent=t; }); }
+let _secT=null; ["input","change","click"].forEach(ev=>document.addEventListener(ev,()=>{ clearTimeout(_secT); _secT=setTimeout(()=>{ try{ secProgress_(); }catch(e){} },250); },true));
+function secAfterPlace_(){ const L=secAll_(); L.forEach(d=>{ d.open=false; }); if(L[1]){ L[1].open=true; setTimeout(()=>secScroll_(L[1]),120); } }
+function sunToggle_(){ const on=!document.body.classList.contains("sun"); document.body.classList.toggle("sun",on); try{ STORE&&STORE.setItem("fi_sun",on?"1":"0"); }catch(e){} toast(on?"Sunlight mode on":"Sunlight mode off"); }
+try{ if(STORE&&STORE.getItem("fi_sun")==="1") document.body.classList.add("sun"); }catch(e){}
+function codesToggle_(){ const on=!document.body.classList.contains("show-codes"); document.body.classList.toggle("show-codes",on); try{ STORE&&STORE.setItem("fi_codes",on?"1":"0"); }catch(e){} toast(on?"Column codes shown on the form":"Column codes hidden"); }
+try{ if(STORE&&STORE.getItem("fi_codes")==="1") document.body.classList.add("show-codes"); }catch(e){}
 function captureAtCrosshair(){
   // same correction as the move: the crosshair is not the map centre
   const c=crosshairLatLng_() || fmap.getCenter(); fillPlace(c.lat,c.lng);
-  endCapture_(); closeMap(); window.scrollTo({top:0,behavior:"smooth"});   // return to the top of the form for data entry
-  toast("Location set — enter your plot data");
+  endCapture_(); closeMap(); secAfterPlace_();   // v470: straight to the tree tally (the header shows stand · plot)
+  toast("Location set — tally the trees");
 }
 function captureAtGPS(){
   if(!mePos){ toast("No GPS fix yet — pan to the spot and use the crosshair instead",true); return; }
   const a=avgPos_()||mePos; setLocation(a.lat,a.lon,(a.n&&a.n>1)?`your location · avg ${a.n} fixes`:"your location",a.alt);
-  endCapture_(); closeMap(); toast("Location set from GPS — enter your plot data");
+  endCapture_(); closeMap(); secAfterPlace_(); toast("Location set from GPS — tally the trees");
 }
 
 /* ---- measure distance / area ---- */
@@ -10396,40 +10537,88 @@ function countByStand_(pts){ const m={}; pts.forEach(p=>{ const s=p.stand||"(una
 // Count everything on the map, per layer and per compartment.
 /* One Count button instead of two. #️⃣ counted the whole map and ◎ counted inside a polygon — two
    near-identical glyphs for a difference nobody could guess. Ask instead. */
-function openCount_(){
-  const hasPoly = (typeof polyPts!=="undefined" && polyPts && polyPts.length>=3) ||
-                  (typeof polys!=="undefined" && polys && polys.length);
-  showInfoSheet_("Count points",
-    `<div style="color:#a9c9b0;font-size:12px;line-height:1.5;margin-bottom:10px">Counts your plots, crew plots, imported plots and reference points.</div>`+
-    `<button type="button" onclick="closeInfoSheet_();countPoints()" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">#️⃣ Everything on the map<div style="color:#8fae95;font-size:11px;margin-top:2px">Totals, broken down by compartment</div></button>`+
-    `<button type="button" onclick="closeInfoSheet_();countPoints(true)" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">▢ Just what's in view<div style="color:#8fae95;font-size:11px;margin-top:2px">Only the plots on the screen now — zoom or pan first, then count</div></button>`+
-    (hasPoly
-      ? `<button type="button" onclick="closeInfoSheet_();countInPolygon()" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">◎ Inside an outline<div style="color:#8fae95;font-size:11px;margin-top:2px">Uses the area you have drawn, with its size in hectares</div></button>`
-      : `<div style="color:#5a7a62;font-size:11px;margin-top:8px;line-height:1.4">To count inside an area, use <b>Draw</b> to outline it first — then this offers to count what falls inside.</div>`));
-}
+/* v470 — #️⃣ Count as a bar at the bottom (the map stays in view): everything, what's in view, a compartment you tap, or an
+   area you draw. (v468 took ⬠ Draw off the rail, which had been the only way to count inside an area.) */
+var _cnt=null, _cntTmp=[];
+function bbar_(id, html){ let bar=$(id); if(!bar){ bar=document.createElement("div"); bar.id=id; bar.className="bbar"; document.body.appendChild(bar); }
+  bar.innerHTML=html; try{ document.body.classList.add("bar-open","pw-open"); }catch(e){} return bar; }
+function bbarClose_(id){ const b=$(id); if(b&&b.parentNode) b.parentNode.removeChild(b); if(!document.querySelector(".bbar,#spBar,#pwBar")) try{ document.body.classList.remove("bar-open","pw-open"); }catch(e){} }
+function bbarHead_(t, help, close){ return `<div class="bbar-hd"><b>${t}</b>${help?`<button type="button" class="bbar-q" onclick="helpOne_('${help}')" title="What does this do?">?</button>`:""}<button type="button" class="bbar-x" onclick="${close}" title="Close">✕</button></div>`; }
+function openCount_(){ if(_cnt){ cntClose_(); return; } _cnt={step:"menu", pts:[]}; const b=$("toolCount"); if(b) b.classList.add("on"); cntBar_(); }
+function cntClose_(){ cntTmpClear_(); _cnt=null; bbarClose_("cntBar"); const b=$("toolCount"); if(b) b.classList.remove("on"); }
+function cntTmpClear_(){ try{ _cntTmp.forEach(m=>fmap.removeLayer(m)); }catch(e){} _cntTmp=[]; }
+function cntBar_(){ if(!_cnt) return; const st=_cnt.step;
+  const opt=(fn,t,d)=>`<button type="button" class="bbar-opt" onclick="${fn}">${t}<div>${d}</div></button>`;
+  const hasPoly=(typeof polyPts!=="undefined"&&polyPts&&polyPts.length>=3)||(typeof polys!=="undefined"&&polys&&polys.length);
+  let h=bbarHead_("#️⃣ Count plots","count","cntClose_()");
+  if(st==="menu") h+=`<div class="bbar-note">Your plots, crew plots, imported plots and reference points.</div>`+
+    opt("cntClose_();countPoints()","#️⃣ Everything on the map","Totals, broken down by compartment")+
+    opt("cntClose_();countPoints(true)","▢ Just what's in view","Only what is on the screen now — zoom or pan first")+
+    opt("_cnt.step='pick';cntBar_()","⬚ In a compartment — tap it","Plots inside it, its size and plots per ha")+
+    opt("_cnt.step='draw';_cnt.pts=[];cntBar_()","✏ In an area you draw","Tap the corners of any area")+
+    (hasPoly?opt("cntClose_();countInPolygon()","◎ Inside your saved outline","The last area drawn with the old ⬠ Draw tool"):"");
+  else if(st==="pick") h+=`<div class="bbar-note"><b>Tap the compartment</b> on the map.</div><div class="bbar-row"><button type="button" class="btn ghost" onclick="_cnt.step='menu';cntBar_()">◂ Back</button></div>`;
+  else if(st==="draw"){ const n=_cnt.pts.length;
+    h+=`<div class="bbar-note">${n?n+" corner"+(n===1?"":"s")+" — keep tapping round the area.":"Tap the area's corners in order on the map."}</div>`+
+      `<div class="bbar-row"><button type="button" class="btn submit" ${n<3?"disabled":""} onclick="cntDrawDone_()">✓ Count inside</button><button type="button" class="btn ghost" ${n?"":"disabled"} onclick="_cnt.pts.pop();cntDrawTmp_();cntBar_()">↶ Corner</button><button type="button" class="btn ghost" onclick="cntTmpClear_();_cnt.step='menu';cntBar_()">◂ Back</button></div>`; }
+  bbar_("cntBar", h); }
+function cntTap_(ll){ if(!_cnt) return false;
+  if(_cnt.step==="pick"){ const r=spPickAt_(ll); if(!r){ toast("No compartment there — tap inside one, or ◂ Back and draw an area",true); return true; }
+    cntClose_(); countInArea_(r.polys, (r.stand?r.stand:"the compartment")+(r.tract?" · "+r.tract:"")); return true; }
+  if(_cnt.step==="draw"){ _cnt.pts.push([+ll.lat,+ll.lng]); cntDrawTmp_(); cntBar_(); return true; }
+  return true; }
+function cntDrawTmp_(){ cntTmpClear_(); const pts=_cnt.pts; if(!fmap||!window.L) return;
+  try{ if(pts.length>=3) _cntTmp.push(L.polygon(pts,{color:"#ffd24a",weight:3,fillOpacity:.1,interactive:false}).addTo(fmap)); else if(pts.length===2) _cntTmp.push(L.polyline(pts,{color:"#ffd24a",weight:3,interactive:false}).addTo(fmap));
+    pts.forEach(q=>_cntTmp.push(L.circleMarker(q,{radius:5,color:"#fff",weight:2,fillColor:"#ffd24a",fillOpacity:1,interactive:false}).addTo(fmap))); }catch(e){} }
+function cntDrawDone_(){ const pts=_cnt.pts.slice(); if(pts.length<3) return; cntClose_(); countInArea_([[pts]], "the area you drew"); }
+/* points inside any of the polygons [[outer, hole…], …] (lat/lon) */
+function countInArea_(polys, where){
+  const inside=(lat,lon)=>polys.some(pg=>pointInRing_(lat,lon,pg[0]) && !pg.slice(1).some(h=>pointInRing_(lat,lon,h)));
+  const layers=allPointLayers_(), insideOf=[]; let rows="";
+  layers.forEach(l=>{ const ins=l.pts.filter(p=>isFinite(+p.lat)&&isFinite(+p.lon)&&inside(+p.lat,+p.lon)); insideOf.push(ins);
+    if(ins.length) rows+=`<div style="font:13px system-ui;color:#dcefe0">${esc(l.layer)}: <b>${ins.length}</b> of ${l.pts.length}</div>`; });
+  const d=distinctPts_(insideOf), who=byWho_(insideOf);
+  let ha=0; try{ ha=spHa_(polys); }catch(e){}
+  let html=`<div style="font:600 15px system-ui;margin-bottom:6px">${d.n} plot${d.n===1?"":"s"} in ${esc(where)}</div>`;
+  if(!d.n) html+="<div style='color:#cfe3d2'>No plots or points fall inside.</div>";
+  else { const names=Object.keys(who).sort((a,b)=>who[b]-who[a]);
+    if(names.length) html+=`<div style="margin:2px 0 6px;font:13px system-ui;color:#dcefe0">Collected by: `+names.map(n=>`${esc(n)} <b>${who[n]}</b>`).join(" · ")+`</div>`;
+    html+=`<div style="margin-top:6px;font:600 13px system-ui;color:#8fe6a0">Where they are held</div>`+rows;
+    if(d.dup) html+=`<div style="margin-top:5px;font:12.5px system-ui;color:#cfe3d2">${d.dup} of those are the same plot in two lists (on this device and in the Sheet); ${d.n} real plots.</div>`; }
+  html+=`<div style="margin-top:8px;font:13px system-ui;color:#cfe3d2">Area ≈ ${ha.toFixed(ha<10?2:1)} ha (${(ha*HA_AC).toFixed(1)} ac) · ${ha>0?(d.n/ha).toFixed(2):"—"} plots/ha</div>`;
+  showInfoSheet_("Plots in an area", html);
+  try{ window.__lastCount={n:d.n, ha, where}; }catch(e){}
+  return d.n; }
 /* A plain list of what the rail does, because a tooltip you have to hover for is no use on a phone. */
-function mapToolHelp_(){
-  const row=(i,n,d)=>`<div style="display:flex;gap:10px;padding:7px 0;border-bottom:1px solid #1d3320">`+
-    `<div style="width:24px;text-align:center;font-size:16px">${i}</div>`+
-    `<div><div style="color:#eafae8;font-size:13px">${n}</div>`+
-    `<div style="color:#8fae95;font-size:11px;line-height:1.4;margin-top:1px">${d}</div></div></div>`;
-  showInfoSheet_("The map tools",
-    row("＋","Set up","Add a property step by step: name it, make its outline (draw it, or load the CLTIP viewer's export), cut it into compartments, then name them and set each one's MFTIP class. On a property already set up it opens its page, where any step can be done again.")+
-    row("🏠","Property","The property shown on the map: pick it (the map zooms to it), open its details and MFTIP areas, print its maps, or show every property again after a Find.")+
-    row("🧰","Map tools","Opens the tools in a row: Text, Points, Lines, Sample and Measure. Tap again to tuck them away. (Drawing a property and its compartments is under ＋ Set up.)")+
-    row("✎","Text","Notes and arrows for the MFTIP maps: one tap for a note, two for an arrow (tail, then head). Size in inches as printed, bold, colour, and which map it goes on.")+
-    row("⤳","Lines","Trails, private roads, skid trails and streams — and ponds, wetlands and other areas — for the MFTIP maps: made from the track log you recorded, traced over it, or tapped along the map. Each line has a name, a kind with its own line style, and a note. Shared through the Sheet.")+
-    row("📍","Points","Buildings, gates, species at risk, stick nests, dens and other features for the MFTIP maps: pick the kind, then tap the map (or use your position). Each point can carry a name, a note and photos; a sensitive point is left off a printed map unless asked for. Shared through the Sheet.")+
-    row("🔎","Find","Type a street address and the map goes there and drops a pin. Needs signal. The pin stays until you clear it.")+
-    row("⏺","Track","Records where you walk, as a line. Tap again to stop. Export it from + Layers.")+
-    row("📐","Measure","Tap two or more points for a distance; close the shape for an area. Nothing is saved.")+
-    row("〰️","Route","Lay out a line of points to walk — a planned cruise line. Can be saved and shared.")+
-    row("⊞","Sample","A grid of sample points in a compartment: tap the compartment (or draw an area), choose points per ha, a spacing or a % of the area, and the points are made from a random start, numbered in walking order. Every crew phone gets them; tap one → Place plot here. Export as a shapefile, GPX or CSV.")+
-    row("#️⃣","Count","How many plots and reference points there are — everything on the map, or just inside an area you have drawn.")+
-    row("☒","Select","Tap corners around plots to pick them out, then delete, export or email just those.")+
-    row("🗺","PDF","Appears once a georeferenced PDF is loaded. Shows or hides it; the slider sets how see-through it is.")+
-    `<div style="color:#5a7a62;font-size:11px;margin-top:10px;line-height:1.4">A tool stays on until you tap it again — the button turns amber while it is active.</div>`);
-}
+/* v470: the help as data — the whole list from ？ Help, or one topic from the ? on a panel */
+const HELP_ROWS=[
+  ["setup","＋","Set up","Add a property step by step: name it, make its outline (draw it, or load the CLTIP viewer's export), cut it into compartments, then name them and set each one's MFTIP class. On a property already set up it opens its page, where any step can be done again."],
+  ["find","🔎","Find","Type a property name or a street address and the map goes there. Needs signal for addresses. The pin stays until you clear it."],
+  ["prop","🏠","Property","The property shown on the map: pick it (the map zooms to it), open its details and MFTIP areas, make its maps, or open its compartments in ＋ Set up."],
+  ["tools","🧰","Map tools","Opens a row of tools: Text, Points, Lines, Sample and Measure. Tap again to tuck them away."],
+  ["text","✎","Text","Notes and arrows for the MFTIP maps: one tap for a note, two for an arrow (tail, then head). Size in inches as printed, bold, colour, and which map it goes on."],
+  ["lines","⤳","Lines","Trails, private roads, skid trails and streams — and ponds, wetlands and other areas — for the MFTIP maps: made from the track log you recorded, traced over it, or tapped along the map. Each line has a name, a kind with its own line style, and a note. Shared through the Sheet."],
+  ["points","📍","Points","Buildings, gates, species at risk, stick nests, dens and other features for the MFTIP maps: pick the kind, then tap the map (or use your position). Each point can carry a name, a note and photos; a sensitive point is left off a printed map unless asked for. Shared through the Sheet."],
+  ["sample","⊞","Sample","A grid of sample points in a compartment: tap the compartment (or draw an area), choose points per ha, a spacing or a % of the area, and how far to keep from the edge. The points are made from a random start and numbered in walking order. Every crew phone gets them; tap one → Place plot here. Export as a shapefile, GPX or CSV; switch them on or off, or remove them, in ◫ Layers."],
+  ["measure","📐","Measure","Tap two or more points for a distance; close the shape for an area. Nothing is saved."],
+  ["field","🥾","Field","Opens a row of tools for the walk: Track, Route, Count and Select. It says REC while the track is recording."],
+  ["track","⏺","Track","Records where you walk, as a line. Tap again to stop. Export it from ◫ Layers → Files."],
+  ["route","〰️","Route","Lay out a line of points to walk — a planned cruise line. Can be saved and shared."],
+  ["count","#️⃣","Count","How many plots and reference points there are: everything on the map, just what's on the screen, inside a compartment you tap, or inside an area you draw — with the area and plots per hectare."],
+  ["select","☒","Select","Tap corners around plots to pick them out, then delete, export or email just those."],
+  ["pdf","🗺","PDF","Appears once a georeferenced PDF is loaded. Shows or hides it; the slider sets how see-through it is."],
+  ["layers","◫","Layers (top)","What shows on the map: each layer on or off, zoom to it, names and town names, crew positions, labels for plot dots; the property and its maps; the map style; loading files."],
+  ["menu","☰","Menu (top)","Analysis and summaries, reports and exports, plots and stands, this device (your name, sunlight mode, storage, backups)."],
+  ["net","●","Status dot (top)","Green: everything sent. Amber: offline, or plots waiting to send. Orange: the Sheet hasn't answered lately. Tap it to see what's waiting, send now, and recent problems."],
+];
+function helpRow_(r){ return `<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid #1d3320">`+
+    `<div style="width:26px;text-align:center;font-size:18px">${r[1]}</div>`+
+    `<div><div style="color:#eafae8;font-size:15px;font-weight:600">${r[2]}</div>`+
+    `<div style="color:#cfe3d2;font-size:13.5px;line-height:1.45;margin-top:2px">${r[3]}</div></div></div>`; }
+function mapToolHelp_(){ showInfoSheet_("The map tools", HELP_ROWS.map(helpRow_).join("")+
+    `<div style="color:#cfe3d2;font-size:13px;margin-top:10px;line-height:1.45">A tool stays on until you tap it again — the button turns amber while it is active. Each panel has its own <b>?</b> for just that part.</div>`); }
+function helpOne_(k){ const r=HELP_ROWS.find(x=>x[0]===k); if(!r){ mapToolHelp_(); return; }
+  showInfoSheet_(r[1]+" "+r[2], helpRow_(r).replace("border-bottom:1px solid #1d3320","")+`<button type="button" onclick="closeInfoSheet_();mapToolHelp_()" style="margin-top:10px;width:100%;padding:11px;border-radius:9px;border:1px solid #33623a;background:#16271a;color:#cdebcf;font:600 14px system-ui">All the map tools</button>`); }
 /* v462: inView — only the points inside the map as it is on the screen now. */
 function countPoints(inView){
   let layers=allPointLayers_();
@@ -10469,7 +10658,7 @@ function countInPolygon(){
   let ring=null, where="";
   if(polyPts.length>=3){ ring=polyPts; where="current outline"; }
   else if(polys.length){ ring=polys[polys.length-1].pts; where=polys[polys.length-1].name; }
-  if(!ring){ toast("Draw a polygon first (⬠), then tap Count-in-area",true); return; }
+  if(!ring){ toast("No saved outline — use #️⃣ Count → In an area you draw",true); return; }
   const layers=allPointLayers_();
   const insideOf=[]; let rows="";
   layers.forEach(l=>{ const inside=l.pts.filter(p=>pointInRing_(p.lat,p.lon,ring));
@@ -12958,7 +13147,13 @@ const FIND_URL="https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeSer
 let findPin=null, _findSeq=0, _findHits=[];
 /* v413 — the rail's ✎ Edit group (Text, Points, Lines, Draw, Tract, Measure) opens as a row beside the button; it stays
    open while one of those tools is on, and the choice is remembered */
-function railEditToggle_(force){ const r=document.querySelector(".map-rail"); if(!r) return; const on=force!=null?!!force:!r.classList.contains("edit-open"); r.classList.toggle("edit-open",on); try{ STORE&&STORE.setItem("fi_railedit",on?"1":"0"); }catch(e){} }
+function railFieldToggle_(force){ const r=document.querySelector(".map-rail"); if(!r) return; const on=force!=null?!!force:!r.classList.contains("field-open"); r.classList.toggle("field-open",on); if(on) r.classList.remove("edit-open"); }
+/* v470: the 🥾 Field button lights up while one of its tools is on, and says REC while the track is recording */
+function railFieldState_(){ const f=$("toolField"); if(!f) return; const sub=[...document.querySelectorAll("#railField .map-tool")];
+  f.classList.toggle("has-on", sub.some(b=>b.classList.contains("on")||b.classList.contains("rec")));
+  const rec=$("railRec"); if(rec) rec.style.display=(typeof trackActive!=="undefined"&&trackActive)?"block":"none"; }
+try{ new MutationObserver(()=>railFieldState_()).observe(document.getElementById("railField"),{subtree:true,attributes:true,attributeFilter:["class"]}); }catch(e){}
+function railEditToggle_(force){ const r=document.querySelector(".map-rail"); if(!r) return; const on=force!=null?!!force:!r.classList.contains("edit-open"); r.classList.toggle("edit-open",on); if(on) r.classList.remove("field-open"); try{ STORE&&STORE.setItem("fi_railedit",on?"1":"0"); }catch(e){} }
 function railEditInit_(){ try{ if(STORE&&STORE.getItem("fi_railedit")==="1") railEditToggle_(true); }catch(e){} }
 /* v413 — 🏠 Property on the rail: the property shown on the map, one tap away — pick it (zooms), its details, its maps */
 function propBarOpen_(){ const b=$("propBar"); if(!b) return; try{ findClose_(); }catch(e){}
@@ -12971,7 +13166,7 @@ function propBarFill_(){ const sel=$("propBarSel"), box=$("propBarBtns"); if(!se
   box.innerHTML=B("propBarClose_();openPropSheet_(propActiveTract_())","🏠 Details & areas",!has)+B("propZoomTo_()","🔍 Zoom to it",!has)+
     B("propBarClose_();mmMenuShow_()","🖨 Make a map…",!has)+      /* v458: one plain way in — the Make a map block lists Custom, Map 6, Map 4, Map 7 */
     B("propBarClose_();_ppTract=propActiveTract_();pkOpen_()","📦 Map package",!has)+
-    B("propBarClose_();_ppTract=propActiveTract_();csEdit_(propActiveTract_())","✂ Cut compartments",!has)+
+    B("propBarClose_();_ppTract=propActiveTract_();pwOpen_(propActiveTract_())","✂ Compartments (＋ Set up)",!has)+      /* v470: one home — Set up */
     B("propBarClose_();_ppTract=propActiveTract_();propDelete_(propActiveTract_())","🗑 Delete property…",!has)+
     ((typeof mapOnly!=="undefined"&&mapOnly)?B("mapOnlyClear_();propBarFill_()","👁 Show all properties"):B("propBarClose_();if($('layersMenu').style.display==='none') toggleLayersMenu(); layersTab_('prop');","☰ Provincial layers & more"));
 }
@@ -14643,7 +14838,7 @@ function pkCompPage_(tract, row, an, s, sheetOk){
   /* the written summary */
   const notes=an&&an.notes?String(an.notes):""; y+=30; ctx.textAlign="left"; ctx.fillStyle="#111"; ctx.font="bold 30px "+PK_F; ctx.fillText("Summary",PK_X,y); y+=44;
   if(notes){ ctx.save(); ctx.beginPath(); ctx.rect(PK_X,y-30,PK_W,MM_H-160-y); ctx.clip(); const y2=pkText_(ctx,notes,PK_X,y,PK_W,24,34,"#111"); ctx.restore(); if(y2>MM_H-160){ ctx.font="20px "+PK_F; ctx.fillStyle="#8a5a00"; ctx.fillText("(the summary continues in the Sheet's Note Summaries tab)",PK_X,MM_H-140); } }
-  else { ctx.font="24px "+PK_F; ctx.fillStyle="#555"; ctx.fillText(sheetOk?"No written summary for this compartment yet (Tools → Write compartment summaries).":"Not available without the Sheet.",PK_X,y); }
+  else { ctx.font="24px "+PK_F; ctx.fillStyle="#555"; ctx.fillText(sheetOk?"No written summary for this compartment yet (Menu → Write compartment summaries).":"Not available without the Sheet.",PK_X,y); }
   return cv;
 }
 async function pkCompPages_(tract, notes){
@@ -16246,7 +16441,7 @@ function spBar_(){ if(!_sp) return;
   bar.style.cssText="position:fixed;left:8px;right:8px;bottom:10px;z-index:5450;max-height:50vh;overflow-y:auto;background:rgba(16,36,15,.97);border:1px solid #4caf50;border-radius:12px;padding:10px;color:#eafae8;font:13px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.5)";
   const B=(fn,label,main,dis)=>`<button type="button" class="btn ${main?"submit":"ghost"}" ${dis?"disabled":""} style="flex:1;min-width:0;padding:9px 6px;font-size:13px" onclick="${fn}">${label}</button>`;
   const chip=(k,v,label,on)=>`<button type="button" onclick="spSet_('${k}','${v}')" style="padding:6px 9px;margin:0 4px 4px 0;border-radius:14px;border:1px solid ${on?"#ffd24a":"#2f7a44"};background:${on?"#3a3410":"#123a1c"};color:${on?"#ffd24a":"#e8f0e6"};font-size:13px">${label}</button>`;
-  const head=t=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="flex:1;font-size:15px">${t}</b><button type="button" onclick="spClose_()" title="Close" style="border:0;background:none;color:#a9c9b0;font-size:20px;line-height:1;padding:0 4px">✕</button></div>`;
+  const head=t=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="flex:1;font-size:15px">${t}</b><button type="button" class="bbar-q" onclick="helpOne_('sample')" title="What does this do?">?</button><button type="button" onclick="spClose_()" title="Close" style="border:0;background:none;color:#a9c9b0;font-size:20px;line-height:1;padding:0 4px">✕</button></div>`;
   const st=_sp.step; let h="";
   if(st==="pick"){ const gs=spGrids_(propActiveTract_());
     h=head("⊞ Sample points")+`<div style="color:#cfe3d2;line-height:1.45;margin-bottom:8px">A grid of reference points in a compartment, to walk to and put plots on. <b>Tap the compartment</b> on the map — or draw one.</div>`+
@@ -16529,7 +16724,7 @@ function pwBar_(){
   const big=(fn,icon,label,sub,dis)=>`<button type="button" ${dis?"disabled":""} onclick="${fn}" style="display:block;width:100%;text-align:left;padding:10px 12px;margin:0 0 6px;border-radius:10px;border:1px solid ${dis?"#2a4030":"#2f7a44"};background:${dis?"#14201a":"#123a1c"};color:${dis?"#6f8a76":"#e8f0e6"};font:inherit;font-size:14px"><span style="font-size:17px">${icon}</span> ${label}${sub?`<div style="color:#8fae95;font-size:11px;margin-top:2px;line-height:1.35">${sub}</div>`:""}</button>`;
   const steps=["Name","Outline","Compartments","Names & class"], at={start:0,outline:1,draw:1,divide:2,cut:2,names:3}[st];
   const dots=at==null?"":`<div style="display:flex;gap:4px;margin:2px 0 8px">${steps.map((s,i)=>`<div style="flex:1;text-align:center;font-size:10px;padding:3px 0;border-radius:6px;background:${i<at?"#2f7a44":i===at?"#c8952a":"#1d3320"};color:${i===at?"#0b160a":"#cfe3d2"}">${i+1} ${s}</div>`).join("")}</div>`;
-  const head=(title)=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><b style="flex:1;font-size:15px">${title}</b><button type="button" onclick="pwClose_()" title="Close" style="border:0;background:none;color:#a9c9b0;font-size:20px;line-height:1;padding:0 4px">✕</button></div>`;
+  const head=(title)=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><b style="flex:1;font-size:15px">${title}</b><button type="button" class="bbar-q" onclick="helpOne_('setup')" title="What does this do?">?</button><button type="button" onclick="pwClose_()" title="Close" style="border:0;background:none;color:#a9c9b0;font-size:20px;line-height:1;padding:0 4px">✕</button></div>`;
   let h="";
   if(st==="start"){ const list=propTracts_();
     h=head("Set up a property")+dots+
