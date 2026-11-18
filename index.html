@@ -1428,7 +1428,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-14 · v470";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-18 · v473";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3121,6 +3121,44 @@ function _bareAnswer_(v){
   if(v==="N") toast("Plot saved, left out of the analysis");
   c.then();
 }
+/* ===== v473 — TIME STUDY (temporary; Chris, 2026-11-18: "track how long it takes to complete each section … to see
+   where the time is being spent"). Hidden from the crew. Every touch, keystroke or scroll credits the time since the
+   last one to the section it happened in (01–09), the map, or "other" — up to TS_IDLE seconds; a longer pause counts
+   as idle, and time with the screen off or the app in the background as away. Travel = the previous plot's submit →
+   this plot's location set; on plot = location set → submit. Sent with the plot as _ts → the Sheet's "Time Study" tab.
+   To remove: set TS_ON=false (or delete this block, the tsLoc_/tsStamp_ calls and timeStudyPut_ in Code.gs). ===== */
+const TS_ON=true, TS_IDLE=120;
+var _ts=null, _tsSaveT=null;
+function tsNew_(){ const n=Date.now(); return {t0:n, loc:null, sec:{}, map:0, other:0, idle:0, away:0, last:n, key:"other", hid:null}; }
+function tsInit_(){ if(!TS_ON) return; try{ _ts=JSON.parse((STORE&&STORE.getItem("fi_ts"))||"null"); }catch(e){ _ts=null; } if(!_ts||!_ts.sec) _ts=tsNew_(); _ts.last=Date.now(); _ts.hid=null; }
+function tsSave_(){ clearTimeout(_tsSaveT); _tsSaveT=setTimeout(()=>{ try{ STORE&&STORE.setItem("fi_ts",JSON.stringify(_ts)); }catch(e){} },800); }
+function tsKey_(el){ try{ if(document.body.classList.contains("map-open")) return "map"; const d=el&&el.closest&&el.closest("details.sec");
+    if(d && d.id!=="savedSec"){ const ix=d.querySelector(".ix"); if(ix) return ix.textContent.trim(); } }catch(e){} return "other"; }
+function tsCredit_(now){ if(!_ts) return; const dt=(now-_ts.last)/1000; _ts.last=now; if(!(dt>0)) return;
+  const a=Math.min(dt,TS_IDLE), k=_ts.key||"other";
+  if(k==="map") _ts.map+=a; else if(k==="other") _ts.other+=a; else _ts.sec[k]=(_ts.sec[k]||0)+a;
+  if(dt>TS_IDLE) _ts.idle+=dt-TS_IDLE; }
+function tsAct_(e,keep){ if(!TS_ON||!_ts||_ts.hid) return; const now=Date.now(); tsCredit_(now); if(!keep) _ts.key=tsKey_(e&&e.target); tsSave_(); }
+if(TS_ON){ tsInit_();
+  ["pointerdown","input","change","keydown"].forEach(ev=>document.addEventListener(ev,e=>tsAct_(e,false),{capture:true,passive:true}));
+  let _tsScr=0; document.addEventListener("scroll",e=>{ const n=Date.now(); if(n-_tsScr<3000) return; _tsScr=n; tsAct_(e,true); },{capture:true,passive:true});
+  document.addEventListener("visibilitychange",()=>{ if(!_ts) return; const n=Date.now();
+    if(document.hidden){ tsCredit_(n); _ts.hid=n; } else if(_ts.hid){ _ts.away+=(n-_ts.hid)/1000; _ts.hid=null; _ts.last=n; } tsSave_(); }); }
+function tsLoc_(){ if(!TS_ON||!_ts) return; if(!_ts.loc){ tsCredit_(Date.now()); _ts.loc=Date.now(); tsSave_(); } }
+function tsStamp_(d){ if(!TS_ON||!_ts) return; const now=Date.now(); tsCredit_(now);
+  const m=s=>Math.round(s/6)/10, iso=t=>t?new Date(t).toISOString():"";
+  let end=0; try{ end=+(STORE&&STORE.getItem("fi_ts_end"))||0; }catch(e){}
+  const loc=_ts.loc||_ts.t0, sameDay=end && new Date(end).toDateString()===new Date(loc).toDateString() && loc-end<3*3600e3;
+  const sec={}; ["01","02","03","04","05","06","07","08","09"].forEach(k=>{ sec[k]=m(_ts.sec[k]||0); });
+  let regenRows=0; try{ regenRows=document.querySelectorAll("#adrgnRows > .pair, #eargnRows > .pair").length; }catch(e){}
+  d._ts={ v:1, build:typeof APP_BUILD!=="undefined"?APP_BUILD:"", loc:iso(_ts.loc), sub:iso(now), prev:sameDay?iso(end):"",
+    travel:sameDay?m((loc-end)/1000):"", onplot:_ts.loc?m((now-_ts.loc)/1000):"", formStart:iso(_ts.t0),
+    sec, map:m(_ts.map), other:m(_ts.other), idle:m(_ts.idle), away:m(_ts.away),
+    trees:(d._trees!=null?d._trees:0), regenRows, photos:(typeof currentPhotoNames!=="undefined"&&currentPhotoNames?currentPhotoNames.length:0) };
+  try{ STORE&&STORE.setItem("fi_ts_end",String(now)); }catch(e){}
+  _ts=tsNew_(); tsSave_(); }
+function tsReset_(){ if(!TS_ON) return; _ts=tsNew_(); tsSave_(); }
+/* ===== end TIME STUDY ===== */
 function finalizeSubmit(d){
   d._sent=false; d._ts=nowStr();
   // Editing an imported audit plot: keep it in the audit set (push to Sheet later, deliberately).
@@ -3140,7 +3178,7 @@ function finalizeSubmit(d){
   if(isUpdate){ const was_=saved[editingIndex]; d._id = was_._id || genId(); clearedNote_(was_, d);
     if(baseOk_(was_)) d._base=was_._base;   // v377: the edit is measured against the plot as last confirmed in step with the Sheet
     saved[editingIndex]=d; }
-  else { d._id = genId(); saved.push(d); }
+  else { d._id = genId(); try{ if(!d._audit) tsStamp_(d); }catch(e){} saved.push(d); }      /* v473: time study rides with a NEW plot */
   persist();
   send(d,isUpdate);
   if(isUpdate){ editingIndex=null; setEditMode(false); }
@@ -3208,6 +3246,7 @@ function cancelPlot(){
     ? "Discard your changes to this plot?\n\nThe saved version stays unchanged."
     : "Discard this new plot?\n\nNothing has been saved, so it won't be mapped.";
   if(!confirm(msg)) return;
+  if(!editing) try{ tsReset_(); }catch(e){}      /* v473: a discarded plot's time starts over */
   editingIndex=null; editingAudit=null; setEditMode(false); clearDraft(); nextPlot();
   toast(editing?"Changes discarded":"Plot discarded");
   openMap();   // back to the map, ready for the next one
@@ -3787,8 +3826,23 @@ function nextPlotFor(stand, tract){
   let max=has(plotMaxKey_(t,s)) ? (parseInt(hw[plotMaxKey_(t,s)],10)||0) : 0;
   if(has(s) && (!tk || (s && standKnownFor_(t,s)))) max=Math.max(max, parseInt(hw[s],10)||0);
   saved.forEach(p=>{ if((p.STANDID||"")===s && (!tk || propK_(p.TRACT)===tk)){ const n=parseInt(p.PLOTNUM,10); if(!isNaN(n)&&n>max) max=n; } });
+  if(tk && s){ const sm=parseInt(sheetMax_()[tk+"|"+propK_(s)],10); if(!isNaN(sm)&&sm>max) max=sm; }      /* v471: plots already in the Sheet (an earlier visit, another phone) */
   return max+1;
 }
+/* v471 — the highest plot number per property + compartment among the Sheet's plots (the crew feed), kept on the phone
+   so it still works out of signal. Before, a return visit started again at plot 1 (Clarke 109d, Nov 2026). */
+var _sheetMax=null, _sheetHt=null;
+/* v472: does this compartment already have a plot height — on this phone, or in the Sheet (kept for out of signal)? */
+function compHasHt_(t,s,self){ const k=propK_(t)+"|"+propK_(s); if(!propK_(s)) return false;
+  if(!_sheetHt){ try{ _sheetHt=JSON.parse((STORE&&STORE.getItem("fi_sheetht"))||"{}")||{}; }catch(e){ _sheetHt={}; } }
+  if(_sheetHt[k]) return true;
+  return (saved||[]).some((p,i)=>p!==self && i!==editingIndex && propK_(p.TRACT)===propK_(t) && propK_(p.STANDID)===propK_(s) && parseFloat(p.HT)>0); }
+try{ document.getElementById("PLOTNUM").addEventListener("change",e=>{ if(e.isTrusted) e.target.dataset.touched="1"; }); }catch(e){}      /* a number the crew chose is never bumped */
+function sheetMax_(){ if(_sheetMax) return _sheetMax; try{ _sheetMax=JSON.parse((STORE&&STORE.getItem("fi_sheetmax"))||"{}")||{}; }catch(e){ _sheetMax={}; } return _sheetMax; }
+function sheetMaxUpdate_(rows){ if(!rows||!rows.length) return; const m={}, h={};
+  rows.forEach(r=>{ const k=propK_(r.tract||"")+"|"+propK_(r.stand||""), n=parseInt(r.plot,10); if(!isNaN(n) && n>(m[k]||0)) m[k]=n; if(parseFloat(r.ht)>0) h[k]=1; });
+  _sheetMax=m; _sheetHt=h; try{ STORE&&STORE.setItem("fi_sheetmax",JSON.stringify(m)); STORE&&STORE.setItem("fi_sheetht",JSON.stringify(h)); }catch(e){}
+  try{ const pn=$("PLOTNUM"), st=$("STANDID"); if(pn&&st&&st.value&&editingIndex==null&&!pn.dataset.touched){ const nx=nextPlotFor(st.value); if((parseInt(pn.value,10)||0)<nx){ addablePlotNum_(nx); setField(pn,String(nx)); } } }catch(e){} }
 /* is this compartment one of this property's? (its pieces, its Sheet records, a loaded file's compartments, or its plots) */
 function standKnownFor_(t,s){ const tk=propK_(t), sk=propK_(s); if(!tk||!sk) return true;
   try{ if(refStandValues_().has(sk)) return true; }catch(e){}      // v450: a sub-compartment from the reference polygons
@@ -3814,7 +3868,7 @@ function nextPlot(){
   htSelect_($("HT"));                                              // refresh height order from latest usage
   defaultNoneFields_();   // pest / disease / SAR / invasive fields default to None
   plotInAnalysis="Y";   // a fresh plot starts included
-  setField($("PLOTNUM"), nextPlotFor(carryStand)); renderGround([]); currentPhotoNames=[]; clearPhotos(); setNow(); updateTally(); autoGPS(); updateHdrAt_(); updateMoveBtn_();
+  setField($("PLOTNUM"), nextPlotFor(carryStand)); try{ delete $("PLOTNUM").dataset.touched; }catch(e){} renderGround([]); currentPhotoNames=[]; clearPhotos(); setNow(); updateTally(); autoGPS(); updateHdrAt_(); updateMoveBtn_();
 }
 
 /* ---------- saved list ---------- */
@@ -5888,6 +5942,7 @@ function crewPhotoHtml_(p){
 function renderCrewPlots(rows, silent, auto){
   if(!crewLayer) return;
   crewData = rows||[];                       // cache so re-labelling doesn't need a re-fetch
+  try{ sheetMaxUpdate_(crewData); }catch(e){}      // v471: next plot numbers know the Sheet
   crewLayer.clearLayers();
   // Don't redraw YOUR OWN plots here — they already show as your yellow pins. Otherwise a plot you
   // collected appears twice (yellow device copy + a coloured crew copy from the Sheet), and deleting
@@ -6519,7 +6574,12 @@ function validatePlot(d){
   /* A tallied tree is worth a full BAF of basal area whatever its size, so a 0 here is not a small tree —
      it is a tree that will vanish from basal area, stems and volume without saying so. */
   if(zeroDbh) blocks.push({m:`${zeroDbh} tree${zeroDbh>1?"s have":" has"} a species but a diameter of 0 — enter the DBH, or clear the row if it was tallied by mistake.`,f:"treeRows"});
-  if(d.CC==="") warns.push({m:"Crown closure (CC) not set.",f:"CC"});
+  if(d.CC==="") warns.push({m:"Crown closure (CC) not entered.",f:"CC"});
+  /* v471 (Chris): say so at submit when the plot's height or crown closure is missing — seven plots reached the Sheet without a height */
+  /* v472 (Chris): only when the compartment has no height yet — on this phone or in the Sheet — since one or two heights per compartment is enough */
+  if(String(d.HT==null?"":d.HT).trim()==="" && n && !compHasHt_(d.TRACT||"", d.STANDID||"", d)) warns.push({m:`Height-tree height (HT) not entered — compartment ${d.STANDID||"?"} has no height yet.`,f:"HT"});
+  { const reg=Object.keys(d).filter(k=>/^(AD|EA)RGNN\d$/.test(k)).reduce((a,k)=>a+(parseFloat(d[k])||0),0);
+    if(!n && !reg && d.CC==="" && !String(d.COMMENT||"").trim()) warns.unshift({m:"This plot is completely empty — no trees, no regeneration, no crown closure and no comment. Was it submitted by mistake?",f:"treeRows"}); }      /* v472: and no comment */
   /* Blank means "not recorded" here, while 0 means "looked, there was none" — so an empty cover field
      is a gap in the record rather than a zero, and worth saying before the plot goes in. */
   {
@@ -6529,6 +6589,9 @@ function validatePlot(d){
   }
   const dup = d.STANDID && d.STANDID!=="-" && saved.some((p,idx)=> idx!==editingIndex && p.PLOTNUM && p.STANDID===d.STANDID && p.PLOTNUM===d.PLOTNUM);
   if(dup) warns.push({m:`Stand ${d.STANDID} already has a plot ${d.PLOTNUM}.`,f:"PLOTNUM"});
+  else if(d.STANDID && d.STANDID!=="-" && d.PLOTNUM){ const myId=String(d.PlotID||d._id||(editingIndex!=null&&saved[editingIndex]?(saved[editingIndex]._id||saved[editingIndex].PlotID):"")||"");
+    const hit=(crewData||[]).find(r=>String(r.id||"")!==myId && propK_(r.stand)===propK_(d.STANDID) && String(r.plot)===String(d.PLOTNUM) && propK_(r.tract)===propK_(d.TRACT||""));
+    if(hit) warns.push({m:`The Sheet already has ${d.TRACT?d.TRACT+" · ":""}stand ${d.STANDID} plot ${d.PLOTNUM}${hit.cruiser?" (by "+hit.cruiser+")":""}. Use the next free number, ${nextPlotFor(d.STANDID,d.TRACT)}?`,f:"PLOTNUM"}); }      /* v471 */
   // A photo can't be taken after the fact from the office, so say so while you're still standing there.
   if(!(currentPhotoNames&&currentPhotoNames.length) && !String(d.PHOTONUM||"").trim())
     warns.push({m:"No photo taken at this plot.",f:"PHOTONUM"});
@@ -9514,6 +9577,9 @@ function dropAtMe(){ if(!mePos){ toast("No GPS fix yet",true); return; }
   const src = (a.n&&a.n>1) ? `your location · avg ${a.n} fixes${a.acc?` ±${a.acc} m`:""}` : "your location";
   setLocation(a.lat,a.lon,src,a.alt); }
 function setLocation(lat,lon,src,alt){
+  /* v471: a new plot's DATE is the moment its location is set — at the plot — not when the form was cleared after
+     the last plot (which made every DATE the previous plot's finish time, and the day's first one the app opening). */
+  try{ const editing=(typeof editingIndex!=="undefined"&&editingIndex!=null)||(typeof editingAudit!=="undefined"&&editingAudit!=null); if(!editing){ setNow(); tsLoc_(); } }catch(e){}
   $("X").value=lon.toFixed(6); $("Y").value=lat.toFixed(6);
   if(alt!=null&&!isNaN(alt)) $("Z").value=Number(alt).toFixed(1);
   $("gpsHint") && ($("gpsHint").textContent=`Set from map (${src}).`);
@@ -10544,8 +10610,8 @@ function bbar_(id, html){ let bar=$(id); if(!bar){ bar=document.createElement("d
   bar.innerHTML=html; try{ document.body.classList.add("bar-open","pw-open"); }catch(e){} return bar; }
 function bbarClose_(id){ const b=$(id); if(b&&b.parentNode) b.parentNode.removeChild(b); if(!document.querySelector(".bbar,#spBar,#pwBar")) try{ document.body.classList.remove("bar-open","pw-open"); }catch(e){} }
 function bbarHead_(t, help, close){ return `<div class="bbar-hd"><b>${t}</b>${help?`<button type="button" class="bbar-q" onclick="helpOne_('${help}')" title="What does this do?">?</button>`:""}<button type="button" class="bbar-x" onclick="${close}" title="Close">✕</button></div>`; }
-function openCount_(){ if(_cnt){ cntClose_(); return; } _cnt={step:"menu", pts:[]}; const b=$("toolCount"); if(b) b.classList.add("on"); cntBar_(); }
-function cntClose_(){ cntTmpClear_(); _cnt=null; bbarClose_("cntBar"); const b=$("toolCount"); if(b) b.classList.remove("on"); }
+function openCount_(){ if(_cnt){ cntClose_(); return; } _cnt={step:"menu", pts:[]}; const b=$("toolCount"); if(b) b.classList.add("on"); cntBar_(); try{ spRender_(); }catch(e){} }
+function cntClose_(){ cntTmpClear_(); _cnt=null; bbarClose_("cntBar"); const b=$("toolCount"); if(b) b.classList.remove("on"); try{ spRender_(); }catch(e){} }
 function cntTmpClear_(){ try{ _cntTmp.forEach(m=>fmap.removeLayer(m)); }catch(e){} _cntTmp=[]; }
 function cntBar_(){ if(!_cnt) return; const st=_cnt.step;
   const opt=(fn,t,d)=>`<button type="button" class="bbar-opt" onclick="${fn}">${t}<div>${d}</div></button>`;
@@ -11799,7 +11865,7 @@ function setRefField(k){ refLabelField=k; renderRefLabels(); }
 function placeFromRef(lat,lon,pn){
   setLocation(lat,lon,"reference point");
   // Take the plot number from the reference point (stand & tract still come from the compartment polygon).
-  if(pn && $("PLOTNUM")){ addablePlotNum_(pn); setField($("PLOTNUM"), pn); }
+  if(pn && $("PLOTNUM")){ addablePlotNum_(pn); setField($("PLOTNUM"), pn); $("PLOTNUM").dataset.touched="1"; }
 }
 function addablePlotNum_(v){ const sel=$("PLOTNUM"); if(!sel||sel.tagName!=="SELECT") return; v=String(v); if(![...sel.options].some(o=>o.value===v)) sel.insertAdjacentHTML("beforeend",`<option value="${esc(v)}">${esc(v)}</option>`); }
 function gpxToGeo(text){ const xml=new DOMParser().parseFromString(text,"application/xml"); const feats=[];
@@ -16360,9 +16426,9 @@ function spPickAt_(ll){ const lat=ll.lat, lon=ll.lng;
 function spOpen_(){ if(_sp){ spClose_(); return; }
   try{ propBarClose_(); }catch(e){} try{ findClose_(); }catch(e){} try{ if(_pw) pwClose_(); }catch(e){} try{ mnCancel_(true); ftCancel_(true); lnCancel_(true); }catch(e){}
   if(_csEd){ toast("Finish the compartment editor first (✓ Done on its bar)",true); return; }
-  _sp={step:"pick", pts:[], mode:SP_SET.mode||"density", val:SP_SET.val||"", plot:SP_SET.plot||"10", edge:SP_SET.edge||"0"}; const b=$("toolSample"); if(b) b.classList.add("on"); setTimeout(()=>{ try{ railEditToggle_(false); }catch(e){} },0); spBar_(); }      // the tools row folds away so the map is clear (after the row's own tap handler)
+  _sp={step:"pick", pts:[], mode:SP_SET.mode||"density", val:SP_SET.val||"", plot:SP_SET.plot||"10", edge:SP_SET.edge||"0"}; const b=$("toolSample"); if(b) b.classList.add("on"); setTimeout(()=>{ try{ railEditToggle_(false); }catch(e){} },0); spBar_(); try{ spRender_(); }catch(e){} }      // the tools row folds away so the map is clear (after the row's own tap handler)
 function spClose_(){ spTmpClear_(); try{ document.body.classList.remove("bar-open","pw-open"); }catch(e){} const bar=$("spBar")||_spBarEl; _spBarEl=null; try{ if(bar&&bar.parentNode) bar.parentNode.removeChild(bar); }catch(e){}
-  _sp=null; const b=$("toolSample"); if(b) b.classList.remove("on"); }
+  _sp=null; const b=$("toolSample"); if(b) b.classList.remove("on"); try{ spRender_(); }catch(e){} }      /* v473: points tappable again */
 function spTmpClear_(){ try{ _spTmp.forEach(m=>fmap.removeLayer(m)); }catch(e){} _spTmp=[]; }
 function spTap_(ll){ if(!_sp) return false;
   if(_sp.step==="draw"){ _sp.pts.push([+ll.lat,+ll.lng]); spDrawTmp_(); spBar_(); return true; }
@@ -16419,8 +16485,11 @@ function spDeleteGrid_(gid, quiet){ const G=spGrids_().find(x=>x.gid===gid); if(
 function spRender_(){ if(!fmap||!window.L) return; if(!spLayer){ spLayer=L.layerGroup().addTo(fmap); fmap.on("moveend zoomend",()=>{ try{ spRender_(); }catch(e){} }); } spLayer.clearLayers();
   let vis=true, lbl=true; try{ vis=layerVis.sample!==false; lbl=labelVis.sample!==false; }catch(e){} if(!vis) return;      // v469: its own switch in Layers
   const z=fmap.getZoom(), vb=fmap.getBounds().pad(0.2); let nLbl=0;
+  /* v473: while ⊞ Sample or #️⃣ Count is open, a tap on a sample point goes through to the compartment under it
+     (it used to open the point's popup, so picking a compartment failed whenever a point sat under the finger) */
+  const pick=!!((typeof _sp!=="undefined"&&_sp)||(typeof _cnt!=="undefined"&&_cnt));
   spGrids_().forEach(G=>G.pts.forEach(p=>{ if(!vb.contains([p[0],p[1]])) return;
-    L.circleMarker([p[0],p[1]],{radius:4,color:"#1c2b1e",weight:1.5,fillColor:"#ffffff",fillOpacity:.9}).addTo(spLayer)
+    L.circleMarker([p[0],p[1]],{radius:4,color:"#1c2b1e",weight:1.5,fillColor:"#ffffff",fillOpacity:.9,interactive:!pick}).addTo(spLayer)
       .bindPopup(`<div style="font-family:monospace;font-size:11px;color:#16271a"><b>Sample point ${p[2]}</b>${G.stand?" — "+esc(G.stand):""}<br>${G.spacing?G.spacing.toFixed(1)+" m grid · ":""}${p[0].toFixed(5)}, ${p[1].toFixed(5)}<br><a href="javascript:void(0)" onclick="placeFromRef(${p[0]},${p[1]},'${p[2]}')">Place plot here ›</a></div>`);
     if(lbl && z>=17 && nLbl++<400) L.marker([p[0],p[1]],{interactive:false,keyboard:false,icon:L.divIcon({className:"",iconSize:[40,14],iconAnchor:[-5,7],html:`<div style="font:700 11px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000">${p[2]}</div>`})}).addTo(spLayer); })); }
 /* ---- export: shapefile (UTM 17N), GPX (waypoints named by number), CSV ---- */
