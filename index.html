@@ -575,6 +575,12 @@ try{ (function(){
     .rep.tree{ grid-template-columns:1.3fr .85fr 1fr } .rep.tree .del{ grid-column:3; justify-self:end; width:42px }
   }
   @media (prefers-reduced-motion:reduce){ *{transition:none!important} }
+  /* v474: species · DBH · quality get the row; class and logs only when switched on or already filled */
+  #treeRows .rep.tree{ grid-template-columns:1.6fr 1fr 1.15fr auto; }
+  #treeRows .rep.tree .tx{ display:none; }
+  body.tree-extra #treeRows .rep.tree .tx, #treeRows .rep.tree.has-tx .tx{ display:block; }      /* on a second line, same widths */
+  #treeRows .rep.tree .del{ grid-row:1; grid-column:4; width:44px; }
+  .tx-toggle{ display:block; margin:8px 0 0 auto; background:none; border:none; color:#8fe6a0; font:600 13px system-ui; padding:8px 4px; min-height:40px; }
 </style>
 </head>
 <body>
@@ -663,6 +669,7 @@ try{ (function(){
       </div>
       <div class="rows" id="treeRows"></div>
       <button class="addbtn" type="button" onclick="addTree(null,true)">＋ Add new tree (in)</button>
+      <button type="button" id="treeTxBtn" class="tx-toggle" onclick="treeTxToggle_()">＋ Show class &amp; logs</button>
       <div class="hint">Each “in” tree on the BAF 2.0 prism. Up to 28 map to <span class="pill">T1…T28</span>: species, DBH (cm), quality, class, merch. logs.</div>
     </div>
   </details>
@@ -1428,7 +1435,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-18 · v473";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-18 · v474";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2590,6 +2597,12 @@ function setSel(el,val){ val=(val==null)?"":String(val);
   if(![...el.options].some(o=>o.value===val)){ const o=document.createElement("option"); o.value=val; o.textContent=val||"—"; el.appendChild(o); }
   el.value=val; }
 function setField(el,val){ if(!el) return; if(el.tagName==="SELECT") setSel(el,val); else el.value=(val==null)?"":val; }
+/* v474 (Chris, 2026-11-18): class and logs are rarely used and squeezed species / DBH / quality off the screen. They
+   are hidden unless switched on (remembered on the phone) — a row that already has a class or logs keeps them showing. */
+function treeTxMark_(row){ const ql=row.querySelector(".t_ql"), lg=row.querySelector(".t_logs"); const has=v=>!!(v&&v.value&&v.value!=="-"&&v.value!=="—");
+  row.classList.toggle("has-tx", has(ql)||has(lg)); }
+function treeTxToggle_(on){ if(on==null) on=!document.body.classList.contains("tree-extra"); document.body.classList.toggle("tree-extra",on);
+  try{ STORE&&STORE.setItem("fi_treeextra",on?"1":"0"); }catch(e){} const b=$("treeTxBtn"); if(b) b.textContent=on?"− Hide class & logs":"＋ Show class & logs"; }
 function addTree(v,scroll){
   if(treeRows.children.length>=28){ toast("Max 28 trees"); return; }
   // when added by hand (no saved values), carry the previous tree's species + DBH forward
@@ -2600,8 +2613,8 @@ function addTree(v,scroll){
   div.innerHTML=`<div><label class="n">T${i} · spp</label><select class="t_sp"></select></div>`+
     `<div><label class="n">DBH</label><select class="t_s"></select></div>`+
     `<div><label class="n">qual</label><select class="t_q"></select></div>`+
-    `<div><label class="n">class</label><select class="t_ql"></select></div>`+
-    `<div><label class="n">logs (8 ft)</label><select class="t_logs"></select></div>`+
+    `<div class="tx"><label class="n">class</label><select class="t_ql"></select></div>`+
+    `<div class="tx"><label class="n">logs (8 ft)</label><select class="t_logs"></select></div>`+      /* v474: shown only when wanted (☰ Class & logs) or already filled */
     `<button class="del" type="button" aria-label="Remove tree">×</button>`;
   treeRows.appendChild(div);
   sppSelect(div.querySelector(".t_sp"));
@@ -2630,10 +2643,11 @@ function addTree(v,scroll){
   spSel.addEventListener("change",clearSp); spSel.addEventListener("blur",clearSp);
   if(v){ setSel(spSel,v.sp); setSel(dbhSel,v.s); setSel(div.querySelector(".t_q"),v.q);
          setSel(div.querySelector(".t_ql"),v.ql); setSel(div.querySelector(".t_logs"),v.logs);
-         flagDbh_(); }   // a loaded or imported row missing its size is red on sight, not on submit
+         treeTxMark_(div); flagDbh_(); }   // a loaded or imported row missing its size is red on sight, not on submit
   else { spSel.value = prevSpp; dbhSel.value = prevDbh;
          dbhSel.classList.add("needs-dbh"); spSel.classList.add("needs-entry");   // set/confirm the species for this tree
          div.querySelector(".t_q").value = "AGS"; }
+  [div.querySelector(".t_ql"), div.querySelector(".t_logs")].forEach(el=>el.addEventListener("change",()=>treeTxMark_(div)));
   div.querySelector(".del").onclick=()=>{ div.remove(); renumberTrees(); updateTally(); };
   updateTally();
   if(scroll) scrollRowIntoView(div);
@@ -9919,6 +9933,7 @@ function sunToggle_(){ const on=!document.body.classList.contains("sun"); docume
 try{ if(STORE&&STORE.getItem("fi_sun")==="1") document.body.classList.add("sun"); }catch(e){}
 function codesToggle_(){ const on=!document.body.classList.contains("show-codes"); document.body.classList.toggle("show-codes",on); try{ STORE&&STORE.setItem("fi_codes",on?"1":"0"); }catch(e){} toast(on?"Column codes shown on the form":"Column codes hidden"); }
 try{ if(STORE&&STORE.getItem("fi_codes")==="1") document.body.classList.add("show-codes"); }catch(e){}
+try{ if(STORE&&STORE.getItem("fi_treeextra")==="1") treeTxToggle_(true); }catch(e){}
 function captureAtCrosshair(){
   // same correction as the move: the crosshair is not the map centre
   const c=crosshairLatLng_() || fmap.getCenter(); fillPlace(c.lat,c.lng);
