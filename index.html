@@ -1436,7 +1436,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-19 · v479";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-19 · v480";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2780,10 +2780,26 @@ function collect(){
     const _b=boundaryStandAt_(_lat,_lon);
     if(_b){ d.POLYNAME=_b.standId; d.POLYAREA=Number(_b.areaHa.toFixed(4)); d.AREASRC="S"; }
     else { const _hit=pointInPolys_(_lat,_lon); if(_hit){ d.POLYNAME=_hit.name; d.POLYAREA=Number(_hit.areaHa.toFixed(4)); d.AREASRC="P"; }
-           else { d.POLYNAME=""; d.POLYAREA=""; d.AREASRC=""; } }
+           else { const _c=sharedCompAt_(_lat,_lon);      /* v480: (3) the property's shared compartments, as seen on the map */
+                  if(_c){ d.POLYNAME=_c.name; d.POLYAREA=_c.ha; d.AREASRC="S"; } else { d.POLYNAME=""; d.POLYAREA=""; d.AREASRC=""; } } }
   } else { d.POLYNAME=""; d.POLYAREA=""; d.AREASRC=""; }
+  /* v480: AGE from the compartment's own record when no boundary file gave it */
+  if(String(d.AGE==null?"":d.AGE).trim()===""){ try{ const _t=String(d.TRACT||"").trim(), _n=String(d.POLYNAME||d.STANDID||"").trim();
+    const _f=(_t&&_n)?cfGet_(_t,_n):null, _a=_f&&_f.fields?parseFloat(_f.fields.AGE):NaN; if(isFinite(_a)&&_a>0) d.AGE=String(Math.round(_a)); }catch(e){} }
   return d;
 }
+/* v480 — Chris, 2026-11-19: Kathleen's 104 plots this week came in with no POLYNAME/POLYAREA/AREASRC/AGE,
+   because only a boundary FILE loaded on the phone (or a polygon she drew) could fill them. The compartments a
+   property's owner adds are shared with everyone and drawn on every phone's map — now they fill them too.
+   Area: the compartment's HA field when it has one, else the area of all its pieces. */
+function sharedCompAt_(lat,lon){ try{
+  const c=csPieceInner_(lat,lon); if(!c||!String(c.name||"").trim()) return null;
+  const f=cfGet_(c.tract,c.name), ha0=f&&f.fields?parseFloat(f.fields.HA):NaN;
+  let ha=isFinite(ha0)&&ha0>0?ha0:0;
+  if(!ha){ const P=cgProj_(lat,lon), k=propK_(c.tract), nk=propK_(c.name);
+    csAll_().filter(x=>propK_(x.tract)===k&&propK_(x.name)===nk).forEach(x=>{ const xy=x.rings.map(r=>r.map(P.xy));
+      ha+=(Math.abs(cgArea_(xy[0]))-xy.slice(1).reduce((t,r)=>t+Math.abs(cgArea_(r)),0))/10000; }); }
+  return ha>0 ? {name:String(c.name), tract:String(c.tract||""), ha:Number(ha.toFixed(4))} : null; }catch(e){ return null; } }
 
 /* ---------- load a saved plot back into the form (for editing) ---------- */
 function loadPlot(d){
