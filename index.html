@@ -862,8 +862,9 @@ try{ (function(){
         <button type="button" onclick="closeLayersMenu();$('boundInput').click()">⬇ Stand boundaries (polygons)</button>
         <button type="button" onclick="closeLayersMenu();$('pointsInput').click()">⬇ Reference points, lines &amp; polygons</button>
         <button type="button" id="refClearBtn" onclick="closeLayersMenu();clearRefFiles()" style="display:none">✕ Remove reference points, lines &amp; polygons</button>
-        <button type="button" onclick="closeLayersMenu();$('pdfInput').click()">🗺 Georeferenced PDF map</button>
+        <button type="button" onclick="closeLayersMenu();$('pdfInput').click()">🗺 PDF map — georeferenced, or pin your own</button>
         <button type="button" id="pdfUnloadBtn" onclick="closeLayersMenu();unloadPDF()" style="display:none">✕ Unload PDF map</button>
+        <button type="button" id="pdfReloadBtn" onclick="closeLayersMenu();pdfReload_()" style="display:none">🗺 Reload the PDF map from Drive</button>
         <button type="button" onclick="closeLayersMenu();openDriveLayers()">☁ From Drive — plots, boundaries, points &amp; PDF maps</button>
       </div>
     </details>
@@ -1103,7 +1104,7 @@ try{ (function(){
 <input type="file" id="boundInput" style="display:none">
 <input type="file" id="pointsInput" style="display:none">
 <input type="file" id="importPlotsInput" accept=".zip,.shp,.dbf,.geojson,.json,.csv,.tsv,.txt" style="display:none">
-<input type="file" id="pdfInput" accept=".pdf,application/pdf" style="display:none">
+<input type="file" id="pdfInput" accept=".pdf,application/pdf,image/jpeg,image/png" style="display:none">
 
 <div class="modal" id="photoArchive" style="display:none">
   <div class="modal-card">
@@ -1435,7 +1436,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-18 · v474";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-19 · v479";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -3139,7 +3140,7 @@ function _bareAnswer_(v){
    where the time is being spent"). Hidden from the crew. Every touch, keystroke or scroll credits the time since the
    last one to the section it happened in (01–09), the map, or "other" — up to TS_IDLE seconds; a longer pause counts
    as idle, and time with the screen off or the app in the background as away. Travel = the previous plot's submit →
-   this plot's location set; on plot = location set → submit. Sent with the plot as _ts → the Sheet's "Time Study" tab.
+   this plot's location set; on plot = location set → submit. Sent with the plot as _tstudy → the Sheet's "Time Study" tab.
    To remove: set TS_ON=false (or delete this block, the tsLoc_/tsStamp_ calls and timeStudyPut_ in Code.gs). ===== */
 const TS_ON=true, TS_IDLE=120;
 var _ts=null, _tsSaveT=null;
@@ -3161,14 +3162,15 @@ if(TS_ON){ tsInit_();
 function tsLoc_(){ if(!TS_ON||!_ts) return; if(!_ts.loc){ tsCredit_(Date.now()); _ts.loc=Date.now(); tsSave_(); } }
 function tsStamp_(d){ if(!TS_ON||!_ts) return; const now=Date.now(); tsCredit_(now);
   const m=s=>Math.round(s/6)/10, iso=t=>t?new Date(t).toISOString():"";
-  let end=0; try{ end=+(STORE&&STORE.getItem("fi_ts_end"))||0; }catch(e){}
-  const loc=_ts.loc||_ts.t0, sameDay=end && new Date(end).toDateString()===new Date(loc).toDateString() && loc-end<3*3600e3;
+  /* v476: travel = form cleared after the last plot (t0) → this plot's location — no longer from a value kept in storage,
+     which some phones did not keep (Hs: TRAVEL_MIN blank on every plot) */
+  const end=_ts.t0, loc=_ts.loc||_ts.t0, sameDay=!!_ts.loc && new Date(end).toDateString()===new Date(loc).toDateString() && loc-end<3*3600e3 && loc>=end;
   const sec={}; ["01","02","03","04","05","06","07","08","09"].forEach(k=>{ sec[k]=m(_ts.sec[k]||0); });
   let regenRows=0; try{ regenRows=document.querySelectorAll("#adrgnRows > .pair, #eargnRows > .pair").length; }catch(e){}
-  d._ts={ v:1, build:typeof APP_BUILD!=="undefined"?APP_BUILD:"", loc:iso(_ts.loc), sub:iso(now), prev:sameDay?iso(end):"",
+  d._tstudy={ v:2, build:typeof APP_BUILD!=="undefined"?APP_BUILD:"", loc:iso(_ts.loc), sub:iso(now), prev:sameDay?iso(end):"",
     travel:sameDay?m((loc-end)/1000):"", onplot:_ts.loc?m((now-_ts.loc)/1000):"", formStart:iso(_ts.t0),
     sec, map:m(_ts.map), other:m(_ts.other), idle:m(_ts.idle), away:m(_ts.away),
-    trees:(d._trees!=null?d._trees:0), regenRows, photos:(typeof currentPhotoNames!=="undefined"&&currentPhotoNames?currentPhotoNames.length:0) };
+    trees:(d._trees!=null?d._trees:treeCount()), regenRows, photos:(typeof currentPhotoNames!=="undefined"&&currentPhotoNames?currentPhotoNames.length:0) };      /* v476: _tstudy — "_ts" is the plot's own submit time (v473 overwrote it, and an edit or re-send then blanked the Time Study row) */
   try{ STORE&&STORE.setItem("fi_ts_end",String(now)); }catch(e){}
   _ts=tsNew_(); tsSave_(); }
 function tsReset_(){ if(!TS_ON) return; _ts=tsNew_(); tsSave_(); }
@@ -3191,6 +3193,7 @@ function finalizeSubmit(d){
   if(!String(d.PLOTSRC||"").trim()) d.PLOTSRC="FIELD";   // note the source of a field-collected plot (imported plots use "IMPORTED")
   if(isUpdate){ const was_=saved[editingIndex]; d._id = was_._id || genId(); clearedNote_(was_, d);
     if(baseOk_(was_)) d._base=was_._base;   // v377: the edit is measured against the plot as last confirmed in step with the Sheet
+    if(was_._tstudy && !d._tstudy) d._tstudy=was_._tstudy;      /* v476: an edit keeps the plot's timings (sent again unchanged) */
     saved[editingIndex]=d; }
   else { d._id = genId(); try{ if(!d._audit) tsStamp_(d); }catch(e){} saved.push(d); }      /* v473: time study rides with a NEW plot */
   persist();
@@ -5107,6 +5110,7 @@ function storageClear_(k){
   // drop it from the running app too, so the map matches what storage now says
   try{
     if(k==="fi_track"){ trackLog=[]; if(typeof renderTrack==="function") renderTrack(); }
+    if(k==="fi_pdf"){ try{ ldbDelete_(PDF_IMG_KEY); if(pdfOverlay){ fmap.removeLayer(pdfOverlay); pdfOverlay=null; } }catch(e){} }      /* v479: the picture is in the database now */
     if(k==="fi_route"){ routePts=[]; if(typeof renderRoute==="function") renderRoute(); }
     if(k==="fi_polys"){ polys=[]; if(typeof renderPolys==="function") renderPolys(); }
     if(k==="fi_reffiles"){ if(typeof clearRefFiles==="function") clearRefFiles(); }
@@ -5188,8 +5192,31 @@ function saveCruiser(){
   const em=$("cruiserEmail").value.trim();
   if(em && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){ toast("That email doesn't look right",true); return; }
   cruiserEmail=em;
-  if(STORE){ try{ STORE.setItem("fi_cruiser",cruiser); STORE.setItem("fi_cruiser_email",cruiserEmail); }catch(e){} }
-  renderCruiser(); closeCruiser(); if(cruiser) toast(`Data entry: ${cruiser}`);
+  const kept=whoSave_();
+  renderCruiser(); closeCruiser(); try{ setLiveBtn(); }catch(e){}
+  if(!kept) toast("Saved for now, but this phone would not store it — its storage may be full (Menu → About shows storage used). A backup copy was kept.",true);
+  else if(cruiser) toast(`Data entry: ${cruiser}`);
+}
+/* v477 — Hs's email went missing twice (Nov 18–19) while her name stayed: a write the phone refused was
+   never noticed, and the email lived only until the app restarted. The name and email are now read back
+   after saving, kept a second time in the on-device database, and put back from there at start-up. */
+function whoSave_(){
+  let ok=false;
+  if(STORE){ try{ STORE.setItem("fi_cruiser",cruiser); STORE.setItem("fi_cruiser_email",cruiserEmail);
+    ok = STORE.getItem("fi_cruiser")===cruiser && STORE.getItem("fi_cruiser_email")===cruiserEmail; }catch(e){ ok=false; } }
+  try{ ldbPut("fi_who",{name:cruiser, email:cruiserEmail, at:Date.now()}).catch(()=>{}); }catch(e){}
+  return ok;
+}
+function whoRestore_(){
+  if(cruiser && cruiserEmail) return Promise.resolve(false);
+  let q; try{ q=ldbGet("fi_who"); }catch(e){ return Promise.resolve(false); }
+  return Promise.resolve(q).then(w=>{
+    if(!w || typeof w!=="object") return false;
+    const wn=String(w.name||"").trim(), we=String(w.email||"").trim(); let ch=false;
+    if(!cruiser && wn){ cruiser=wn; ch=true; }
+    if(!cruiserEmail && we && (!wn || wn===cruiser)){ cruiserEmail=we; ch=true; }   // never another person's email
+    if(ch){ whoSave_(); try{ renderCruiser(); }catch(e){} try{ setLiveBtn(); }catch(e){} }
+    return ch; }).catch(()=>false);
 }
 
 /* ---------- recover plots that already reached the Google Sheet (e.g. after the browser cleared local storage) ---------- */
@@ -6042,7 +6069,7 @@ function clockStr_(t){ const d=new Date(t); let h=d.getHours(), m=d.getMinutes()
    crew already look, and only speaks up when something needs doing (a missing email). */
 function setLiveBtn(){
   const el=$("liveState"); if(!el) return;
-  if(!cruiserEmail){ el.innerHTML=`<span style="color:#e8a33a">📡 add your email to share</span>`; el.onclick=openCruiser; el.style.cursor="pointer"; return; }
+  if(!cruiserEmail && !cruiser){ el.innerHTML=`<span style="color:#e8a33a">📡 add your name to share</span>`; el.onclick=openCruiser; el.style.cursor="pointer"; return; }
   el.onclick=null; el.style.cursor="";
   el.innerHTML = liveBroadcastTimer ? `<span style="color:#7fd0a0">📡 sharing</span>`
                                     : `<span style="color:#8fae95">📡 waiting for signal</span>`;
@@ -6059,7 +6086,7 @@ function sharingNotice_(){
     ()=>{ try{ if(STORE) STORE.setItem("fi_share_notice","1"); }catch(e){} });
 }
 function liveStatus_(){
-  if(!cruiserEmail){ toast("Add your email so the crew can see who you are",true); openCruiser(); return; }
+  if(!cruiserEmail && !cruiser){ toast("Add your name so the crew can see who you are",true); openCruiser(); return; }
   if(!connected || isOffline()){ toast("Offline — your position shares again when you're back in range"); return; }
   toast("Your position updates for the crew about once a minute while the map is open");
 }
@@ -6085,7 +6112,7 @@ let _liveSent=null;      // {lat, lon, at} of the last position that went
 function metresBetween_(a,b){ const R=6371000, r=Math.PI/180, dLat=(b.lat-a.lat)*r, dLon=(b.lon-a.lon)*r;
   const h=Math.sin(dLat/2)**2 + Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLon/2)**2; return 2*R*Math.asin(Math.min(1,Math.sqrt(h))); }
 function liveDue_(pos, now){
-  if(!_liveSent || _liveSent.who!==String(cruiserEmail||"")) return true;       // first beat, or a different name on this phone
+  if(!_liveSent || _liveSent.who!==String(cruiserEmail||cruiser||"")) return true;       // first beat, or a different name on this phone
   if(metresBetween_(_liveSent,pos)>=LIVE_MOVE_M) return true;
   return now-_liveSent.at >= Math.max(LIVE_MS, Math.floor(LIVE_FRESH_MS*0.4)) - 2000;     // the "still here" beat: every 2 minutes
 }
@@ -6093,9 +6120,9 @@ function broadcastLive(){
   if(!liveOn || !connected || isOffline() || !mePos || authBlocked) return;
   const pos={lat:+mePos.lat, lon:+mePos.lon}, now=Date.now();
   if(!isFinite(pos.lat) || !isFinite(pos.lon) || !liveDue_(pos, now)) return;
-  const mark={lat:pos.lat, lon:pos.lon, at:now, who:String(cruiserEmail||"")}; _liveSent=mark;
+  const mark={lat:pos.lat, lon:pos.lon, at:now, who:String(cruiserEmail||cruiser||"")}; _liveSent=mark;
   const undo=()=>{ if(_liveSent===mark) _liveSent=null; };       // not taken: the next beat sends, whatever it is
-  try{ sheetPost_({_action:"presence", email:cruiserEmail, name:(cruiser||shortEmail_(cruiserEmail)), lat:pos.lat, lon:pos.lon})
+  try{ sheetPost_({_action:"presence", email:cruiserEmail, name:(cruiser||shortEmail_(cruiserEmail||"")), lat:pos.lat, lon:pos.lon})
         .then(j=>{ if(j && j.ok===false) undo(); }).catch(undo); }catch(e){ undo(); }
 }
 function pollLive(){
@@ -6139,8 +6166,9 @@ function renderLive(crew){
   _crewLast=crew||[];
   liveLayer.clearLayers();
   if(!crewWhereOn){ const el0=$("liveLegend"); if(el0){ el0.style.display="none"; el0.innerHTML=""; } setCrewWhereBtn(); return; }
-  const me=(cruiserEmail||"").trim().toLowerCase();
-  const others=crew.filter(c=>String(c.email||"").trim().toLowerCase()!==me && isFinite(c.lat) && isFinite(c.lon));
+  const me=(cruiserEmail||"").trim().toLowerCase(), myName=String(cruiser||"").trim().toLowerCase();
+  const isMe=c=> me ? String(c.email||"").trim().toLowerCase()===me : (!!myName && String(c.name||"").trim().toLowerCase()===myName);
+  const others=crew.filter(c=>!isMe(c) && isFinite(c.lat) && isFinite(c.lon));
   others.sort((a,b)=>(Date.parse(b.t)||0)-(Date.parse(a.t)||0));   // freshest first
   const legLive=[], legOld=[];
   others.forEach(c=>{
@@ -7485,7 +7513,7 @@ function resumeSharing_(){
   // switch a layer on to find out what's been done. Refreshed on a timer as the crew submits.
   if(!crewTimer){ fetchCrew(!!crewData.length, true); crewTimer=setInterval(()=>fetchCrew(true), CREW_REFRESH_MS); }
   if(crewRoutesShown && !crewRoutesTimer){ fetchCrewRoutes(true); crewRoutesTimer=setInterval(()=>fetchCrewRoutes(true), CREW_REFRESH_MS); }
-  if(liveOn && !liveBroadcastTimer && cruiserEmail){
+  if(liveOn && !liveBroadcastTimer && (cruiserEmail||cruiser)){   /* v477: a name is enough — the Sheet finds the email */
     broadcastLive(); pollLive();
     liveBroadcastTimer=setInterval(broadcastLive, LIVE_MS);
     livePollTimer=setInterval(pollLive, LIVE_MS);
@@ -7521,6 +7549,7 @@ function initMap(){
      (Samsung Internet, WebViews) do not when a canvas renderer is under the finger, so a short, still touch that is not
      followed by a click within 450 ms is handled the same way (Chris, 2026-10-13: no popup on Android). */
   window.mapTapHandle_=function(ll){ try{
+    if(typeof pinTap_==="function" && pinTap_(ll)) return;                     /* v478: 📌 pinning a PDF by hand */
     if(typeof cntTap_==="function" && cntTap_(ll)) return;                     // v470: #️⃣ Count — a compartment tapped, or an area drawn
     if(typeof spTap_==="function" && spTap_(ll)) return;                       // v468: ⊞ Sample points — picking or drawing the area
     if(typeof pwTap_==="function" && pwTap_(ll)) return;                       // v465: ＋ Set up — drawing the outline, or finding a compartment in the names list
@@ -7655,7 +7684,7 @@ function dlUpload_(){
   inp.onchange=()=>{ const f=inp.files&&inp.files[0]; if(f) dlUploadFile_(f); };
   inp.click();
 }
-function dlUploadFile_(f){
+function dlUploadFile_(f, onOk){
   if(!/\.(zip|shp|geojson|json|kml|kmz|csv|tsv|txt|pdf)$/i.test(f.name||"")){ toast("That is not a layer file the app can open",true); return; }
   if(f.size>DL_UP_MAX){ toast("That file is "+Math.round(f.size/1048576)+" MB — too big to send from the phone (the limit is about 6 MB).",true); return; }
   if(_dlUpBusy) return;
@@ -7671,6 +7700,7 @@ function dlUploadFile_(f){
         if(j && j.ok===false){ toast("Not added: "+(j.error||"the Sheet refused it"),true); dlRender_(); return; }
         /* j is null when the reply could not be read (the old way of sending): do not claim it —
            reload the list, which shows whether the file is there. */
+        if(j&&j.ok&&typeof onOk==="function"){ try{ onOk(j); }catch(e){} }
         toast(j&&j.ok ? "Added "+(j.name||f.name)+" to the shared layers" : "Sent "+f.name+" — checking the list…");
         setTimeout(openDriveLayers, j&&j.ok?300:3000); })
       .catch(e=>{ _dlUpBusy=false; toast(postFailMsg_(e,"Couldn't send the file — check signal",true),true); dlRender_(); });
@@ -7719,7 +7749,7 @@ function dlPick_(i){
       try{ file=new File([buf], r.name, {type:r.mime||"application/octet-stream"}); }
       catch(e){ file=new Blob([buf],{type:r.mime||"application/octet-stream"}); file.name=r.name; }
       _dlBusy=""; closeDataSheet_();
-      if(r.kind==="pdf") loadPdfOverlay(file);
+      if(r.kind==="pdf"){ _pdfSrcNext={id:it.id, name:r.name||it.name}; loadPdfOverlay(file); }
       else {
         /* The same file could be boundaries, reference features or a set of plots to bring in — and
            no extension tells them apart. Ask, rather than guess wrong: importing plots as reference
@@ -8317,6 +8347,19 @@ function setStandLabelMode(v){ standLabelMode=(v==="analysis")?"analysis":"attr"
   if(standLabelMode==="analysis") standAnFetch_(true);
   renderLabels();
   toast(standLabelMode==="analysis"?"Compartments labelled by analysis":"Compartments labelled by the layer's own field"); }
+/* v475 (Chris, 2026-11-18): a reference or sample point and its number could sit hidden under a compartment's name,
+   and the plot be missed. Compartment names now go in a pane BELOW the map's points (the canvas, z 400) — the point
+   is drawn over the name and its own number stays on top (marker pane, z 600). */
+/* …and a name with a point right under it moves up out of the way (the point and its number stay put) */
+var _lblPts=null;
+function lblPtsIndex_(){ const B=24, idx={}; if(!fmap) return idx; const vb=fmap.getBounds().pad(0.1), add=(la,lo)=>{ if(!vb.contains([la,lo])) return; const p=fmap.latLngToContainerPoint([la,lo]); const k=Math.floor(p.x/B)+":"+Math.floor(p.y/B); (idx[k]=idx[k]||[]).push(p); };
+  try{ if(layerVis.sample!==false) spGrids_().forEach(G=>G.pts.forEach(q=>add(q[0],q[1]))); }catch(e){}
+  try{ if(layerVis.ref!==false) (refLabels||[]).forEach(R=>add(R.lat,R.lng)); }catch(e){}
+  return idx; }
+function lblNudge_(ll){ try{ if(!fmap) return 0; if(!_lblPts||_lblPts.z!==fmap.getZoom()||_lblPts.c!==String(fmap.getCenter())) _lblPts={z:fmap.getZoom(), c:String(fmap.getCenter()), idx:lblPtsIndex_()};
+    const p=fmap.latLngToContainerPoint(ll), B=24, gx=Math.floor(p.x/B), gy=Math.floor(p.y/B);
+    for(let dx=-2;dx<=2;dx++) for(let dy=-1;dy<=1;dy++){ const L0=_lblPts.idx[(gx+dx)+":"+(gy+dy)]; if(L0&&L0.some(q=>Math.abs(q.x-p.x)<44&&Math.abs(q.y-p.y)<14)) return 22; } }catch(e){} return 0; }
+function lblLowPane_(){ try{ if(fmap && !fmap.getPane("cmpLblPane")){ const p=fmap.createPane("cmpLblPane"); p.style.zIndex=395; p.style.pointerEvents="none"; } }catch(e){} return "cmpLblPane"; }
 function renderLabels(){
   if(!flabelLayer) return; const _it=[];
   try{ renderLabels0_(_it); }finally{ lblSync_(flabelLayer,_it); } }      /* v444: changed only where it differs */
@@ -8333,7 +8376,7 @@ function renderLabels0_(_it){
       const v=standAnVal_(a,standAnField);
       txt = v==="" ? L0.name : L0.name+" · "+v;   // v417: no plots analysed there yet → just the name (the dash came out as "?" on Android)
     }
-    { const ll=[L0.lat,L0.lng], h=`<div class="standlabel" style="font-size:${MAP_STYLE.labelSize||11}px">${esc(txt)}</div>`; _it.push({k:ll.join(",")+"|"+h, make:()=>L.marker(ll,{interactive:false,icon:L.divIcon({className:"",html:h,iconSize:[90,16],iconAnchor:[45,8]})})}); }
+    { const ll=[L0.lat,L0.lng], h=`<div class="standlabel" style="font-size:${MAP_STYLE.labelSize||11}px">${esc(txt)}</div>`, up=lblNudge_(ll); _it.push({k:ll.join(",")+"|"+up+"|"+h, make:()=>L.marker(ll,{interactive:false,pane:lblLowPane_(),icon:L.divIcon({className:"",html:h,iconSize:[90,16],iconAnchor:[45,8+up]})})}); }
     n++;
   }
 }
@@ -10268,7 +10311,7 @@ function drawPoly(){ if(!fmap) return; polyRendered.forEach(l=>fmap.removeLayer(
     const lyr=L.polygon(pg.pts,{color:POLY_COL,weight:2.5,fillColor:POLY_COL,fillOpacity:.16}).addTo(fmap);
     lyr.bindPopup(`<div style="font-family:monospace;font-size:12px;color:#16271a"><b>${esc(pg.name)}</b><br>${fmtArea_(polyAreaOf_(pg.pts))}<br><a href="javascript:void(0)" onclick="renamePolyAt_(${i})">Rename</a> · <a href="javascript:void(0)" onclick="deletePolyAt_(${i})">Delete</a></div>`);
     polyRendered.push(lyr);
-    polyRendered.push(L.marker(polyCentroid_(pg.pts),{interactive:false,icon:L.divIcon({className:"",html:`<div class="standlabel">${esc(pg.name)}</div>`,iconSize:[90,16],iconAnchor:[45,8]})}).addTo(fmap)); });
+    polyRendered.push(L.marker(polyCentroid_(pg.pts),{interactive:false,pane:lblLowPane_(),icon:L.divIcon({className:"",html:`<div class="standlabel">${esc(pg.name)}</div>`,iconSize:[90,16],iconAnchor:[45,8]})}).addTo(fmap)); });
   if(polyPts.length>=3) polyRendered.push(L.polygon(polyPts,{color:POLY_WIP,weight:2.5,dashArray:"6,4",fillColor:POLY_WIP,fillOpacity:.12}).addTo(fmap));
   else if(polyPts.length===2) polyRendered.push(L.polyline(polyPts,{color:POLY_WIP,weight:2.5,dashArray:"6,4"}).addTo(fmap));
   if(polyMode) polyPts.forEach((p,i)=>{ const snapped=!!polyPtsSnap[i]; polyRendered.push(L.circleMarker(p,{radius:snapped?6:4,color:snapped?"#0a3d18":"#fff",weight:2,fillColor:snapped?SNAP_COL:POLY_WIP,fillOpacity:1,interactive:false}).addTo(fmap)); }); }
@@ -11855,7 +11898,7 @@ function renderRefLabels0_(_it){
     refPolys.forEach(P=>{ if(m>=200) return; const v=refPolyVal_(P,refPolyLblField); if(!v) return; const big=P.parts.slice().sort((x,y)=>y[0].length-x[0].length)[0][0];
       let la=0,lo=0; big.forEach(q=>{ la+=q[0]; lo+=q[1]; }); const ll=[la/big.length, lo/big.length]; if(!bb.contains(ll)) return; m++;
       const h=`<div class="refpoly-lbl" style="background:rgba(255,112,67,.88);color:#fff;font:700 11px system-ui;padding:1px 5px;border-radius:6px;white-space:nowrap;transform:translateX(-50%);display:inline-block">${esc(v)}</div>`;
-      _it.push({k:"rp|"+ll.join(",")+"|"+h, make:()=>L.marker(ll,{interactive:false,keyboard:false,icon:L.divIcon({className:"",html:h,iconSize:[0,0],iconAnchor:[0,8]})})}); }); }
+      _it.push({k:"rp|"+ll.join(",")+"|"+h, make:()=>L.marker(ll,{interactive:false,keyboard:false,pane:lblLowPane_(),icon:L.divIcon({className:"",html:h,iconSize:[0,0],iconAnchor:[0,8]})})}); }); }      /* v475: reference-polygon names below the points too */
   if(!refLabels.length || !fmap || fmap.getZoom()<REF_LABEL_MIN_ZOOM) return;
   const bb=fmap.getBounds(); let n=0;
   for(const R of refLabels){
@@ -11895,8 +11938,9 @@ function gpxToGeo(text){ const xml=new DOMParser().parseFromString(text,"applica
 /* ---- georeferenced PDF overlay (reads embedded GeoPDF georeferencing) ---- */
 function loadPdfOverlay(file){
   toast("Reading PDF…");
+  if(/^image\//.test(file.type||"") || /\.(jpe?g|png)$/i.test(file.name||"")){ pinFromImage_(file); return; }    /* v478: a picture is always pinned */
   file.arrayBuffer().then(buf=>{ const geo=parseGeo(new Uint8Array(buf));
-    if(!geo){ toast("No georeference found in that PDF",true); return; }
+    if(!geo){ pinOffer_(file, buf); return; }      /* v478: was "No georeference found" — now it can be pinned by hand */
     toast("Rendering…");
     renderPDF(buf.slice(0),geo).then(res=>{
       const imgUrl=(typeof res==="string")?res:res.url;
@@ -11905,28 +11949,70 @@ function loadPdfOverlay(file){
       // order corners to TL,TR,BR,BL by their image fraction so we can map image edges to ground
       const TL=cs.find(c=>c.px<0.5&&c.py<0.5)||cs[0], TR=cs.find(c=>c.px>=0.5&&c.py<0.5)||cs[1],
             BR=cs.find(c=>c.px>=0.5&&c.py>=0.5)||cs[2], BL=cs.find(c=>c.px<0.5&&c.py>=0.5)||cs[3];
-      if(pdfOverlay) fmap.removeLayer(pdfOverlay);
-      pdfBounds=L.latLngBounds(cs.map(c=>[c.lat,c.lon]));
-      pdfCorners=[[TL.lat,TL.lon],[TR.lat,TR.lon],[BR.lat,BR.lon],[BL.lat,BL.lon]];
-      pdfOverlay=cornerImageOverlay_(imgUrl, pdfCorners).addTo(fmap); pdfVisible=true; pdfName=file.name||"PDF";
-      try{ STORE&&STORE.setItem("fi_pdf",JSON.stringify({url:imgUrl,corners:pdfCorners,name:pdfName})); }catch(e){}
-      $("toolPdf").style.display="flex"; $("toolPdf").classList.add("on"); { const ub=$("pdfUnloadBtn"); if(ub) ub.style.display="block"; }
-      $("pdfOpacityBar").style.display="flex"; $("pdfOpacity").value=85; $("pdfOpacityVal").textContent="85%";
-      fmap.fitBounds(pdfBounds,{padding:[30,30]}); toast("PDF map loaded"); updateLayerStatus();
+      pdfShow_(imgUrl, [[TL.lat,TL.lon],[TR.lat,TR.lon],[BR.lat,BR.lon],[BL.lat,BL.lon]], file.name||"PDF");
     }).catch(()=>toast("PDF render failed",true));
   }).catch(()=>toast("Couldn't read the PDF",true));
 }
+/* v478: shared by a GeoPDF and a PDF pinned by hand */
+function pdfShow_(imgUrl, corners, name){
+  if(pdfOverlay) fmap.removeLayer(pdfOverlay);
+  pdfCorners=corners; pdfBounds=L.latLngBounds(corners.map(c=>[c[0],c[1]]));
+  pdfOverlay=cornerImageOverlay_(imgUrl, pdfCorners).addTo(fmap); pdfVisible=true; pdfName=name||"PDF";
+  const src=_pdfSrcNext||null; _pdfSrcNext=null;
+  pdfKeep_(imgUrl, {corners:pdfCorners, name:pdfName, src, at:Date.now(), vis:1});
+  $("toolPdf").style.display="flex"; $("toolPdf").classList.add("on"); { const ub=$("pdfUnloadBtn"); if(ub) ub.style.display="block"; }
+  $("pdfOpacityBar").style.display="flex"; $("pdfOpacity").value=85; $("pdfOpacityVal").textContent="85%";
+  pdfReloadBtn_(); fmap.fitBounds(pdfBounds,{padding:[30,30]}); toast("PDF map loaded"); updateLayerStatus();
+}
+/* ============ v479 — PDF maps kept in the phone's larger store, and let go when unused ============
+   Chris, 2026-11-19: "put in phone storage but i dont want files continuing to be stored if not used …
+   removed from phone storage and grabbed from the drive when needed". The picture (often 1–3 MB) used to
+   sit in the small 5 MB store beside the name and email; it now lives in the on-device database and the
+   small store keeps only a short record (corners, name, where it came from, when last shown).
+   A PDF map that is on Drive (loaded From Drive, or pinned and shared) and has been hidden or not shown for
+   PDF_IDLE_DAYS is removed from the phone at the next start; Layers then offers to reload it from Drive in
+   one tap. One that is NOT on Drive is never removed by itself — that would throw away the pinning. */
+const PDF_IDLE_DAYS=30, PDF_IMG_KEY="pdf:img";
+let _pdfSrcNext=null;
+function pdfRec_(){ try{ return JSON.parse((STORE&&STORE.getItem("fi_pdf"))||"null"); }catch(e){ return null; } }
+function pdfRecSet_(r){ try{ if(STORE){ if(r) STORE.setItem("fi_pdf",JSON.stringify(r)); else STORE.removeItem("fi_pdf"); } }catch(e){} }
+function pdfRecPatch_(o){ const r=pdfRec_(); if(r){ Object.assign(r,o); pdfRecSet_(r); } }
+function pdfKeep_(url, rec){
+  const small=Object.assign({},rec,{store:"db"});
+  return Promise.resolve().then(()=>ldbPut(PDF_IMG_KEY,url)).then(()=>{ pdfRecSet_(small); return true; })
+    .catch(()=>{ pdfRecSet_(Object.assign({},rec,{url})); return false; });     /* no database: the old way */
+}
+function pdfReloadBtn_(){ const b=$("pdfReloadBtn"); if(!b) return; const r=pdfRec_();
+  const show=!pdfOverlay && r && r.removed && r.src && r.src.id;
+  b.style.display=show?"block":"none"; if(show) b.textContent="🗺 Reload "+(r.name||"the PDF map")+" from Drive"; }
+function pdfReload_(){ const r=pdfRec_(); if(!r||!r.src||!r.src.id){ pdfReloadBtn_(); return; }
+  toast("Fetching "+(r.name||"the PDF map")+" from Drive…");
+  jsonp_("action=layerget&id="+encodeURIComponent(r.src.id), (j,why)=>{
+    if(!j||!j.ok||!j.data){ toast(why==="offline"?"Reloading needs a connection":(j&&j.error)||"Couldn't fetch it — it may have been removed from the shared layers",true); return; }
+    try{ const bin=atob(j.data), buf=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) buf[i]=bin.charCodeAt(i);
+      let file; try{ file=new File([buf], j.name||r.src.name||"map.pdf", {type:"application/pdf"}); }catch(e){ file=new Blob([buf],{type:"application/pdf"}); file.name=j.name||"map.pdf"; }
+      _pdfSrcNext={id:r.src.id, name:j.name||r.src.name}; loadPdfOverlay(file);
+    }catch(e){ toast("That file couldn't be read",true); } }, 90000); }
 function setPDFOpacity(v){ $("pdfOpacityVal").textContent=v+"%"; if(pdfOverlay&&pdfVisible) pdfOverlay.setOpacity(v/100); }
 // Restore a georeferenced PDF (image + its 4 corners) saved from a previous session.
 function loadCachedPdf_(){ try{ if(!STORE||pdfOverlay) return;
-  const s=JSON.parse(STORE.getItem("fi_pdf")||"null"); if(!s||!s.url||!s.corners) return;
-  pdfCorners=s.corners; pdfName=s.name||"PDF"; pdfBounds=L.latLngBounds(s.corners.map(c=>[c[0],c[1]]));
-  pdfOverlay=cornerImageOverlay_(s.url,s.corners).addTo(fmap); pdfVisible=true;
-  $("toolPdf").style.display="flex"; $("toolPdf").classList.add("on");
-  const ub=$("pdfUnloadBtn"); if(ub) ub.style.display="block";
-  $("pdfOpacityBar").style.display="flex"; $("pdfOpacity").value=85; $("pdfOpacityVal").textContent="85%";
+  const s=pdfRec_(); if(!s||!s.corners){ pdfReloadBtn_(); return; }
+  if(s.removed){ pdfReloadBtn_(); return; }
+  const idle=Date.now()-(+s.at||0) > PDF_IDLE_DAYS*864e5;
+  if(idle && s.src && s.src.id){      /* unused for a month and safe on Drive: let it go */
+    ldbDelete_(PDF_IMG_KEY).catch(()=>{}); pdfRecSet_({name:s.name, src:s.src, removed:Date.now()});
+    pdfReloadBtn_(); toast((s.name||"The PDF map")+" hadn't been used for "+PDF_IDLE_DAYS+" days, so it was removed from this phone. Layers → Reload it from Drive when you need it."); return; }
+  const show=url=>{ if(pdfOverlay||!url) return;
+    pdfCorners=s.corners; pdfName=s.name||"PDF"; pdfBounds=L.latLngBounds(s.corners.map(c=>[c[0],c[1]]));
+    pdfOverlay=cornerImageOverlay_(url,s.corners).addTo(fmap); pdfVisible=s.vis!==0;
+    if(!pdfVisible) pdfOverlay.setOpacity(0); else pdfRecPatch_({at:Date.now()});
+    $("toolPdf").style.display="flex"; $("toolPdf").classList.toggle("on",pdfVisible);
+    const ub=$("pdfUnloadBtn"); if(ub) ub.style.display="block";
+    $("pdfOpacityBar").style.display="flex"; $("pdfOpacity").value=85; $("pdfOpacityVal").textContent="85%"; pdfReloadBtn_(); };
+  if(s.url){ const url=s.url; show(url); pdfKeep_(url, Object.assign({},s,{url:undefined})); return; }     /* an older phone: move it out of the small store */
+  Promise.resolve().then(()=>ldbGet(PDF_IMG_KEY)).then(url=>{ if(url) show(url); else { pdfRecSet_(s.src&&s.src.id?{name:s.name,src:s.src,removed:Date.now()}:null); pdfReloadBtn_(); } }).catch(()=>{});
 }catch(e){} }
-function togglePDF(){ if(!pdfOverlay) return; pdfVisible=!pdfVisible; const btn=$("toolPdf");
+function togglePDF(){ if(!pdfOverlay) return; pdfVisible=!pdfVisible; const btn=$("toolPdf"); pdfRecPatch_({vis:pdfVisible?1:0, at:Date.now()});
   if(pdfVisible){ pdfOverlay.setOpacity($("pdfOpacity").value/100); btn.classList.add("on"); } else { pdfOverlay.setOpacity(0); btn.classList.remove("on"); } }
 // Fully remove the georeferenced PDF from the map.
 function unloadPDF(){
@@ -11935,8 +12021,9 @@ function unloadPDF(){
   const t=$("toolPdf"); if(t){ t.classList.remove("on"); t.style.display="none"; }
   const ub=$("pdfUnloadBtn"); if(ub) ub.style.display="none";
   const bar=$("pdfOpacityBar"); if(bar) bar.style.display="none";
-  try{ STORE&&STORE.removeItem("fi_pdf"); }catch(e){}
-  updateLayerStatus(); toast("PDF map unloaded");
+  const was=pdfRec_(); try{ STORE&&STORE.removeItem("fi_pdf"); }catch(e){} ldbDelete_(PDF_IMG_KEY).catch(()=>{});      /* v479: off the phone too */
+  if(was&&was.src&&was.src.id) pdfRecSet_({name:was.name, src:was.src, removed:Date.now()});
+  pdfReloadBtn_(); updateLayerStatus(); toast(was&&was.src&&was.src.id?"PDF map removed from this phone — Layers → Reload it from Drive any time":"PDF map unloaded");
 }
 function parseGeo(bytes){
   const text=new TextDecoder("latin1").decode(bytes);
@@ -11992,6 +12079,168 @@ function drawWarpedTriangle(ctx,srcCanvas,ox,oy,s0,s1,s2,d0,d1,d2){
 }
 function loadPdfJs(){ if(window.pdfjsLib) return Promise.resolve();
   return loadScript("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js").then(()=>{ pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; }); }
+/* ============ v478 — 📌 pin a PDF or a picture to the map yourself ============
+   Chris, 2026-11-19: an MNR Make-a-Map PDF has no location built in, so the app could only refuse it.
+   Now any PDF or picture can be pinned: tap a spot on it, then the same spot on the aerial — two or
+   three times. One pair moves it, two also turn and size it, three or more stretch it to fit (least
+   squares, with the average miss shown). Done makes it the ordinary PDF map (see-through slider, kept
+   across restarts), and it can be saved or shared as a GeoPDF that opens already placed. */
+let _pin=null, _pinBarEl=null, _pinLast=null;
+const PIN_MAX_PX=3000;
+function pinP_(lat,lon){ const p=L.CRS.EPSG3857.project(L.latLng(lat,lon)); return [p.x,p.y]; }
+function pinLL_(x,y){ const l=L.CRS.EPSG3857.unproject(L.point(x,y)); return [l.lat,l.lng]; }
+/* A maps image pixels (u right, v down) to Web Mercator metres: X=a·u+b·v+c, Y=d·u+e·v+f */
+function pinApply_(A,u,v){ return [A[0]*u+A[1]*v+A[2], A[3]*u+A[4]*v+A[5]]; }
+function pinInverse_(A,X,Y){ const det=A[0]*A[4]-A[1]*A[3]; if(!isFinite(det)||Math.abs(det)<1e-12) return null;
+  const x=X-A[2], y=Y-A[5]; return [(A[4]*x-A[1]*y)/det, (-A[3]*x+A[0]*y)/det]; }
+function pinSolve3_(M,b){
+  const D=m=>m[0][0]*(m[1][1]*m[2][2]-m[1][2]*m[2][1])-m[0][1]*(m[1][0]*m[2][2]-m[1][2]*m[2][0])+m[0][2]*(m[1][0]*m[2][1]-m[1][1]*m[2][0]);
+  const d=D(M); if(!isFinite(d)||Math.abs(d)<1e-9) return null;
+  return [0,1,2].map(k=>D(M.map((row,i)=>row.map((x,j)=>j===k?b[i]:x)))/d); }
+function pinFit_(pairs, prev){
+  const P=pairs.map(q=>{ const g=pinP_(q.lat,q.lon); return {u:q.u,v:q.v,X:g[0],Y:g[1]}; }), n=P.length;
+  if(!n) return prev;
+  if(n===1){ const t=pinApply_(prev,P[0].u,P[0].v), A=prev.slice(); A[2]+=P[0].X-t[0]; A[5]+=P[0].Y-t[1]; return A; }
+  if(n===2){   /* turn + size + move (no stretch): z = s·w + t with w = u − i·v */
+    const dw=[P[1].u-P[0].u, -(P[1].v-P[0].v)], dz=[P[1].X-P[0].X, P[1].Y-P[0].Y], den=dw[0]*dw[0]+dw[1]*dw[1];
+    if(den<1e-9) return prev;
+    const s0=(dz[0]*dw[0]+dz[1]*dw[1])/den, s1=(dz[1]*dw[0]-dz[0]*dw[1])/den, A=[s0,s1,0,s1,-s0,0];
+    const t=pinApply_(A,P[0].u,P[0].v); A[2]=P[0].X-t[0]; A[5]=P[0].Y-t[1]; return A; }
+  /* 3 or more: the affine that misses them least (centred, so the sums stay well-conditioned) */
+  const mu=P.reduce((s,p)=>s+p.u,0)/n, mv=P.reduce((s,p)=>s+p.v,0)/n, mX=P.reduce((s,p)=>s+p.X,0)/n, mY=P.reduce((s,p)=>s+p.Y,0)/n;
+  const fit=key=>{ const M=[[0,0,0],[0,0,0],[0,0,0]], b=[0,0,0];
+    P.forEach(p=>{ const r=[p.u-mu,p.v-mv,1], t=p[key]-(key==="X"?mX:mY); for(let i=0;i<3;i++){ b[i]+=r[i]*t; for(let j=0;j<3;j++) M[i][j]+=r[i]*r[j]; } });
+    return pinSolve3_(M,b); };
+  const x=fit("X"), y=fit("Y"); if(!x||!y) return prev;
+  return [x[0],x[1],mX+x[2]-x[0]*mu-x[1]*mv, y[0],y[1],mY+y[2]-y[0]*mu-y[1]*mv];
+}
+function pinCorners_(A,W,H){ return [[0,0],[W,0],[W,H],[0,H]].map(c=>{ const g=pinApply_(A,c[0],c[1]); const l=pinLL_(g[0],g[1]); return [+l[0].toFixed(8),+l[1].toFixed(8)]; }); }
+/* average miss on the ground, metres — only meaningful once there are more points than the fit needs */
+function pinMiss_(){ if(!_pin||_pin.pairs.length<4) return null;
+  let s=0; _pin.pairs.forEach(q=>{ const g=pinApply_(_pin.A,q.u,q.v), l=pinLL_(g[0],g[1]); s+=fmap.distance(L.latLng(l[0],l[1]),L.latLng(q.lat,q.lon)); });
+  return s/_pin.pairs.length; }
+
+/* Start: from a PDF with no location (rendered first) or from a picture */
+function pinOffer_(file, buf){
+  showInfoSheet_("No location in this PDF",
+    `<div style="color:#a9c9b0;font-size:13px;line-height:1.55;margin-bottom:10px">This PDF has no location built in, so the app can't place it by itself. You can pin it: tap a spot on the PDF, then the same spot on the aerial — two or three times, using things you can see on both (a road corner, a building, a parcel corner).</div>`+
+    `<button type="button" class="btn submit" style="width:100%;min-height:46px" onclick="closeInfoSheet_();pinFromPdf_()">📌 Pin it to the map myself</button>`);
+  _pinFile={file,buf};
+}
+let _pinFile=null;
+function pinFromPdf_(){ const f=_pinFile; _pinFile=null; if(!f) return;
+  toast("Rendering…");
+  renderPDF(f.buf.slice(0),null).then(res=>pinStartUrl_((typeof res==="string")?res:res.url, (f.file&&f.file.name)||"PDF"))
+    .catch(()=>toast("PDF render failed",true)); }
+function pinFromImage_(file){
+  const fr=new FileReader(); fr.onerror=()=>toast("That picture couldn't be read",true);
+  fr.onload=()=>pinStartUrl_(String(fr.result), file.name||"Picture"); fr.readAsDataURL(file); }
+/* the picture is redrawn as a JPEG no bigger than PIN_MAX_PX, so what is kept and shared stays small */
+function pinStartUrl_(url, name){
+  return new Promise(res=>{ const im=new Image();
+    im.onload=()=>{ const k=Math.min(1,PIN_MAX_PX/Math.max(im.naturalWidth,im.naturalHeight)), W=Math.max(1,Math.round(im.naturalWidth*k)), H=Math.max(1,Math.round(im.naturalHeight*k));
+      const cv=document.createElement("canvas"); cv.width=W; cv.height=H; const cx=cv.getContext("2d"); cx.fillStyle="#fff"; cx.fillRect(0,0,W,H); cx.drawImage(im,0,0,W,H);
+      pinBegin_(cv.toDataURL("image/jpeg",.88), W, H, name); res(true); };
+    im.onerror=()=>{ toast("That picture couldn't be opened",true); res(false); };
+    im.src=url; }); }
+function pinBegin_(url,W,H,name){
+  try{ if(measureMode||routeMode||polyMode||selectMode||placeMode){ toast("Finish what you are drawing first",true); return; } }catch(e){}
+  try{ closeDataSheet_(); }catch(e){} try{ closeInfoSheet_(); }catch(e){}
+  pinCancel_(true);
+  /* first guess: north up, filling most of the screen where you are looking */
+  const b=fmap.getBounds(), sw=pinP_(b.getSouth(),b.getWest()), ne=pinP_(b.getNorth(),b.getEast());
+  const k=Math.min(0.8*(ne[0]-sw[0])/W, 0.8*(ne[1]-sw[1])/H), cx=(sw[0]+ne[0])/2, cy=(sw[1]+ne[1])/2;
+  const A=[k,0,cx-k*W/2, 0,-k,cy+k*H/2];
+  _pin={url,W,H,name:String(name||"PDF").replace(/\.[a-z0-9]+$/i,""),A,pairs:[],pend:null,op:0.85,marks:[],corners:pinCorners_(A,W,H)};
+  _pin.layer=cornerImageOverlay_(url,_pin.corners).addTo(fmap); _pin.layer.setOpacity(_pin.op);
+  pinBar_();
+}
+function pinRedraw_(){ if(!_pin) return;
+  const c=pinCorners_(_pin.A,_pin.W,_pin.H); _pin.corners.splice(0,4,...c);
+  try{ _pin.layer._redraw&&_pin.layer._redraw(); }catch(e){}
+  _pin.marks.forEach(m=>{ try{ fmap.removeLayer(m); }catch(e){} }); _pin.marks=[];
+  const mk=(lat,lon,col,txt)=>L.marker([lat,lon],{interactive:false,icon:L.divIcon({className:"",iconSize:[22,22],iconAnchor:[11,11],
+    html:`<div style="width:22px;height:22px;border-radius:50%;background:${col};border:2px solid #fff;color:#fff;font:bold 11px system-ui;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)">${txt}</div>`})}).addTo(fmap);
+  _pin.pairs.forEach((q,i)=>_pin.marks.push(mk(q.lat,q.lon,"#2e9d4a",i+1)));
+  if(_pin.pend){ const g=pinApply_(_pin.A,_pin.pend[0],_pin.pend[1]), l=pinLL_(g[0],g[1]); _pin.marks.push(mk(l[0],l[1],"#e8760c",_pin.pairs.length+1)); }
+}
+function pinTap_(ll){
+  if(!_pin) return false;
+  const g=pinP_(ll.lat,ll.lng);
+  if(!_pin.pend){
+    const uv=pinInverse_(_pin.A,g[0],g[1]);
+    if(!uv||uv[0]<0||uv[1]<0||uv[0]>_pin.W||uv[1]>_pin.H){ toast("That's off the PDF — tap a spot on the PDF itself",true); return true; }
+    _pin.pend=uv; _pin.layer.setOpacity(0.35);
+  } else {
+    _pin.pairs.push({u:_pin.pend[0],v:_pin.pend[1],lat:ll.lat,lon:ll.lng}); _pin.pend=null;
+    _pin.A=pinFit_(_pin.pairs,_pin.A); _pin.layer.setOpacity(_pin.op);
+  }
+  pinRedraw_(); pinBar_(); return true;
+}
+function pinUndo_(){ if(!_pin) return;
+  if(_pin.pend) _pin.pend=null; else if(_pin.pairs.length){ _pin.pairs.pop(); if(_pin.pairs.length) _pin.A=pinFit_(_pin.pairs,_pin.A); }
+  _pin.layer.setOpacity(_pin.op); pinRedraw_(); pinBar_(); }
+function pinSee_(){ if(!_pin) return; _pin.op=_pin.op>0.5?0.4:0.85; if(!_pin.pend) _pin.layer.setOpacity(_pin.op); pinBar_(); }
+function pinBarRemove_(){ const b=$("pinBar")||_pinBarEl; _pinBarEl=null; try{ if(b&&b.parentNode) b.parentNode.removeChild(b); }catch(e){} }
+function pinCancel_(quiet){ if(!_pin){ pinBarRemove_(); return; }
+  try{ fmap.removeLayer(_pin.layer); }catch(e){} _pin.marks.forEach(m=>{ try{ fmap.removeLayer(m); }catch(e){} });
+  _pin=null; pinBarRemove_(); if(!quiet) toast("Pinning cancelled"); }
+function pinBar_(){
+  if(!_pin){ pinBarRemove_(); return; }
+  let bar=$("pinBar")||_pinBarEl; if(!bar){ bar=document.createElement("div"); bar.id="pinBar"; document.body.appendChild(bar); } _pinBarEl=bar;
+  bar.style.cssText="position:fixed;left:8px;right:8px;bottom:10px;z-index:5450;background:rgba(16,36,15,.96);border:1px solid #4caf50;border-radius:12px;padding:8px;color:#eafae8;font:13px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.5)";
+  const n=_pin.pairs.length, miss=pinMiss_(), B=(fn,label,on)=>`<button type="button" class="btn ${on?"submit":"ghost"}" style="flex:1;min-width:0;padding:8px 4px;font-size:13px" onclick="${fn}">${label}</button>`;
+  const say = _pin.pend ? `<b>② Now tap the same spot on the aerial.</b> The PDF is faded so you can see it.`
+    : n===0 ? `<b>① Tap a spot on the PDF</b> you can also find on the aerial — a road corner, a building, a parcel corner. Zoom in for accuracy; you can move the map between taps.`
+    : n===1 ? `Moved to fit. <b>Tap a second spot on the PDF</b>, far from the first, to turn and size it.`
+    : n===2 ? `Turned and sized. <b>A third spot</b> well away from the other two lets it stretch to fit — recommended. Or ✓ Done.`
+    : `Fitted to ${n} points${miss!=null?` — they miss by about <b>${miss<10?miss.toFixed(1):Math.round(miss)} m</b> on average`:""}. Add more, or ✓ Done.`;
+  bar.innerHTML=`<div style="margin-bottom:6px">📌 <b>Pinning ${esc(_pin.name)}</b> · ${n} point${n===1?"":"s"}<div style="color:#bfe3c4;margin-top:3px;line-height:1.4">${say}</div></div>`+
+    `<div style="display:flex;gap:6px">`+B("pinDone_()","✓ Done",n>=2&&!_pin.pend)+B("pinUndo_()","↶ Undo")+B("pinSee_()",_pin.op>0.5?"👁 Fade":"👁 Solid")+B("pinCancel_()","Cancel")+`</div>`;
+}
+function pinDone_(){
+  if(!_pin) return; if(_pin.pairs.length<2||_pin.pend){ toast("Pin at least two points first",true); return; }
+  const p=_pin, corners=pinCorners_(p.A,p.W,p.H); pinCancel_(true);
+  _pinLast={url:p.url,W:p.W,H:p.H,corners,name:p.name};
+  pdfShow_(p.url, corners, p.name);
+  showInfoSheet_("PDF pinned",
+    `<div style="color:#a9c9b0;font-size:13px;line-height:1.55;margin-bottom:10px"><b>${esc(p.name)}</b> is on the map and stays there after the app restarts. The 🗺 button shows or hides it; the slider sets how see-through it is.</div>`+
+    `<button type="button" class="btn submit" style="width:100%;min-height:44px;margin-bottom:8px" onclick="pinShare_()">⬆ Share with the crew</button>`+
+    `<button type="button" class="btn ghost" style="width:100%;min-height:44px" onclick="pinSave_()">⬇ Save as a GeoPDF</button>`+
+    `<div style="color:#8fae95;font-size:11px;margin-top:8px;line-height:1.4">Both make a GeoPDF that opens already placed — in this app on any phone, and in apps such as Avenza.</div>`);
+}
+/* A one-page PDF holding the picture, with its four corners on the ground (ISO 32000 geospatial:
+   a Viewport with a GEO Measure — what parseGeo here, and Avenza, read). */
+function pinGeoPdf_(o){
+  const b64=String(o.url).split(",")[1]||"", bin=atob(b64), jpg=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) jpg[i]=bin.charCodeAt(i);
+  const Wp=+(o.W*0.5).toFixed(2), Hp=+(o.H*0.5).toFixed(2), c=o.corners;      // c: TL,TR,BR,BL
+  const f=v=>(+v).toFixed(8), gpts=[c[3],c[0],c[1],c[2]].map(p=>f(p[0])+" "+f(p[1])).join(" ");   // BL,TL,TR,BR ↔ LPTS 0 0, 0 1, 1 1, 1 0
+  const content=`q ${Wp} 0 0 ${Hp} 0 0 cm /Im0 Do Q`;
+  const objs={
+    1:`<< /Type /Catalog /Pages 2 0 R >>`,
+    2:`<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
+    3:`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${Wp} ${Hp}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R /VP [6 0 R] >>`,
+    6:`<< /Type /Viewport /BBox [0 0 ${Wp} ${Hp}] /Name (${String(o.name||"Map").replace(/[()\\\r\n]/g," ").slice(0,60)}) /Measure 7 0 R >>`,
+    7:`<< /Type /Measure /Subtype /GEO /Bounds [0 0 0 1 1 1 1 0] /GPTS [${gpts}] /LPTS [0 0 0 1 1 1 1 0] /GCS 8 0 R >>`,
+    8:`<< /Type /GEOGCS /EPSG 4326 /WKT (GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]) >>`,
+    5:`<< /Length ${content.length} >>\nstream\n${content}\nendstream`
+  };
+  const enc=s=>{ const a=new Uint8Array(s.length); for(let i=0;i<s.length;i++) a[i]=s.charCodeAt(i)&255; return a; };
+  const parts=[], off={}; let pos=0; const push=a=>{ parts.push(a); pos+=a.length; };
+  push(enc("%PDF-1.7\n%\xE2\xE3\xCF\xD3\n"));
+  [1,2,3,6,7,8,5].forEach(n=>{ off[n]=pos; push(enc(n+" 0 obj\n"+objs[n]+"\nendobj\n")); });
+  off[4]=pos; push(enc(`4 0 obj\n<< /Type /XObject /Subtype /Image /Width ${o.W} /Height ${o.H} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpg.length} >>\nstream\n`)); push(jpg); push(enc("\nendstream\nendobj\n"));
+  const xref=pos; let x="xref\n0 9\n0000000000 65535 f \n"; for(let n=1;n<=8;n++) x+=String(off[n]).padStart(10,"0")+" 00000 n \n";
+  push(enc(x+`trailer\n<< /Size 9 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`));
+  return new Blob(parts,{type:"application/pdf"});
+}
+function pinFile_(){ if(!_pinLast) return null; const name=(_pinLast.name||"Map")+" (pinned).pdf", blob=pinGeoPdf_(_pinLast);
+  try{ return new File([blob],name,{type:"application/pdf"}); }catch(e){ blob.name=name; return blob; } }
+function pinSave_(){ const f=pinFile_(); if(!f) return;
+  const u=URL.createObjectURL(f), a=document.createElement("a"); a.href=u; a.download=f.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(u),4000); }
+function pinShare_(){ const f=pinFile_(); if(!f) return; closeInfoSheet_();
+  dlUploadFile_(f, j=>{ if(j&&j.id) pdfRecPatch_({src:{id:j.id, name:j.name||f.name}}); }); }      /* v479: now it can be let go and reloaded */
+
 /* ============ v380 — Phase 2, steps 1 and 2 ============
    PROPERTY RECORD (one per tract): owner, roll number, 911 address, lot and concession, township,
    municipality, MPAC acres, how compartment areas are labelled, and the property's own outline.
@@ -16497,7 +16746,10 @@ function spDeleteGrid_(gid, quiet){ const G=spGrids_().find(x=>x.gid===gid); if(
   propPersist_(); spRender_(); if(propBackendOk) propPush_().then(()=>{}); if(!quiet){ toast("Sample points deleted"); if(_sp) spBar_(); }
   try{ if(!spGrids_().length) _spRmOpen=false; renderLayerVis_(); }catch(e){} }
 /* ---- on the map: like reference points (white, dark ring); the number shows when zoomed in ---- */
-function spRender_(){ if(!fmap||!window.L) return; if(!spLayer){ spLayer=L.layerGroup().addTo(fmap); fmap.on("moveend zoomend",()=>{ try{ spRender_(); }catch(e){} }); } spLayer.clearLayers();
+var _spSigLbl="";
+function spRender_(){ if(!fmap||!window.L) return;
+  try{ const sig=spGrids_().map(G=>G.gid+":"+G.pts.length).join(",")+"|"+(layerVis.sample!==false); if(sig!==_spSigLbl){ _spSigLbl=sig; _lblPts=null; setTimeout(()=>{ try{ csRender_(); }catch(e){} try{ renderLabels(); }catch(e){} },0); } }catch(e){}      /* v475: names move off new points */
+  if(!spLayer){ spLayer=L.layerGroup().addTo(fmap); fmap.on("moveend zoomend",()=>{ try{ spRender_(); }catch(e){} }); } spLayer.clearLayers();
   let vis=true, lbl=true; try{ vis=layerVis.sample!==false; lbl=labelVis.sample!==false; }catch(e){} if(!vis) return;      // v469: its own switch in Layers
   const z=fmap.getZoom(), vb=fmap.getBounds().pad(0.2); let nLbl=0;
   /* v473: while ⊞ Sample or #️⃣ Count is open, a tap on a sample point goes through to the compartment under it
@@ -16899,7 +17151,7 @@ function csRender_(){
       pcs.forEach(c=>L.polygon(c.rings,{color:MAP_STYLE.compColor, weight:MAP_STYLE.compWidth, fillColor:MAP_STYLE.compFill, fillOpacity:(typeof MAP_ALPHA!=="undefined"?MAP_ALPHA.fill:10)/100, smoothFactor:2, interactive:false}).addTo(csLayer)); }
     const items=[]; pcs.forEach(c=>{ if(nLbl>=400) return; const ctr=csCtr_(c); try{ if(vb&&vb.contains&&!vb.contains(ctr)) return; }catch(e){} nLbl++;
       const h=`<div style="text-align:center;font:700 12px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000">${esc(c.name)}</div>`;
-      items.push({k:(c.id||"")+"|"+ctr.join(",")+"|"+h, make:()=>L.marker(ctr,{interactive:false,keyboard:false,icon:L.divIcon({className:"",iconSize:[120,20],iconAnchor:[60,10],html:h})})}); });
+      const up=lblNudge_(ctr); items.push({k:(c.id||"")+"|"+ctr.join(",")+"|"+up+"|"+h, make:()=>L.marker(ctr,{interactive:false,keyboard:false,pane:lblLowPane_(),icon:L.divIcon({className:"",iconSize:[120,20],iconAnchor:[60,10+up],html:h})})}); });
     lblSync_(csLayer, items); return; }
   csLayer.clearLayers(); _csSig=null;
   pcs.forEach(c=>{ const ct=c.tract||t, cls=(propComp_(ct,c.name)||{}).cls||"", pick=_csEd&&_csEd.pick===c.id;
@@ -16909,7 +17161,7 @@ function csRender_(){
     const ctr=c.rings[0].reduce((a,p)=>[a[0]+p[0]/c.rings[0].length,a[1]+p[1]/c.rings[0].length],[0,0]);
     if(!_csEd){ try{ if(vb&&vb.contains&&!vb.contains(ctr)) return; }catch(e){} if(++nLbl>400) return; }      // v436: names in view only
     if(_csEd&&_csEd.mode==="pw") return;      // v465: ＋ Set up's names step draws the names being typed
-    L.marker(ctr,{interactive:false,keyboard:false,icon:L.divIcon({className:"",iconSize:[120,20],iconAnchor:[60,10],
+    L.marker(ctr,{interactive:false,keyboard:false,pane:_csEd?"markerPane":lblLowPane_(),icon:L.divIcon({className:"",iconSize:[120,20],iconAnchor:[60,10+(_csEd?0:lblNudge_(ctr))],
       html:`<div style="text-align:center;font:700 12px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000">${esc(c.name)}</div>`})}).addTo(csLayer); });   // v418: no " ·?" after a piece without a class (read as an error, Chris 2026-10-13)
   if(_csEd&&(_csEd.mode==="move"||_csEd.mode==="outline")){ csHandles_(t, pcs); return; }      // v466
   if(false){
@@ -17011,6 +17263,7 @@ function mvMake_(i){
     mmMake_(v.kind, v.tract, o, v);
   }, 90000);
 }
+try{ whoRestore_(); }catch(e){}      /* v477 */
 window.__friBooted=1;      /* v448: the whole app script ran — the start-up guard stands down */
 </script>
 </body>
