@@ -919,6 +919,7 @@ try{ (function(){
     <details class="lgroup" id="lgroupRef"><summary>📍 Reference layers — points, lines &amp; polygons</summary>
       <div class="lgroup-body">
         <div class="ls-muted" id="refLayersHint" style="font-size:12px;line-height:1.4;padding:2px">None loaded. Load them under Load &amp; import layers → ⬇ Reference points, lines &amp; polygons.</div>
+        <div id="refLayerList"></div>
         <div class="map-field" id="refFieldRow" style="display:none">
           <label>Point label field</label><select id="refFieldSel" onchange="setRefField(this.value)"></select>
         </div>
@@ -1436,7 +1437,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-19 · v480";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-20 · v482";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -7566,6 +7567,7 @@ function initMap(){
      followed by a click within 450 ms is handled the same way (Chris, 2026-10-13: no popup on Android). */
   window.mapTapHandle_=function(ll){ try{
     if(typeof pinTap_==="function" && pinTap_(ll)) return;                     /* v478: 📌 pinning a PDF by hand */
+    if(typeof featPickTap_==="function" && featPickTap_(ll)) return;           /* v482: choosing what to bring in */
     if(typeof cntTap_==="function" && cntTap_(ll)) return;                     // v470: #️⃣ Count — a compartment tapped, or an area drawn
     if(typeof spTap_==="function" && spTap_(ll)) return;                       // v468: ⊞ Sample points — picking or drawing the area
     if(typeof pwTap_==="function" && pwTap_(ll)) return;                       // v465: ＋ Set up — drawing the outline, or finding a compartment in the names list
@@ -7796,6 +7798,9 @@ function loadBoundaries(file){
   toast("Reading boundaries…");
   const lower=file.name.toLowerCase();
   const add=gj=>{ const fc=normalizeFC(gj); if(!fc.features.length){ toast("No polygons found",true); return; }
+    /* v482: choose which compartments to bring in first */
+    if(fc.features.length>1 && !add._picked){ featPick_(fc.features.map(f=>({f, have:fpHaveComp_(f)})), {name:file.name||"the file", kind:"bound"}).then(ch=>{
+        if(!ch||!ch.length) return; add._picked=true; add({type:"FeatureCollection", features:ch}); }); return; }
     const bf={id:genId(), name:file.name||"shapefile", features:fc.features};
     /* v421: a file with no tract field is asked which property it is for (it was going to the property shown — Chris,
        2026-10-14); one polygon is that property's outline, more are its compartments */
@@ -11722,7 +11727,14 @@ async function exportTractMapsPdf(){
 /* ---- import reference points / lines / polygons (shapefile, GeoJSON, GPX) ---- */
 function importRefFile(file){
   toast("Reading…"); const lower=file.name.toLowerCase();
-  const done=gj=>{ const n=renderRef(gj); if(n){ cacheRefFile_(gj); } toast(n?`Imported ${n} feature${n>1?"s":""}`:"Nothing to import",!n); };
+  const done0=gj=>{ const n=refAddLayers_(gj, file.name); toast(n?`Imported ${n} feature${n>1?"s":""} — Layers → 📍 Reference layers to set its look`:"Nothing to import",!n); };      /* v481 */
+  /* v482: choose which points, lines and polygons to bring in first (across every layer in a zip) */
+  const done=gj=>{ const cols=(Array.isArray(gj)?gj:[gj]).filter(fc=>fc&&fc.features&&fc.features.length);
+    const all=[]; cols.forEach((fc,ci)=>fc.features.forEach(f=>{ f.__fpc=ci; all.push({f}); }));
+    if(all.length<2){ done0(gj); return; }
+    featPick_(all,{name:file.name||"the file", kind:"ref"}).then(ch=>{ if(!ch||!ch.length) return;
+      const keep=new Set(ch); const out=cols.map(fc=>Object.assign({},fc,{features:fc.features.filter(f=>keep.has(f))})).filter(fc=>fc.features.length);
+      out.forEach(fc=>fc.features.forEach(f=>{ delete f.__fpc; })); done0(out.length===1?out[0]:out); }); };
   if(lower.endsWith(".geojson")||lower.endsWith(".json")) file.text().then(t=>ensureWGS84(JSON.parse(t))).then(done).catch(()=>toast("Bad GeoJSON",true));
   else if(lower.endsWith(".gpx")) file.text().then(t=>done(gpxToGeo(t))).catch(()=>toast("Bad GPX",true));
   else if(lower.endsWith(".shp")||lower.endsWith(".zip")) file.arrayBuffer().then(b=>shp(b)).then(ensureWGS84).then(done).catch(e=>toast("Shapefile error",true));
@@ -11739,8 +11751,10 @@ function importRefFile(file){
 function trimRefFc_(fc){
   if(!fc || !fc.features) return fc;
   const round=c=>Array.isArray(c[0]) ? c.map(round) : [ +Number(c[0]).toFixed(5), +Number(c[1]).toFixed(5) ];
-  const keep = refLabelField || null;
-  return { type:"FeatureCollection", _lbl:keep,
+  /* v481: each layer keeps its own label field (the chosen one if it has it, else its likeliest) */
+  const ks=[]; (fc.features||[]).slice(0,200).forEach(f=>Object.keys((f&&f.properties)||{}).forEach(k=>{ if(ks.indexOf(k)<0) ks.push(k); }));
+  const keep = (fc._lbl && ks.indexOf(fc._lbl)>=0) ? fc._lbl : (refLabelField && ks.indexOf(refLabelField)>=0) ? refLabelField : (ks.find(k=>/name|^id$|plot|label|wpt|wp|stn|stake|num|comp|stand/i.test(k)) || ks[0] || null);
+  return { type:"FeatureCollection", _lbl:keep, _id:fc._id, _name:fc._name, _sty:fc._sty,
     features: fc.features.map(f=>{
       const pr={};
       if(keep && f.properties && f.properties[keep]!=null) pr[keep]=f.properties[keep];
@@ -11780,15 +11794,16 @@ function loadCachedRefFiles_(){
       try{ STORE.removeItem("fi_reffiles"); }catch(e){}
     }
   }catch(e){}
-  try{ ldbGet("reffiles").then(list=>{ (Array.isArray(list)?list:[]).forEach(fc=>{
-    if(fc && fc._lbl && !refLabelField) refLabelField=fc._lbl;
-    renderRef(fc);
-  }); }).catch(()=>{}); }catch(e){}
+  try{ ldbGet("reffiles").then(list=>{ REFL=(Array.isArray(list)?list:[]).filter(fc=>fc&&fc.features);
+    let fixed=false; REFL.forEach((fc,i)=>{ if(fc._lbl && !refLabelField) refLabelField=fc._lbl; if(!fc._id||!fc._sty||!fc._name){ refInit_(fc,"Reference layer "+(i+1),i); fixed=true; } });
+    if(fixed) refSave_();
+    refRenderAll_(false);
+  }).catch(()=>{}); }catch(e){}
 }
 function clearRefFiles(){
   if((refLabels.length||refFeatCount||refPolys.length) && !confirm("Remove all "+(refFeatCount||refLabels.length)+" imported reference points, lines and polygons from the map and this phone?"+(refStandField&&refPolys.length?"\n\nPlots already given a sub-compartment from them keep it.":""))) return;
   if(refLayer) refLayer.clearLayers(); if(freflabelLayer) freflabelLayer.clearLayers();
-  refLabels=[]; refFeatCount=0; refLabelField=null; refPolys=[]; try{ refPolyFields_(); }catch(e){}
+  refLabels=[]; refFeatCount=0; refLabelField=null; refPolys=[]; REFL=[]; try{ refPolyFields_(); }catch(e){} try{ refListRender_(); }catch(e){}
   try{ STORE&&STORE.removeItem("fi_reffiles"); }catch(e){}
   try{ ldbPut("reffiles",[]).catch(()=>{}); }catch(e){}
   updateLayerStatus(); renderLayerVis_(); toast("Reference layers removed");
@@ -11866,37 +11881,200 @@ function refAltHtml_(){ const c=_refTapCtx; if(!c||!c.P||!_bpLatLng||c.ll!==_bpL
   const v=refStandField?refPolyVal_(c.P,refStandField):(refPolyLblField?refPolyVal_(c.P,refPolyLblField):"");
   return `<div onclick="refTapSwitch_('ref')" style="cursor:pointer;margin-top:8px;font-size:11px;color:#2f6b3c;text-decoration:underline">📍 Show the reference polygon${v?" "+esc(v):""} instead</div>`; }
 function setRefTapPref_(v){ refTapPref=v==="comp"?"comp":"ref"; try{ STORE&&STORE.setItem("fi_reftap",refTapPref); }catch(e){} }
-function renderRef(gj){
-  if(!refLayer) return 0; const cols=Array.isArray(gj)?gj:[gj]; let n=0; const b=[];
-  const pal=["#ff7043","#80cbc4","#ffe082","#ce93d8","#a5d6a7","#90caf9"]; let ci=0;
-  cols.forEach(fc=>{ if(!fc||!fc.features) return; const col=pal[ci++%pal.length];
+/* ============ v482 — choose which features of a file to bring in ============
+   Chris, 2026-11-20: "a large zip file of compartments … I just want to select the compartments I'll be visiting …
+   The same would hold true for trails and points … Bringing in all the features may cause overlap too, as some
+   compartments are already present in the system." A compartment file, or a reference file of points / lines /
+   polygons, with more than one feature now opens on the map first: tap features to take or leave them, take
+   everything in view, all or none, or pick from a searchable list; then bring in only those. Compartments the
+   Sheet already has (same property and name) are marked and left out unless chosen. */
+let _fp=null, _fpBarEl=null;
+const FP_BIG=30;      /* above this many, start with nothing chosen (choose in view or from the list) */
+function fpGuessName_(pr){ const ks=Object.keys(pr||{}); const k=(typeof standField!=="undefined"&&standField&&ks.indexOf(standField)>=0)?standField:ks.find(x=>/^(stand|standid|stand_id|comp|compartment|cpt|name|label|id)$/i.test(x))||ks.find(x=>/stand|comp|name|label|plot|trail/i.test(x));
+  return k&&pr[k]!=null?String(pr[k]).trim():""; }
+function fpLabel_(f){ const pr=(f&&f.properties)||{}; const nm=fpGuessName_(pr); let t=""; try{ t=featTract_(f); }catch(e){}
+  if(nm) return (t&&t!==nm?t+" · ":"")+nm; const v=Object.values(pr).filter(x=>x!=null&&x!==""&&typeof x!=="object").slice(0,2).join(" — "); return v||"(no name)"; }
+function fpGeomParts_(g){ const o={pts:[],lines:[],polys:[]}; if(!g||!g.coordinates) return o;
+  const t=g.type, c=g.coordinates, ll=q=>[+q[1],+q[0]];
+  if(t==="Point") o.pts.push(ll(c)); else if(t==="MultiPoint") c.forEach(q=>o.pts.push(ll(q)));
+  else if(t==="LineString") o.lines.push(c.map(ll)); else if(t==="MultiLineString") c.forEach(l=>o.lines.push(l.map(ll)));
+  else if(t==="Polygon") o.polys.push(c.map(r=>r.map(ll))); else if(t==="MultiPolygon") c.forEach(p=>o.polys.push(p.map(r=>r.map(ll))));
+  return o; }
+/* features: [{f, have?}]  →  Promise of the chosen feature objects, or null when cancelled */
+function featPick_(feats, opts){
+  opts=opts||{};
+  if(!feats||feats.length<2||typeof fmap==="undefined"||!fmap||globalThis.__FP_OFF) return Promise.resolve(feats?feats.map(x=>x.f||x):[]);      /* __FP_OFF: the automated tests of the older load paths bring everything in */
+  return new Promise(res=>{
+    featPickEnd_(true);
+    const lyr=L.layerGroup().addTo(fmap), b=[];
+    const E=feats.map((x,i)=>{ const f=x.f||x, pr=fpGeomParts_(f.geometry), e={i,f,have:!!x.have,label:fpLabel_(f),parts:pr,lyrs:[]};
+      pr.polys.forEach(p=>{ e.lyrs.push(L.polygon(p,{weight:2,interactive:false,smoothFactor:1.5}).addTo(lyr)); p[0].forEach(q=>b.push(q)); });
+      pr.lines.forEach(l=>{ e.lyrs.push(L.polyline(l,{weight:4,interactive:false}).addTo(lyr)); l.forEach(q=>b.push(q)); });
+      pr.pts.forEach(q=>{ e.lyrs.push(L.circleMarker(q,{radius:5,weight:2,interactive:false}).addTo(lyr)); b.push(q); });
+      let s=1/0,w=1/0,n=-1/0,ea=-1/0; [].concat(...pr.polys.map(p=>p[0]),...pr.lines,pr.pts).forEach(q=>{ s=Math.min(s,q[0]); n=Math.max(n,q[0]); w=Math.min(w,q[1]); ea=Math.max(ea,q[1]); });
+      e.bb=[s,w,n,ea]; e.area=(n-s)*(ea-w); return e; });
+    const big=feats.length>FP_BIG; E.forEach(e=>{ e.sel=!big && !e.have; });
+    _fp={E,lyr,res,opts,name:String(opts.name||"the file"),big};
+    E.forEach(fpStyle_);
+    try{ closeLayersMenu(); }catch(e){} try{ closeInfoSheet_(); }catch(e){} try{ closeDataSheet_(); }catch(e){}
+    if(b.length) try{ fmap.fitBounds(b,{padding:[30,30]}); }catch(e){}
+    fpBar_();
+  }); }
+function fpStyle_(e){ const on=e.sel, col=on?"#ff9800":(e.have?"#7fa7ff":"#b0bec5");
+  e.lyrs.forEach(l=>{ try{ if(l instanceof L.CircleMarker) l.setStyle({color:on?"#1c2b1e":"#455a64",fillColor:col,fillOpacity:on?0.95:0.5,weight:on?2:1});
+    else if(l instanceof L.Polygon) l.setStyle({color:col,weight:on?3:1.5,dashArray:on?null:"5 5",fillColor:col,fillOpacity:on?0.28:0.06});
+    else l.setStyle({color:col,weight:on?5:2.5,dashArray:on?null:"6 6",opacity:on?1:0.7}); }catch(_){} }); }
+/* which feature is under a tap: a point or line within a finger's reach, else the smallest polygon around it */
+function fpHit_(ll){ if(!_fp) return null; const P=fmap.latLngToContainerPoint(ll), px=q=>fmap.latLngToContainerPoint(L.latLng(q[0],q[1]));
+  const segD=(p,a,b)=>{ const dx=b.x-a.x, dy=b.y-a.y, L2=dx*dx+dy*dy; let t=L2?((p.x-a.x)*dx+(p.y-a.y)*dy)/L2:0; t=Math.max(0,Math.min(1,t)); const x=a.x+t*dx-p.x, y=a.y+t*dy-p.y; return Math.sqrt(x*x+y*y); };
+  let best=null, bd=1/0;
+  _fp.E.forEach(e=>{ e.parts.pts.forEach(q=>{ const d=px(q).distanceTo(P); if(d<16&&d<bd){ bd=d; best=e; } });
+    e.parts.lines.forEach(l=>{ for(let k=1;k<l.length;k++){ const d=segD(P,px(l[k-1]),px(l[k])); if(d<12&&d<bd){ bd=d; best=e; } } }); });
+  if(best) return best;
+  const inRing=(r,y,x)=>{ let c=false; for(let i=0,j=r.length-1;i<r.length;j=i++){ const a=r[i],b2=r[j]; if(((a[0]>y)!==(b2[0]>y)) && (x<(b2[1]-a[1])*(y-a[0])/(b2[0]-a[0])+a[1])) c=!c; } return c; };
+  const y=ll.lat, x=ll.lng; let sm=null;
+  _fp.E.forEach(e=>{ if(y<e.bb[0]||y>e.bb[2]||x<e.bb[1]||x>e.bb[3]) return;
+    if(e.parts.polys.some(p=>inRing(p[0],y,x)&&!p.slice(1).some(h=>inRing(h,y,x))) && (!sm||e.area<sm.area)) sm=e; });
+  return sm; }
+function featPickTap_(ll){ if(!_fp) return false; const e=fpHit_(ll);
+  if(e){ e.sel=!e.sel; fpStyle_(e); fpBar_(); toast((e.sel?"✓ ":"✕ ")+e.label+(e.have&&e.sel?" — the Sheet already has this one":""),false); }
+  return true; }
+function fpSetAll_(v){ if(!_fp) return; _fp.E.forEach(e=>{ e.sel=v; fpStyle_(e); }); fpBar_(); }
+function fpInView_(){ if(!_fp) return; const bb=fmap.getBounds(); let n=0;
+  _fp.E.forEach(e=>{ const c=L.latLngBounds([[e.bb[0],e.bb[1]],[e.bb[2],e.bb[3]]]); if(bb.intersects(c) && !e.sel && !e.have){ e.sel=true; fpStyle_(e); n++; } });
+  fpBar_(); toast(n?"Added "+n+" in view":"Nothing new in view"+(_fp.E.some(e=>e.have)?" (ones the Sheet already has are left for you to tap)":"")); }
+function fpBar_(){ if(!_fp){ fpBarRemove_(); return; }
+  let bar=$("fpBar")||_fpBarEl; if(!bar){ bar=document.createElement("div"); bar.id="fpBar"; document.body.appendChild(bar); } _fpBarEl=bar; document.body.classList.add("bar-open");      /* the bar has the bottom of the screen */
+  bar.style.cssText="position:fixed;left:8px;right:8px;bottom:10px;z-index:5450;background:rgba(16,36,15,.96);border:1px solid #ff9800;border-radius:12px;padding:8px;color:#eafae8;font:13px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.5)";
+  const n=_fp.E.filter(e=>e.sel).length, have=_fp.E.filter(e=>e.have).length, B=(fn,label,cls,dis)=>`<button type="button" class="btn ${cls||"ghost"}" ${dis?"disabled":""} style="flex:1;min-width:0;padding:8px 4px;font-size:13px" onclick="${fn}">${label}</button>`;
+  bar.innerHTML=`<div style="margin-bottom:6px">☑ <b>Choose what to bring in</b> · ${esc(_fp.name)}<div style="color:#bfe3c4;margin-top:3px;line-height:1.4"><b>${n} of ${_fp.E.length}</b> chosen. Tap a feature to take it (orange) or leave it (grey).${have?` <span style="color:#a9c4ff">${have} the Sheet already has (blue) — left out unless you tap them.</span>`:""}</div></div>`+
+    `<div style="display:flex;gap:6px;margin-bottom:6px">`+B("fpInView_()","▣ All in view")+B("fpSetAll_(true)","All")+B("fpSetAll_(false)","None")+B("fpList_()","☰ List")+`</div>`+
+    `<div style="display:flex;gap:6px">`+B("featPickEnd_()","Cancel")+B("fpDone_()",n?`✓ Bring in ${n}`:"✓ Bring in","submit",!n)+`</div>`; }
+function fpBarRemove_(){ const b=$("fpBar")||_fpBarEl; _fpBarEl=null; try{ if(b&&b.parentNode){ b.parentNode.removeChild(b); document.body.classList.remove("bar-open"); } }catch(e){} }
+function featPickEnd_(quiet){ if(!_fp){ fpBarRemove_(); return; } const r=_fp.res; try{ fmap.removeLayer(_fp.lyr); }catch(e){} _fp=null; fpBarRemove_(); try{ closeDataSheet_(); }catch(e){}
+  if(!quiet){ toast("Nothing brought in"); } if(r) r(null); }
+function fpDone_(){ if(!_fp) return; const chosen=_fp.E.filter(e=>e.sel).map(e=>e.f); if(!chosen.length){ toast("Choose at least one",true); return; }
+  const r=_fp.res; _fp.res=null; featPickEnd_(true); r(chosen); }
+/* the list: search by any name or value, take or leave what is shown */
+function fpList_(q){ if(!_fp) return; q=String(q==null?(_fp.q||""):q); _fp.q=q; const k=q.trim().toLowerCase();
+  const match=e=>!k || e.label.toLowerCase().indexOf(k)>=0 || Object.values((e.f&&e.f.properties)||{}).some(v=>v!=null&&String(v).toLowerCase().indexOf(k)>=0);
+  const shown=_fp.E.filter(match).sort((a,b)=>a.label.localeCompare(b.label,undefined,{numeric:true}));
+  const rows=shown.slice(0,400).map(e=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid rgba(255,255,255,.07)"><input type="checkbox" ${e.sel?"checked":""} onchange="fpListSet_(${e.i},this.checked)" style="width:20px;height:20px"><span style="flex:1">${esc(e.label)}</span>${e.have?`<small style="color:#a9c4ff">on the Sheet</small>`:""}</label>`).join("");
+  showDataSheet_("Choose from the list — "+_fp.name,
+    `<input id="fpQ" type="search" placeholder="Search names and values (e.g. a property or compartment)" value="${esc(q)}" oninput="fpListQ_(this.value)" style="width:100%;box-sizing:border-box;padding:9px;border-radius:8px;border:1px solid #4c6b52;background:#10240f;color:#eafae8;font:15px system-ui;margin-bottom:8px">`+
+    `<div style="display:flex;gap:6px;margin-bottom:6px"><button type="button" class="btn ghost" style="flex:1" onclick="fpListShown_(true)">Take the ${shown.length} shown</button><button type="button" class="btn ghost" style="flex:1" onclick="fpListShown_(false)">Leave them</button></div>`+
+    `<div id="fpRows" style="max-height:48vh;overflow:auto">${rows||`<div style="color:#8fae95;padding:8px">Nothing matches.</div>`}${shown.length>400?`<div style="color:#8fae95;padding:6px">… ${shown.length-400} more — narrow the search</div>`:""}</div>`+
+    `<button type="button" class="btn submit" style="width:100%;margin-top:10px" onclick="closeDataSheet_();fpBar_()">Back to the map · ${_fp.E.filter(e=>e.sel).length} chosen</button>`);
+  const i=$("fpQ"); if(i&&q){ try{ i.focus(); i.setSelectionRange(q.length,q.length); }catch(e){} } }
+let _fpQT=null; function fpListQ_(v){ clearTimeout(_fpQT); _fpQT=setTimeout(()=>fpList_(v),250); }
+function fpListSet_(i,v){ if(!_fp) return; const e=_fp.E[i]; if(!e) return; e.sel=!!v; fpStyle_(e); fpBar_(); }
+function fpListShown_(v){ if(!_fp) return; const k=String(_fp.q||"").trim().toLowerCase();
+  _fp.E.forEach(e=>{ if(!k || e.label.toLowerCase().indexOf(k)>=0 || Object.values((e.f&&e.f.properties)||{}).some(x=>x!=null&&String(x).toLowerCase().indexOf(k)>=0)){ e.sel=v; fpStyle_(e); } }); fpBar_(); fpList_(); }
+/* compartments the Sheet already has: the same property and name */
+function fpHaveComp_(f){ try{ const t=featTract_(f), nm=fpGuessName_((f&&f.properties)||{}); if(!t||!nm) return false; return csOf_(t).some(c=>propK_(c.name)===propK_(nm)); }catch(e){ return false; } }
+
+/* ============ v481 — each reference layer has its own look ============
+   Chris, 2026-11-20: "several layers that are reference points … all have the same symbology. Can we have
+   different symbology and customize that for each of the layers". Every imported file (each shapefile in a
+   zip) is now its own layer with a name and a style — colour, point shape (● ■ ▲ ◆), point size, line
+   width and line style — set in Layers → 📍 Reference layers, where each can also be hidden or removed on
+   its own. New layers get a different colour and shape each; the first keeps the old white dot. Kept with
+   the layer on this phone (IndexedDB "reffiles"). */
+let REFL=[];
+const REF_COLS=["#ffffff","#ffd600","#00e5ff","#ff4081","#76ff03","#448aff","#ff9100","#e040fb","#ff1744","#1c2b1e"];
+const REF_SHAPES=[["circle","●"],["square","■"],["triangle","▲"],["diamond","◆"]];
+const REF_DEF=[["#ffffff","circle"],["#ffd600","square"],["#00e5ff","triangle"],["#ff4081","diamond"],["#76ff03","circle"],["#448aff","square"],["#ff9100","triangle"],["#e040fb","diamond"]];
+const REF_SIZE={s:3,m:4,l:6.5}, REF_DASH={solid:null,dashed:"9 6",dotted:"2 6"};
+function refInit_(fc,name,i){
+  const hasPt=(fc.features||[]).some(f=>f&&f.geometry&&/Point/.test(f.geometry.type||""));
+  const d=REF_DEF[i%REF_DEF.length];
+  fc._id=fc._id||("R"+Date.now().toString(36)+Math.floor(Math.random()*46656).toString(36));
+  fc._name=String(fc._name||name||"Reference layer").slice(0,60);
+  fc._sty=Object.assign({c:(hasPt||i)?d[0]:"#ff7043", sh:d[1], sz:"m", lw:3, ls:"solid", hid:false}, fc._sty||{});
+  return fc; }
+function refSave_(){ try{ return ldbPut("reffiles", REFL).catch(()=>toast("Couldn't save the reference layers to this device",true)); }catch(e){ return Promise.resolve(); } }
+function refAddLayers_(gj, fileName){
+  const cols=(Array.isArray(gj)?gj:[gj]).filter(fc=>fc&&fc.features&&fc.features.length); if(!cols.length) return 0;
+  const base=String(fileName||"Reference layer").replace(/\.(zip|shp|geojson|json|gpx)$/i,"");
+  let n=0; const added=[];
+  cols.forEach((fc,j)=>{ const nm=fc.fileName?String(fc.fileName).replace(/^.*\//,""):(cols.length>1?base+" "+(j+1):base);
+    const t=trimRefFc_(refInit_(fc, nm, REFL.length)); REFL.push(t); added.push(t._id); n+=t.features.length; });
+  try{ STORE&&STORE.removeItem("fi_reffiles"); }catch(e){}
+  refSave_(); refRenderAll_(added); return n; }
+/* a point drawn as a circle, square, triangle or diamond — on the map's canvas, so thousands stay quick */
+let _refShapeCls=null;
+function refShapeCls_(){ if(_refShapeCls) return _refShapeCls;
+  const path=(p,r,s)=>s==="square"?[[p.x-r,p.y-r],[p.x+r,p.y-r],[p.x+r,p.y+r],[p.x-r,p.y+r]]
+    : s==="triangle"?[[p.x,p.y-r*1.35],[p.x+r*1.2,p.y+r*0.8],[p.x-r*1.2,p.y+r*0.8]]
+    : s==="diamond"?[[p.x,p.y-r*1.35],[p.x+r*1.35,p.y],[p.x,p.y+r*1.35],[p.x-r*1.35,p.y]] : null;
+  if(L.Canvas&&L.Canvas.include) L.Canvas.include({ _updateRefShape(layer){ if(!this._drawing||layer._empty()) return; const p=layer._point, ctx=this._ctx, r=Math.max(layer._radius,1), pts=path(p,r,layer.options.shape);
+    if(!pts){ this._updateCircle(layer); return; } ctx.beginPath(); pts.forEach((q,i)=>i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])); ctx.closePath(); this._fillStroke(ctx,layer); } });
+  if(L.SVG&&L.SVG.include) L.SVG.include({ _updateRefShape(layer){ const p=layer._point, r=Math.max(layer._radius,1), pts=path(p,r,layer.options.shape);
+    if(!pts){ this._updateCircle(layer); return; } this._setPath(layer, layer._empty()?"M0 0":"M"+pts.map(q=>q[0]+" "+q[1]).join("L")+"z"); } });
+  if(!L.CircleMarker||!L.CircleMarker.extend){ _refShapeCls=function(ll,o){ return L.circleMarker(ll,o); }; return _refShapeCls; }      /* a reduced Leaflet: plain dots */
+  _refShapeCls=L.CircleMarker.extend({ options:{shape:"circle"}, _updatePath(){ const r=this._renderer; if(r&&r._updateRefShape) r._updateRefShape(this); else L.CircleMarker.prototype._updatePath.call(this); } });
+  return _refShapeCls; }
+function refRenderAll_(fitIds){
+  if(!refLayer) return 0; refLayer.clearLayers(); refLabels=[]; refPolys=[]; refFeatCount=0;
+  const b=[]; let n=0; const Shape=refShapeCls_();
+  REFL.forEach(fc=>{ if(!fc||!fc.features) return; const st=fc._sty||{}; if(st.hid) return;
+    const col=st.c||"#ffffff", dark=/^#(fff|ffffff)$/i.test(col)?"#1c2b1e":"#111", fit=Array.isArray(fitIds)&&fitIds.indexOf(fc._id)>=0;
+    const line={color:col, weight:+st.lw||3, opacity:.9, dashArray:REF_DASH[st.ls]||null};
     fc.features.forEach(f=>{ const g=f.geometry, pr=f.properties||{}; if(!g) return;
       const label=Object.values(pr).filter(v=>v!=null&&v!=="").slice(0,2).join(" — ")||"feature";
       const pn=refPlotNum_(pr).replace(/'/g,"\\'");
       const addPt=(lon,lat)=>{ if(!isFinite(lat)||!isFinite(lon)) return;
-        /* Smaller, flatter and ringed in dark: a reference point is somewhere to go, not work done.
-           At radius 6 on white they were indistinguishable from a collected plot. */
-        /* White with a dark ring — deliberately colourless. Every warm colour is spoken for, and the
-           crew palette contained this exact orange, so a seventh crew member's plots and the
-           reference points were the same dot. A target to walk to should not compete with recorded
-           work, and white reads on both canopy and open field. */
-        L.circleMarker([lat,lon],{radius:4,color:"#1c2b1e",weight:1.5,fillColor:"#ffffff",fillOpacity:.9}).addTo(refLayer)
+        new Shape([lat,lon],{shape:st.sh||"circle", radius:REF_SIZE[st.sz]||4, color:dark, weight:1.5, fillColor:col, fillOpacity:.9}).addTo(refLayer)
          .bindPopup(`<div style="font-family:monospace;font-size:11px;color:#16271a"><b>${esc(label)}</b><br>${lat.toFixed(5)}, ${lon.toFixed(5)}${pn?`<br>plot ${esc(pn)}`:""}<br><a href="javascript:void(0)" onclick="placeFromRef(${lat},${lon},'${pn}')">Place plot here ›</a></div>`);
-        refLabels.push({lat:lat,lng:lon,props:pr});
-        b.push([lat,lon]); n++; };
+        refLabels.push({lat:lat,lng:lon,props:pr,lyr:fc._id});
+        if(fit) b.push([lat,lon]); n++; };
       if(g.type==="Point") addPt(g.coordinates[0],g.coordinates[1]);
       else if(g.type==="MultiPoint") g.coordinates.forEach(c=>addPt(c[0],c[1]));
-      else if(g.type==="LineString"){ const co=g.coordinates.map(c=>[c[1],c[0]]); L.polyline(co,{color:col,weight:3,opacity:.9}).addTo(refLayer).bindPopup(esc(label)); co.forEach(c=>b.push(c)); n++; }
-      else if(g.type==="MultiLineString") g.coordinates.forEach(l=>{ const co=l.map(c=>[c[1],c[0]]); L.polyline(co,{color:col,weight:3,opacity:.9}).addTo(refLayer); co.forEach(c=>b.push(c)); n++; });
+      else if(g.type==="LineString"){ const co=g.coordinates.map(c=>[c[1],c[0]]); L.polyline(co,line).addTo(refLayer).bindPopup(esc(label)); if(fit) co.forEach(c=>b.push(c)); n++; }
+      else if(g.type==="MultiLineString") g.coordinates.forEach(l=>{ const co=l.map(c=>[c[1],c[0]]); L.polyline(co,line).addTo(refLayer); if(fit) co.forEach(c=>b.push(c)); n++; });
       else if(g.type==="Polygon"||g.type==="MultiPolygon"){ const parts=(g.type==="Polygon"?[g.coordinates]:g.coordinates).map(p=>p.map(r=>r.map(c=>[c[1],c[0]]))).filter(p=>p[0]&&p[0].length>=3);
-        if(!parts.length) return; refPolyAdd_(pr, parts);      // v450: kept, so plots inside can take their compartment from it
-        parts.forEach(co=>{ L.polygon(co,{color:col,weight:2,fillOpacity:.12,smoothFactor:2,interactive:false}).addTo(refLayer); co[0].forEach(c=>b.push(c)); }); n++; }      // v451: a tap on it goes through mapTapHandle_, which chooses between it and the compartment under it
+        if(!parts.length) return; refPolyAdd_(pr, parts);
+        parts.forEach(co=>{ L.polygon(co,{color:col,weight:Math.max(1,(+st.lw||3)-1),dashArray:REF_DASH[st.ls]||null,fillOpacity:.12,smoothFactor:2,interactive:false}).addTo(refLayer); if(fit) co[0].forEach(c=>b.push(c)); }); n++; }
     }); });
-  pickRefField(); try{ refPolyFields_(); }catch(e){}
-  refFeatCount+=n; updateLayerStatus();
+  pickRefField(); try{ refPolyFields_(); }catch(e){} try{ renderRefLabels(); }catch(e){}
+  refFeatCount=n; updateLayerStatus(); refListRender_();
   if(b.length) fmap.fitBounds(b,{padding:[36,36]});
-  return n;
-}
+  return n; }
+function renderRef(gj){ return refAddLayers_(gj, (gj&&gj.fileName)||"Reference layer"); }      /* kept for older callers */
+/* the swatch: the layer's point shape in its colour, with a line beside it */
+function refSwatch_(st){ st=st||{}; const c=st.c||"#fff", k=/^#(fff|ffffff)$/i.test(c)?"#1c2b1e":"#111", s=st.sh||"circle";
+  const shp = s==="square"?`<rect x="3" y="5" width="10" height="10" fill="${c}" stroke="${k}" stroke-width="1.5"/>`
+    : s==="triangle"?`<polygon points="8,3 14,15 2,15" fill="${c}" stroke="${k}" stroke-width="1.5"/>`
+    : s==="diamond"?`<polygon points="8,2 14,10 8,18 2,10" fill="${c}" stroke="${k}" stroke-width="1.5"/>`
+    : `<circle cx="8" cy="10" r="5.5" fill="${c}" stroke="${k}" stroke-width="1.5"/>`;
+  const d=REF_DASH[st.ls]; return `<svg width="40" height="20" viewBox="0 0 40 20" style="flex:none;background:#3a4a3c;border-radius:4px">${shp}<line x1="19" y1="10" x2="38" y2="10" stroke="${c}" stroke-width="${Math.min(+st.lw||3,6)}"${d?` stroke-dasharray="${d}"`:""} stroke-linecap="butt"/></svg>`; }
+function refListRender_(){ const box=$("refLayerList"); if(!box) return;
+  if(!REFL.length){ box.innerHTML=""; return; }
+  box.innerHTML=REFL.map(fc=>{ const st=fc._sty||{};
+    return `<div style="display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px solid rgba(255,255,255,.08)">
+      <button type="button" onclick="refStyleOpen_('${fc._id}')" style="flex:1;min-width:0;display:flex;align-items:center;gap:8px;background:none;border:0;color:inherit;font:inherit;text-align:left;padding:0;cursor:pointer;${st.hid?"opacity:.45":""}">${refSwatch_(st)}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(fc._name||"Reference layer")}</span><span style="color:#8fae95;font-size:11px;flex:none">${(fc.features||[]).length}</span></button>
+      <button type="button" class="btn ghost" style="padding:4px 8px;min-width:0;flex:none" title="${st.hid?"Show":"Hide"}" onclick="refStyleSet_('${fc._id}',{hid:${st.hid?"false":"true"}})">${st.hid?"🚫":"👁"}</button></div>`; }).join("")
+    + `<div class="ls-muted" style="font-size:11px;padding:4px 2px">Tap a layer to change its colour, shape and lines.</div>`; }
+function refStyleSet_(id,patch){ const fc=REFL.find(x=>x._id===id); if(!fc) return; fc._sty=Object.assign({},fc._sty||{},patch); refSave_(); refRenderAll_(false);
+  if($("refStyleBox")) refStyleOpen_(id); }
+function refRename_(id,v){ const fc=REFL.find(x=>x._id===id); if(!fc) return; v=String(v||"").trim().slice(0,60); if(!v) return; fc._name=v; refSave_(); refListRender_(); }
+function refRemove_(id){ const i=REFL.findIndex(x=>x._id===id); if(i<0) return; const fc=REFL[i];
+  if(!confirm("Remove the reference layer “"+(fc._name||"")+"” ("+fc.features.length+" features) from the map and this phone?")) return;
+  REFL.splice(i,1); refSave_(); refRenderAll_(false); try{ closeInfoSheet_(); }catch(e){} toast("Removed "+(fc._name||"the layer")); }
+function refStyleOpen_(id){ const fc=REFL.find(x=>x._id===id); if(!fc) return; const st=fc._sty||{};
+  const kinds={pt:0,ln:0,pg:0}; fc.features.forEach(f=>{ const t=(f.geometry&&f.geometry.type)||""; if(/Point/.test(t)) kinds.pt++; else if(/Line/.test(t)) kinds.ln++; else if(/Polygon/.test(t)) kinds.pg++; });
+  const B=(on,fn,inner,title)=>`<button type="button" onclick="${fn}" title="${title||""}" style="min-width:40px;height:38px;border-radius:8px;border:2px solid ${on?"#4caf50":"rgba(255,255,255,.18)"};background:${on?"rgba(76,175,80,.18)":"rgba(255,255,255,.04)"};color:#eafae8;font:15px system-ui;padding:0 8px">${inner}</button>`;
+  const row=(lbl,html)=>`<div style="margin:10px 0 4px;font-size:12px;color:#a9c9b0">${lbl}</div><div style="display:flex;flex-wrap:wrap;gap:6px">${html}</div>`;
+  const s=k=>`refStyleSet_('${id}',${k})`;
+  let h=`<div id="refStyleBox"><div style="display:flex;align-items:center;gap:10px">${refSwatch_(st)}<input type="text" value="${esc(fc._name||"")}" maxlength="60" onchange="refRename_('${id}',this.value)" style="flex:1;min-width:0;padding:7px;border-radius:8px;border:1px solid #4c6b52;background:#10240f;color:#eafae8;font:14px system-ui"></div>`;
+  h+=`<div style="font-size:11px;color:#8fae95;margin-top:4px">${[kinds.pt?kinds.pt+" point"+(kinds.pt>1?"s":""):"",kinds.ln?kinds.ln+" line"+(kinds.ln>1?"s":""):"",kinds.pg?kinds.pg+" polygon"+(kinds.pg>1?"s":""):""].filter(Boolean).join(" · ")}</div>`;
+  h+=row("Colour", REF_COLS.map(c=>B(st.c===c, s(`{c:'${c}'}`), `<span style="display:inline-block;width:18px;height:18px;border-radius:50%;background:${c};border:1px solid #000"></span>`, c)).join(""));
+  if(kinds.pt){ h+=row("Point shape", REF_SHAPES.map(([k,g])=>B((st.sh||"circle")===k, s(`{sh:'${k}'}`), g, k)).join(""));
+    h+=row("Point size", [["s","Small"],["m","Medium"],["l","Large"]].map(([k,t])=>B((st.sz||"m")===k, s(`{sz:'${k}'}`), t)).join("")); }
+  if(kinds.ln||kinds.pg){ h+=row("Line width", [[2,"Thin"],[3,"Medium"],[5,"Thick"]].map(([k,t])=>B((+st.lw||3)===k, s(`{lw:${k}}`), t)).join(""));
+    h+=row("Line style", [["solid","━━ Solid"],["dashed","╍╍ Dashed"],["dotted","┈┈ Dotted"]].map(([k,t])=>B((st.ls||"solid")===k, s(`{ls:'${k}'}`), t)).join("")); }
+  h+=`<div style="display:flex;gap:8px;margin-top:14px"><button type="button" class="btn ghost" style="flex:1" onclick="${s(`{hid:${st.hid?"false":"true"}}`)}">${st.hid?"👁 Show it":"🚫 Hide it"}</button><button type="button" class="btn ghost" style="flex:1;color:#ff8a80" onclick="refRemove_('${id}')">✕ Remove layer</button></div></div>`;
+  showInfoSheet_("📍 "+(fc._name||"Reference layer"), h); }
 /* point labels — same viewport+zoom virtualization as stand labels (essential with 1000s of points) */
 const REF_LABEL_MIN_ZOOM=15, REF_LABEL_MAX=150;
 function refLabelText_(pr){
@@ -12197,13 +12375,13 @@ function pinUndo_(){ if(!_pin) return;
   if(_pin.pend) _pin.pend=null; else if(_pin.pairs.length){ _pin.pairs.pop(); if(_pin.pairs.length) _pin.A=pinFit_(_pin.pairs,_pin.A); }
   _pin.layer.setOpacity(_pin.op); pinRedraw_(); pinBar_(); }
 function pinSee_(){ if(!_pin) return; _pin.op=_pin.op>0.5?0.4:0.85; if(!_pin.pend) _pin.layer.setOpacity(_pin.op); pinBar_(); }
-function pinBarRemove_(){ const b=$("pinBar")||_pinBarEl; _pinBarEl=null; try{ if(b&&b.parentNode) b.parentNode.removeChild(b); }catch(e){} }
+function pinBarRemove_(){ const b=$("pinBar")||_pinBarEl; _pinBarEl=null; try{ if(b&&b.parentNode){ b.parentNode.removeChild(b); document.body.classList.remove("bar-open"); } }catch(e){} }
 function pinCancel_(quiet){ if(!_pin){ pinBarRemove_(); return; }
   try{ fmap.removeLayer(_pin.layer); }catch(e){} _pin.marks.forEach(m=>{ try{ fmap.removeLayer(m); }catch(e){} });
   _pin=null; pinBarRemove_(); if(!quiet) toast("Pinning cancelled"); }
 function pinBar_(){
   if(!_pin){ pinBarRemove_(); return; }
-  let bar=$("pinBar")||_pinBarEl; if(!bar){ bar=document.createElement("div"); bar.id="pinBar"; document.body.appendChild(bar); } _pinBarEl=bar;
+  let bar=$("pinBar")||_pinBarEl; if(!bar){ bar=document.createElement("div"); bar.id="pinBar"; document.body.appendChild(bar); } _pinBarEl=bar; document.body.classList.add("bar-open");      /* v482: hide the Create-plot bar under it */
   bar.style.cssText="position:fixed;left:8px;right:8px;bottom:10px;z-index:5450;background:rgba(16,36,15,.96);border:1px solid #4caf50;border-radius:12px;padding:8px;color:#eafae8;font:13px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.5)";
   const n=_pin.pairs.length, miss=pinMiss_(), B=(fn,label,on)=>`<button type="button" class="btn ${on?"submit":"ghost"}" style="flex:1;min-width:0;padding:8px 4px;font-size:13px" onclick="${fn}">${label}</button>`;
   const say = _pin.pend ? `<b>② Now tap the same spot on the aerial.</b> The PDF is faded so you can see it.`
