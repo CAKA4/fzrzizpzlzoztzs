@@ -1446,7 +1446,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-21 · v486";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-21 · v487";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -8170,7 +8170,7 @@ function mapFileAsk_(file){ const nm=String(file&&file.name||"");
   _mapFile=file;
   showInfoSheet_("What is "+(nm||"this file")+"?",
     `<button type="button" class="btn submit" style="width:100%;min-height:52px;text-align:left;margin-bottom:8px" onclick="mapFileUse_('bound')">▧ <b>Compartments</b> (stand boundaries)<div style="font-size:12px;font-weight:normal;opacity:.85;margin-top:2px">They become the property's compartments — saved to the Sheet; plots inside them get the compartment, area and age.</div></button>`+
-    `<button type="button" class="btn ghost" style="width:100%;min-height:52px;text-align:left" onclick="mapFileUse_('ref')">📍 <b>A reference layer</b> — points, lines or polygons<div style="font-size:12px;opacity:.85;margin-top:2px">Only drawn to look at (trails, stakes, wetlands, a neighbour's layout…). Nothing goes to the Sheet. Each file has its own look.</div></button>`+
+    `<button type="button" class="btn ghost" style="width:100%;min-height:52px;text-align:left" onclick="mapFileUse_('ref')">📍 <b>A reference layer</b> — points, lines or polygons<div style="font-size:12px;opacity:.85;margin-top:2px">Drawn to look at (stakes, a neighbour's layout…), each file with its own look — or add the ones you pick to the property's map points and lines (trails, buildings, wetlands…), which go to the Sheet.</div></button>`+
     `<div style="color:#8fae95;font-size:11px;margin-top:8px;line-height:1.4">Either way you choose which features of the file to bring in.</div>`); }
 let _mapFile=null;
 function mapFileUse_(w){ const f=_mapFile; _mapFile=null; try{ closeInfoSheet_(); }catch(e){} if(!f) return; if(w==="bound") loadBoundaries(f); else importRefFile(f); }
@@ -11836,9 +11836,14 @@ function importRefFile(file){
   const done0=gj=>{ const n=refAddLayers_(gj, file.name); toast(n?`Imported ${n} feature${n>1?"s":""} — Layers → 📍 Reference layers to set its look`:"Nothing to import",!n); };      /* v481 */
   /* v482: choose which points, lines and polygons to bring in first (across every layer in a zip) */
   const done=gj=>{ const cols=(Array.isArray(gj)?gj:[gj]).filter(fc=>fc&&fc.features&&fc.features.length);
-    const all=[]; cols.forEach((fc,ci)=>fc.features.forEach(f=>{ f.__fpc=ci; all.push({f}); }));
+    const all=[]; const H=fpHaveCtx_(); cols.forEach((fc,ci)=>fc.features.forEach(f=>{ f.__fpc=ci; all.push({f, have:H(f)}); }));      /* v487: already on the property's points/lines */
     if(all.length<2){ done0(gj); return; }
     featPick_(all,{name:file.name||"the file", kind:"ref"}).then(ch=>{ if(!ch||!ch.length) return;
+      /* v487: what goes to the property's map points and lines, and what stays a reference layer */
+      const d=ch.dest||{}, toProp=ch.filter(f=>{ const k=d[fpGeomKey_(f)]; return k&&k!=="ref"; });
+      if(toProp.length){ const toRef=ch.filter(f=>toProp.indexOf(f)<0); let nr=0;
+        if(toRef.length){ const kp=new Set(toRef); const o=cols.map(fc=>Object.assign({},fc,{features:fc.features.filter(f=>kp.has(f))})).filter(fc=>fc.features.length); o.forEach(fc=>fc.features.forEach(f=>{ delete f.__fpc; })); nr=refAddLayers_(o.length===1?o[0]:o, file.name); }
+        toProp.forEach(f=>{ delete f.__fpc; }); const r=mfAddToProp_(toProp,d,file.name); toast(r.msg+(nr?" · "+nr+" as a reference layer":""),!r.n&&!nr); return; }
       const keep=new Set(ch); const out=cols.map(fc=>Object.assign({},fc,{features:fc.features.filter(f=>keep.has(f))})).filter(fc=>fc.features.length);
       out.forEach(fc=>fc.features.forEach(f=>{ delete f.__fpc; })); done0(out.length===1?out[0]:out); }); };
   if(lower.endsWith(".geojson")||lower.endsWith(".json")) file.text().then(t=>ensureWGS84(JSON.parse(t))).then(done).catch(()=>toast("Bad GeoJSON",true));
@@ -12009,7 +12014,7 @@ function fpGeomParts_(g){ const o={pts:[],lines:[],polys:[]}; if(!g||!g.coordina
 /* features: [{f, have?}]  →  Promise of the chosen feature objects, or null when cancelled */
 function featPick_(feats, opts){
   opts=opts||{};
-  if(!feats||feats.length<2||typeof fmap==="undefined"||!fmap||globalThis.__FP_OFF) return Promise.resolve(feats?feats.map(x=>x.f||x):[]);      /* __FP_OFF: the automated tests of the older load paths bring everything in */
+  if(!feats||(feats.length<2&&opts.kind!=="copy")||!feats.length||typeof fmap==="undefined"||!fmap||globalThis.__FP_OFF) return Promise.resolve(feats?feats.map(x=>x.f||x):[]);      /* __FP_OFF: the automated tests of the older load paths bring everything in */
   return new Promise(res=>{
     featPickEnd_(true);
     const lyr=L.layerGroup().addTo(fmap), b=[];
@@ -12021,6 +12026,7 @@ function featPick_(feats, opts){
       e.bb=[s,w,n,ea]; e.area=(n-s)*(ea-w); return e; });
     const big=feats.length>FP_BIG; E.forEach(e=>{ e.sel=!big && !e.have; });
     _fp={E,lyr,res,opts,name:String(opts.name||"the file"),big};
+    if(opts.kind==="ref"||opts.kind==="copy"){ _fp.types={pt:E.some(e=>e.parts.pts.length),ln:E.some(e=>e.parts.lines.length),pg:E.some(e=>e.parts.polys.length)}; const d0=opts.kind==="copy"?"":"ref"; _fp.dest={pt:d0,ln:d0,pg:d0}; }      /* v487 */
     E.forEach(fpStyle_);
     try{ closeLayersMenu(); }catch(e){} try{ closeInfoSheet_(); }catch(e){} try{ closeDataSheet_(); }catch(e){}
     if(b.length) try{ fmap.fitBounds(b,{padding:[30,30]}); }catch(e){}
@@ -12053,13 +12059,14 @@ function fpBar_(){ if(!_fp){ fpBarRemove_(); return; }
   let bar=$("fpBar")||_fpBarEl; if(!bar){ bar=document.createElement("div"); bar.id="fpBar"; document.body.appendChild(bar); } _fpBarEl=bar; document.body.classList.add("bar-open");      /* the bar has the bottom of the screen */
   bar.style.cssText="position:fixed;left:8px;right:8px;bottom:10px;z-index:5450;background:rgba(16,36,15,.96);border:1px solid #ff9800;border-radius:12px;padding:8px;color:#eafae8;font:13px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.5)";
   const n=_fp.E.filter(e=>e.sel).length, have=_fp.E.filter(e=>e.have).length, B=(fn,label,cls,dis)=>`<button type="button" class="btn ${cls||"ghost"}" ${dis?"disabled":""} style="flex:1;min-width:0;padding:8px 4px;font-size:13px" onclick="${fn}">${label}</button>`;
-  bar.innerHTML=`<div style="margin-bottom:6px">☑ <b>Choose what to bring in</b> · ${esc(_fp.name)}<div style="color:#bfe3c4;margin-top:3px;line-height:1.4"><b>${n} of ${_fp.E.length}</b> chosen. Tap a feature to take it (orange) or leave it (grey).${have?` <span style="color:#a9c4ff">${have} the Sheet already has (blue) — left out unless you tap them.</span>`:""}</div></div>`+
+  bar.innerHTML=`<div style="margin-bottom:6px">☑ <b>Choose what to bring in</b> · ${esc(_fp.name)}<div style="color:#bfe3c4;margin-top:3px;line-height:1.4"><b>${n} of ${_fp.E.length}</b> chosen. Tap a feature to take it (orange) or leave it (grey).${have?` <span style="color:#a9c4ff">${have} ${_fp.dest?"already on the property's map points or lines":"the Sheet already has"} (blue) — left out unless you tap them.</span>`:""}</div></div>`+fpDestRow_()+
     `<div style="display:flex;gap:6px;margin-bottom:6px">`+B("fpInView_()","▣ All in view")+B("fpSetAll_(true)","All")+B("fpSetAll_(false)","None")+B("fpList_()","☰ List")+`</div>`+
     `<div style="display:flex;gap:6px">`+B("featPickEnd_()","Cancel")+B("fpDone_()",n?`✓ Bring in ${n}`:"✓ Bring in","submit",!n)+`</div>`; }
 function fpBarRemove_(){ const b=$("fpBar")||_fpBarEl; _fpBarEl=null; try{ if(b&&b.parentNode){ b.parentNode.removeChild(b); document.body.classList.remove("bar-open"); } }catch(e){} }
 function featPickEnd_(quiet){ if(!_fp){ fpBarRemove_(); return; } const r=_fp.res; try{ fmap.removeLayer(_fp.lyr); }catch(e){} _fp=null; fpBarRemove_(); try{ closeDataSheet_(); }catch(e){}
   if(!quiet){ toast("Nothing brought in"); } if(r) r(null); }
 function fpDone_(){ if(!_fp) return; const chosen=_fp.E.filter(e=>e.sel).map(e=>e.f); if(!chosen.length){ toast("Choose at least one",true); return; }
+  if(_fp.dest){ const miss=fpDestMissing_(chosen); if(miss){ toast("Choose what the "+miss+" become ("+miss[0].toUpperCase()+miss.slice(1)+" →)",true); return; } chosen.dest=Object.assign({},_fp.dest); }      /* v487 */
   const r=_fp.res; _fp.res=null; featPickEnd_(true); r(chosen); }
 /* the list: search by any name or value, take or leave what is shown */
 function fpList_(q){ if(!_fp) return; q=String(q==null?(_fp.q||""):q); _fp.q=q; const k=q.trim().toLowerCase();
@@ -12078,6 +12085,85 @@ function fpListShown_(v){ if(!_fp) return; const k=String(_fp.q||"").trim().toLo
   _fp.E.forEach(e=>{ if(!k || e.label.toLowerCase().indexOf(k)>=0 || Object.values((e.f&&e.f.properties)||{}).some(x=>x!=null&&String(x).toLowerCase().indexOf(k)>=0)){ e.sel=v; fpStyle_(e); } }); fpBar_(); fpList_(); }
 /* compartments the Sheet already has: the same property and name */
 function fpHaveComp_(f){ try{ const t=featTract_(f), nm=fpGuessName_((f&&f.properties)||{}); if(!t||!nm) return false; return csOf_(t).some(c=>propK_(c.name)===propK_(nm)); }catch(e){ return false; } }
+/* ============ v487 — picked features into the property's own map points and lines ============
+   Chris (2026-11-21): a line file brought in, some of its lines added to the trails; points that are buildings
+   added to the buildings. In the picker each kind of feature in the file (points, lines, polygons) gets a "goes to"
+   choice: a reference layer (as before, the default) or one of the property's map point / line / area kinds. Those
+   become ordinary PROPS.feats / PROPS.lines records — on the Sheet's Map Features / Map Lines tabs, shared, printed —
+   each on the property it falls in (else the property shown). A feature that is already there (a point within
+   FP_NEAR_M of a map point; 80% of a line's or area's corners within FP_NEAR_M of one) starts left out (blue).
+   A reference layer already on the map can do the same later: ➕ in its sheet. */
+const FP_NEAR_M=5;
+function fpGeomKey_(f){ const t=(f&&f.geometry&&f.geometry.type)||""; return /Point/.test(t)?"pt":/Line/.test(t)?"ln":/Polygon/.test(t)?"pg":""; }
+const FP_DEST_WORD={pt:"points", ln:"lines", pg:"polygons"};
+function fpDestOpts_(k){ const L0=_fp&&_fp.opts&&_fp.opts.kind==="copy"?[["","— choose —"]]:[["ref","📍 Reference layer (look only)"]];      /* short names: the select is a third of the bar */
+  if(k==="pt") return {L0, g:"The property's map points", o:FT_KINDS.map(x=>[x[0],x[1]])};
+  if(k==="ln") return {L0, g:"The property's map lines", o:LN_KINDS.filter(x=>!LN_AREA[x[0]]).map(x=>[x[0],x[1]])};
+  return {L0, g:"The property's map areas", o:LN_KINDS.filter(x=>LN_AREA[x[0]]).map(x=>[x[0],x[1]])}; }
+function fpDestRow_(){ if(!_fp||!_fp.dest||!_fp.types) return "";
+  const ks=["pt","ln","pg"].filter(k=>_fp.types[k]); if(!ks.length) return "";
+  return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">`+ks.map(k=>`<label style="flex:1;min-width:30%;font-size:12px;color:#bfe3c4">${FP_DEST_WORD[k][0].toUpperCase()+FP_DEST_WORD[k].slice(1)} →<select id="fpDest_${k}" onchange="fpDest_('${k}',this.value)" style="width:100%;margin-top:2px;padding:6px;border-radius:8px;border:1px solid #4c6b52;background:#10240f;color:#eafae8;font:13px system-ui">`+
+    (D=>{ const op=o=>`<option value="${o[0]}"${_fp.dest[k]===o[0]?" selected":""}>${esc(o[1])}</option>`; return D.L0.map(op).join("")+`<optgroup label="${esc(D.g)}">`+D.o.map(op).join("")+`</optgroup>`; })(fpDestOpts_(k))+`</select></label>`).join("")+
+    `<div style="flex-basis:100%;font-size:11px;color:#8fae95">📍 Reference = only to look at. Any other choice adds them to the property's own map points or lines (the Sheet, the crew, the printed maps).</div></div>`; }
+function fpDest_(k,v){ if(!_fp||!_fp.dest) return; _fp.dest[k]=String(v||""); fpBar_(); }
+function fpDestMissing_(chosen){ if(!_fp||!_fp.dest||!(_fp.opts&&_fp.opts.kind==="copy")) return "";
+  for(const k of ["pt","ln","pg"]){ if(chosen.some(f=>fpGeomKey_(f)===k) && (!_fp.dest[k]||_fp.dest[k]==="ref")) return FP_DEST_WORD[k]; } return ""; }
+/* is this feature already one of the property's map points / lines / areas? */
+function fpHaveCtx_(){ let fts=[], lns=[]; try{ fts=ftAll_(); lns=lnAll_(); }catch(e){}
+  if(!fts.length&&!lns.length) return ()=>false;
+  const a0=fts.length?[+fts[0].lat,+fts[0].lon]:[+lns[0].pts[0][0],+lns[0].pts[0][1]], P=cgProj_(a0[0],a0[1]);
+  const LX=lns.map(l=>({a:lnIsArea_(l), xy:l.pts.map(q=>P.xy([+q[0],+q[1]]))}));
+  const dSeg=(p,a,b)=>{ const dx=b[0]-a[0], dy=b[1]-a[1], L2=dx*dx+dy*dy; let t=L2?((p[0]-a[0])*dx+(p[1]-a[1])*dy)/L2:0; t=Math.max(0,Math.min(1,t)); return Math.hypot(a[0]+t*dx-p[0], a[1]+t*dy-p[1]); };
+  const dRun=(p,xy,closed)=>{ let m=1/0; for(let i=1;i<xy.length;i++) m=Math.min(m,dSeg(p,xy[i-1],xy[i])); if(closed&&xy.length>2) m=Math.min(m,dSeg(p,xy[xy.length-1],xy[0])); if(xy.length===1) m=Math.hypot(p[0]-xy[0][0],p[1]-xy[0][1]); return m; };
+  const sample=v=>{ if(v.length<=20) return v; const o=[]; for(let i=0;i<20;i++) o.push(v[Math.round(i*(v.length-1)/19)]); return o; };
+  return f=>{ try{ const pr=fpGeomParts_(f&&f.geometry);
+    if(pr.pts.length) return pr.pts.every(q=>fts.some(x=>trackDist(q[0],q[1],+x.lat,+x.lon)<=FP_NEAR_M));
+    const runs=pr.lines.length?pr.lines.map(v=>({v,a:false})):pr.polys.map(p=>({v:p[0],a:true}));
+    if(!runs.length) return false;
+    return runs.every(r=>{ const xs=sample(r.v).map(q=>P.xy(q)); return LX.some(L=>L.a===r.a && xs.filter(p=>dRun(p,L.xy,L.a)<=FP_NEAR_M).length>=0.8*xs.length); });
+  }catch(e){ return false; } }; }
+/* a run of corners fitted to what a Sheets cell and the line editor hold */
+function mfFit_(pts, closed){ let v=pts.map(q=>[+q[0],+q[1]]).filter(q=>isFinite(q[0])&&isFinite(q[1]));
+  if(closed&&v.length>1&&v[0][0]===v[v.length-1][0]&&v[0][1]===v[v.length-1][1]) v=v.slice(0,-1);
+  if(v.length<(closed?3:2)) return null;
+  const P=cgProj_(v[0][0],v[0][1]), xy=v.map(P.xy), r7=q=>[+(+q[0]).toFixed(7),+(+q[1]).toFixed(7)];
+  let tol=0.3, out=lnDP_(xy,tol).map(P.ll).map(r7);
+  while(tol<200 && (out.length>LN_MAX_PTS || JSON.stringify(out).length>LN_MAX_CHARS)){ tol*=1.5; out=lnDP_(xy,tol).map(P.ll).map(r7); }      /* worded unlike lnFromTrack_'s: t_lines389 patches that line by its text */
+  return out.length>=(closed?3:2)?out:null; }
+function mfName_(pr){ pr=pr||{}; let n=""; try{ n=fpGuessName_(pr); }catch(e){} if(!n){ const v=Object.values(pr).find(x=>x!=null&&x!==""&&typeof x!=="object"); n=v!=null?String(v):""; } return String(n).trim().slice(0,60); }
+function mfTract_(lat,lon){ let t=""; try{ t=tractOrPolyAt_(lat,lon)||""; }catch(e){} return t||propActiveTract_()||""; }
+let _mfSeq=0;
+function mfId_(pre){ const tab=pre==="F"?(PROPS.feats||{}):(PROPS.lines||{}); let id; do{ id=(pre==="F"?ftNewId_():lnNewId_())+(++_mfSeq).toString(36).toUpperCase(); }while(tab[id]); return id; }
+/* feats: GeoJSON features; dest {pt,ln,pg}: a kind each (or "ref"/"" = not here). → {n, msg} */
+function mfAddToProp_(feats, dest, src){
+  dest=dest||{}; PROPS.feats=PROPS.feats||{}; PROPS.lines=PROPS.lines||{};
+  const note=src?("From "+String(src).replace(/^.*\//,"")).slice(0,400):"", cnt={}, tracts={}; let n=0, noT=0, bad=0;
+  const bump=(k,name,t)=>{ cnt[k]=(cnt[k]||0)+1; tracts[t]=1; n++; };
+  (feats||[]).forEach(f=>{ const key=fpGeomKey_(f), kind=dest[key]; if(!kind||kind==="ref") return;
+    const pr=fpGeomParts_(f.geometry), name=mfName_(f.properties);
+    if(key==="pt"){ if(!FT_KINDS.some(x=>x[0]===kind)) return;
+      pr.pts.forEach(q=>{ const t=mfTract_(q[0],q[1]); if(!t){ noT++; return; }
+        const id=mfId_("F"); PROPS.feats[id]={id, tract:t, kind, lat:+(+q[0]).toFixed(7), lon:+(+q[1]).toFixed(7), name, note, photos:[], sens:kind==="sar"};
+        (propDirty.feats=propDirty.feats||{})[id]=Date.now(); bump(ftKindName_(kind),name,t); }); return; }
+    const area=!!LN_AREA[kind]; if(!LN_KINDS.some(x=>x[0]===kind) || area!==(key==="pg")) return;
+    const runs=key==="ln"?pr.lines:pr.polys.map(p=>p[0]);
+    runs.forEach(v=>{ const pts=mfFit_(v, area); if(!pts){ bad++; return; } const m=pts[Math.floor(pts.length/2)];
+      let la=0,lo=0; pts.forEach(q=>{ la+=q[0]; lo+=q[1]; }); const c=area?[la/pts.length,lo/pts.length]:m;
+      const t=mfTract_(c[0],c[1]); if(!t){ noT++; return; }
+      const id=mfId_("L"); PROPS.lines[id]={id, tract:t, kind, pts, name, note};
+      (propDirty.lines=propDirty.lines||{})[id]=Date.now(); bump(lnKindName_(kind),name,t); }); });
+  if(n){ propPersist_(); try{ ftRender_(); }catch(e){} try{ lnRender_(); }catch(e){}
+    try{ if(propBackendOk) propPush_().then(()=>{}); else propSync_(); }catch(e){} }
+  const what=Object.keys(cnt).map(k=>cnt[k]+" "+k.toLowerCase()+(cnt[k]>1&&!/s$/.test(k)?"s":"")).join(", "), ts=Object.keys(tracts);
+  const msg=n?("Added "+what+" to "+(ts.length===1?ts[0]:ts.length+" properties")+"'s map — shared through the Sheet"+(noT?" · "+noT+" left out (not on a property; choose one first)":"")+(bad?" · "+bad+" too short to use":""))
+    :(noT?"Nothing added — choose a property first (🏠 Property), or bring in features that fall on one":"Nothing added");
+  return {n, msg, noTract:noT}; }
+/* from a reference layer already on the map */
+function refCopyAsk_(id){ const fc=(REFL||[]).find(x=>x._id===id); if(!fc||!fc.features||!fc.features.length){ toast("That layer has nothing in it",true); return; }
+  try{ closeInfoSheet_(); }catch(e){} try{ closeLayersMenu(); }catch(e){}
+  const H=fpHaveCtx_();
+  featPick_(fc.features.map(f=>({f, have:H(f)})), {name:fc._name||"the reference layer", kind:"copy"}).then(ch=>{ if(!ch||!ch.length) return;
+    const r=mfAddToProp_(ch, ch.dest||{}, fc._name); toast(r.msg+(r.n?" · the reference layer is left as it was (✕ it in Layers if no longer needed)":""), !r.n); }); }
 
 /* ============ v481 — each reference layer has its own look ============
    Chris, 2026-11-20: "several layers that are reference points … all have the same symbology. Can we have
@@ -12179,7 +12265,8 @@ function refStyleOpen_(id){ const fc=REFL.find(x=>x._id===id); if(!fc) return; c
     h+=row("Point size", [["s","Small"],["m","Medium"],["l","Large"]].map(([k,t])=>B((st.sz||"m")===k, s(`{sz:'${k}'}`), t)).join("")); }
   if(kinds.ln||kinds.pg){ h+=row("Line width", [[2,"Thin"],[3,"Medium"],[5,"Thick"]].map(([k,t])=>B((+st.lw||3)===k, s(`{lw:${k}}`), t)).join(""));
     h+=row("Line style", [["solid","━━ Solid"],["dashed","╍╍ Dashed"],["dotted","┈┈ Dotted"]].map(([k,t])=>B((st.ls||"solid")===k, s(`{ls:'${k}'}`), t)).join("")); }
-  h+=`<div style="display:flex;gap:8px;margin-top:14px"><button type="button" class="btn ghost" style="flex:1" onclick="${s(`{hid:${st.hid?"false":"true"}}`)}">${st.hid?"👁 Show it":"🚫 Hide it"}</button><button type="button" class="btn ghost" style="flex:1;color:#ff8a80" onclick="refRemove_('${id}')">✕ Remove layer</button></div></div>`;
+  h+=`<button type="button" class="btn ghost" style="width:100%;margin-top:14px;text-align:left" onclick="refCopyAsk_('${id}')">➕ <b>Add some to the property's map points or lines…</b><div style="font-size:11px;opacity:.85;margin-top:2px">Lines as trails or streams, points as buildings or gates, polygons as ponds or wetlands — shared with the crew and printed on the maps.</div></button>`;      /* v487 */
+  h+=`<div style="display:flex;gap:8px;margin-top:10px"><button type="button" class="btn ghost" style="flex:1" onclick="${s(`{hid:${st.hid?"false":"true"}}`)}">${st.hid?"👁 Show it":"🚫 Hide it"}</button><button type="button" class="btn ghost" style="flex:1;color:#ff8a80" onclick="refRemove_('${id}')">✕ Remove layer</button></div></div>`;
   showInfoSheet_("📍 "+(fc._name||"Reference layer"), h); }
 /* point labels — same viewport+zoom virtualization as stand labels (essential with 1000s of points) */
 const REF_LABEL_MIN_ZOOM=15, REF_LABEL_MAX=150;
