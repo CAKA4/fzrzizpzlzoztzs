@@ -1446,7 +1446,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-21 · v484";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-21 · v486";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -5318,56 +5318,104 @@ function toggleCrewPlots(){
 function stopCrew(){ if(crewTimer){ clearInterval(crewTimer); crewTimer=null; } }   // pause polling only; layer stays
 // Map chip → choose what to label dots by. Offers your own plots; imported set if any are loaded.
 // ----- Find plots by attribute; highlight matches with a magenta ring -----
-let _findRule=null;   // { field, op, value }
-function _findHit_(p){
-  if(!_findRule) return false;
-  const {field,op,value}=_findRule;
-  let raw = p[field]; if(raw==null) raw="";
-  const s=String(raw).trim();
-  switch(op){
-    case "blank":   return s==="";
-    case "zero":    return s==="0" || (parseFloat(s)===0 && s!=="");
-    case "eq":      return s.toLowerCase()===String(value).trim().toLowerCase();
-    case "ne":      return s.toLowerCase()!==String(value).trim().toLowerCase();
-    case "has":     return s.toLowerCase().includes(String(value).trim().toLowerCase());
-    case "gt":      return parseFloat(s)> parseFloat(value);
-    case "lt":      return parseFloat(s)< parseFloat(value);
-    default:        return false;
-  }
+/* ============ v485 — search plots by any attribute, several at once; show only the matches ============
+   Chris, 2026-11-21: "search the plots for any of the attributes entered for any of the fields, so for instance, if a
+   user wants to know where all the red pine are they can select that and only those plots that contain red pine would
+   be visible. It could also be searchable on multiple attributes." Rules (field · condition · value), all or any of
+   them; the value list offers what the plots actually hold. "Show only these" hides every other plot (and the crew
+   dots, which carry no tree data); "Highlight" rings them as before. A chip on the map says what is on and clears it. */
+let _findRule=null;      /* kept for older callers: the first rule of _findSet */
+let _findSet=null;       /* { rules:[{f,op,v}], all:true, mode:"only"|"hl" } */
+const FIND_TREE=n=>{ const o=[]; for(let i=1;i<=28;i++) o.push(n.replace("#",i)); return o; };
+const FIND_FIELDS=[
+  ["Plot",[["STANDID","Compartment / stand"],["PLOTNUM","Plot number"],["TRACT","Property (tract)"],["CRUISER","Cruiser"],["DATE","Date"],["AGE","Age"],["HT","Height"],["CC","Crown closure"],["FLAG","Flag"],["PLOTSRC","Source (own / imported)"],["INANALYSIS","In the analysis"],["COMMENT","Comment"]]],
+  ["Trees",[["@SP","Tree species (any tree)"],["@Q","Tree quality (any tree)"],["@DBH","Tree DBH (any tree)"],["@N","Number of trees"]]],
+  ["Regeneration & shrubs",[["@ADRG","Advance regeneration species"],["@EARG","Early regeneration species"],["@SHRUB","Shrub species"]]],
+  ["Site",[["ECOSITE","Ecosite"],["STYPE","Site type"],["TEXTURE","Texture"],["MOISTURE","Moisture"],["DEPTH","Depth"],["TOPOGRAPHY","Topography"],["ACCESS","Access"]]],
+  ["Health & other",[["INVASP","Invasive species"],["SAROSPEC","Species at risk"],["GRNDSPEC","Ground species"],["PESTS","Pests"],["DISEASE","Disease"],["WILDLIFE","Wildlife"],["HARVEST","Harvest"],["@ANY","Anything (any field)"]]]];
+const FIND_VIRT={ "@SP":FIND_TREE("T#SP"), "@Q":FIND_TREE("T#Q"), "@DBH":FIND_TREE("T#S"),
+  "@ADRG":[1,2,3,4,5].map(i=>"ADRGNSP"+i), "@EARG":[1,2,3,4,5].map(i=>"EARGNSP"+i), "@SHRUB":[1,2,3,4,5].map(i=>"SHRUBSP"+i) };
+const FIND_OPS=[["eq","is"],["ne","is not"],["has","contains"],["ge","≥ at least"],["le","≤ at most"],["blank","is blank"],["some","is not blank"]];
+function findFieldName_(k){ for(const g of FIND_FIELDS) for(const f of g[1]) if(f[0]===k) return f[1]; return k; }
+function findVals_(p,f){
+  if(f==="@N"){ let n=0; for(let i=1;i<=28;i++) if(String(p["T"+i+"SP"]||"").trim()) n++; return [String(n)]; }
+  if(f==="@ANY") return Object.keys(p).filter(k=>k.charAt(0)!=="_").map(k=>p[k]).filter(v=>v!=null&&typeof v!=="object").map(v=>String(v).trim()).filter(Boolean);
+  if(FIND_VIRT[f]) return FIND_VIRT[f].map(k=>String(p[k]==null?"":p[k]).trim()).filter(Boolean);
+  const v=p[f]; return [String(v==null?"":v).trim()];
 }
-const FIND_FIELDS=[["STANDID","Stand ID"],["PLOTNUM","Plot number"],["TRACT","Tract"],["AGE","Age"],["CRUISER","Cruiser"],["DATE","Date"],["PLOTSRC","Source (own/imported)"],["FLAG","Flag"]];
-function findCount_(){ let n=0; saved.forEach(p=>{ if(_findHit_(p)) n++; }); auditPlots.forEach(p=>{ if(_findHit_(p)) n++; }); return n; }
-function openFindPlots(){
-  const fopts=FIND_FIELDS.map(([k,l])=>`<option value="${k}">${l}</option>`).join("");
-  const cur=_findRule||{field:"PLOTNUM",op:"zero",value:""};
-  showInfoSheet_("Find plots",
-    `<div style="color:#a9c9b0;font-size:12px;margin-bottom:10px">Highlight plots that match. Matches get a magenta ring on the map.</div>`+
-    `<div style="display:flex;gap:6px;margin-bottom:8px"><button class="btn ghost" type="button" onclick="quickFind_('PLOTNUM','zero')">Plot # = 0</button><button class="btn ghost" type="button" onclick="quickFind_('STANDID','blank')">No stand</button><button class="btn ghost" type="button" onclick="quickFind_('AGE','blank')">No age</button></div>`+
-    `<label style="font-size:12px;color:#8fb89a">Field</label><select id="findField" style="width:100%;font-size:16px;margin:3px 0 8px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">${fopts}</select>`+
-    `<label style="font-size:12px;color:#8fb89a">Condition</label><select id="findOp" onchange="findOpChange_()" style="width:100%;font-size:16px;margin:3px 0 8px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">
-       <option value="eq">equals</option><option value="ne">does not equal</option><option value="has">contains</option>
-       <option value="zero">equals 0</option><option value="blank">is blank</option><option value="gt">greater than</option><option value="lt">less than</option></select>`+
-    `<div id="findValWrap"><label style="font-size:12px;color:#8fb89a">Value</label><input id="findVal" type="text" style="width:100%;font-size:16px;margin:3px 0 10px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></div>`+
-    `<button class="btn" type="button" onclick="applyFind_()">Highlight matches</button>`+
-    (_findRule?`<button class="btn ghost" type="button" onclick="clearFind_()" style="margin-top:8px">Clear highlight</button>`:""));
-  setTimeout(()=>{ const f=$("findField"),o=$("findOp"); if(f) f.value=cur.field; if(o) o.value=cur.op; findOpChange_(); const v=$("findVal"); if(v&&cur.value!=null) v.value=cur.value; },40);
-}
-function findOpChange_(){ const o=$("findOp"), w=$("findValWrap"); if(!o||!w) return; const noVal=(o.value==="zero"||o.value==="blank"); w.style.display=noVal?"none":"block"; }
-function quickFind_(field,op){ _findRule={field,op,value:""}; renderMapPins(); closeInfoSheet_();
-  const n=findCount_(); toast(`${n} plot${n===1?"":"s"} match`); if(n) zoomToFindMatches_(); }
-function applyFind_(){
-  const field=$("findField").value, op=$("findOp").value, value=(($("findVal")||{}).value||"").trim();
-  if((op!=="zero"&&op!=="blank") && value===""){ toast("Enter a value to match",true); return; }
-  _findRule={field,op,value}; renderMapPins(); closeInfoSheet_();
-  const n=findCount_(); toast(`${n} plot${n===1?"":"s"} match ${labelFieldName_(field)} ${opWord_(op)} ${value||""}`.trim()); if(n) zoomToFindMatches_();
-}
-function clearFind_(){ _findRule=null; renderMapPins(); closeInfoSheet_(); toast("Highlight cleared"); }
-function labelFieldName_(k){ const f=FIND_FIELDS.find(x=>x[0]===k); return f?f[1]:k; }
-function opWord_(op){ return {eq:"=",ne:"≠",has:"contains",zero:"= 0",blank:"is blank",gt:">",lt:"<"}[op]||op; }
+function findRuleHit_(p,r){ const vals=findVals_(p,r.f), multi=!!FIND_VIRT[r.f]||r.f==="@ANY", want=String(r.v==null?"":r.v).trim().toLowerCase(), nonblank=vals.filter(s=>s!=="");
+  switch(r.op){
+    case "blank": return nonblank.length===0;
+    case "some":  return nonblank.length>0;
+    case "eq":    return nonblank.some(s=>s.toLowerCase()===want);
+    case "ne":    return multi ? !nonblank.some(s=>s.toLowerCase()===want) : (vals[0]||"").toLowerCase()!==want;
+    case "has":   return nonblank.some(s=>s.toLowerCase().indexOf(want)>=0);
+    case "ge":    return nonblank.some(s=>parseFloat(s)>=parseFloat(want));
+    case "le":    return nonblank.some(s=>parseFloat(s)<=parseFloat(want));
+    case "zero":  return nonblank.some(s=>parseFloat(s)===0);
+  } return false; }
+function findMatch_(p){ if(!_findSet||!_findSet.rules.length) return false; const rs=_findSet.rules;
+  return _findSet.all ? rs.every(r=>findRuleHit_(p,r)) : rs.some(r=>findRuleHit_(p,r)); }
+function _findHit_(p){ return !!(_findSet && _findSet.mode!=="only" && findMatch_(p)); }      /* the magenta ring */
+function findHides_(p){ return !!(_findSet && _findSet.mode==="only" && _findSet.rules.length && !findMatch_(p)); }
+function findOnly_(){ return !!(_findSet && _findSet.mode==="only" && _findSet.rules.length); }
+function findCount_(){ let n=0; saved.concat(auditPlots).forEach(p=>{ if(findMatch_(p)) n++; }); return n; }
 function zoomToFindMatches_(){
-  const pts=[]; saved.concat(auditPlots).forEach(p=>{ if(_findHit_(p)){ const la=parseFloat(p.Y),lo=parseFloat(p.X); if(isFinite(la)&&isFinite(lo)) pts.push([la,lo]); } });
-  if(pts.length && fmap){ try{ fmap.fitBounds(L.latLngBounds(pts).pad(0.3), {maxZoom:17}); }catch(e){} }
-}
+  const pts=[]; saved.concat(auditPlots).forEach(p=>{ if(findMatch_(p)){ const la=parseFloat(p.Y),lo=parseFloat(p.X); if(isFinite(la)&&isFinite(lo)) pts.push([la,lo]); } });
+  if(pts.length && fmap){ try{ fmap.fitBounds(L.latLngBounds(pts).pad(0.3), {maxZoom:17}); }catch(e){} } }
+function findSummary_(){ if(!_findSet||!_findSet.rules.length) return ""; const w={eq:"is",ne:"is not",has:"contains",ge:"≥",le:"≤",blank:"is blank",some:"is not blank",zero:"= 0"};
+  return _findSet.rules.map(r=>findFieldName_(r.f)+" "+(w[r.op]||r.op)+(["blank","some","zero"].indexOf(r.op)<0?" "+r.v:"")).join(_findSet.all?" and ":" or "); }
+function findApplyMap_(zoom){ _findRule=_findSet&&_findSet.rules[0]?{field:_findSet.rules[0].f,op:_findSet.rules[0].op,value:_findSet.rules[0].v}:null;
+  try{ renderMapPins(); }catch(e){} try{ if(typeof renderCrewPlots==="function"&&crewData) renderCrewPlots(crewData,true); }catch(e){}
+  findChip_(); if(zoom&&_findSet) zoomToFindMatches_(); }
+function findChip_(){ const box=$("mapChips"); if(!box) return; let c=$("findChip");
+  if(!_findSet||!_findSet.rules.length){ if(c) c.remove(); return; }
+  if(!c){ c=document.createElement("button"); c.type="button"; c.id="findChip"; c.style.cssText="background:#3a1030;border-color:#ff36c0;color:#ffd7f2;max-width:100%;white-space:normal;text-align:left"; box.insertBefore(c,box.firstChild); }
+  const n=findCount_(); c.innerHTML=`🔎 ${esc(findSummary_())} · <b>${n}</b> plot${n===1?"":"s"}${_findSet.mode==="only"?" (others hidden)":""} <span onclick="event.stopPropagation();clearFind_()" style="margin-left:6px;padding:0 4px">✕</span>`;
+  c.onclick=()=>openSearch(); c.style.display=""; }
+function clearFind_(){ _findSet=null; _findRule=null; findApplyMap_(false); try{ closeInfoSheet_(); }catch(e){} toast("Search cleared — every plot shown"); }
+function quickFind_(field,op){ _findSet={rules:[{f:field,op:op,v:""}],all:true,mode:"hl"}; findApplyMap_(true); try{ closeInfoSheet_(); }catch(e){}
+  const n=findCount_(); toast(`${n} plot${n===1?"":"s"} match`); }
+function labelFieldName_(k){ return findFieldName_(k); }
+function opWord_(op){ return ({eq:"=",ne:"≠",has:"contains",zero:"= 0",blank:"is blank",some:"is not blank",ge:"≥",le:"≤",gt:">",lt:"<"})[op]||op; }
+/* the editor in the Search sheet */
+let _findDraft=null;
+function findDraft_(){ if(!_findDraft) _findDraft=_findSet?JSON.parse(JSON.stringify(_findSet)):{rules:[{f:"@SP",op:"eq",v:""}],all:true,mode:"only"}; return _findDraft; }
+function findValOpts_(f){ const seen={}; saved.concat(auditPlots).forEach(p=>{ const one={}; findVals_(p,f).forEach(s=>{ if(s!==""&&!one[s]){ one[s]=1; seen[s]=(seen[s]||0)+1; } }); });      /* (n) = plots holding it */
+  const spN={}; try{ SPECIES.forEach(x=>{ if(x[0]) spN[x[0].toLowerCase()]=x[1]; }); }catch(e){}
+  const isSp=/^@(SP|ADRG|EARG|SHRUB)$/.test(f);
+  return Object.keys(seen).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,300).map(s=>({v:s,l:(isSp&&spN[s.toLowerCase()]?spN[s.toLowerCase()]:s)+" ("+seen[s]+")"})); }
+function findEditorHtml_(){ const d=findDraft_(), S="width:100%;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6;box-sizing:border-box";
+  const fsel=(i,cur)=>`<select onchange="findSetRule_(${i},'f',this.value)" style="${S}">`+FIND_FIELDS.map(g=>`<optgroup label="${esc(g[0])}">`+g[1].map(f=>`<option value="${f[0]}"${f[0]===cur?" selected":""}>${esc(f[1])}</option>`).join("")+`</optgroup>`).join("")+`</select>`;
+  const osel=(i,cur)=>`<select onchange="findSetRule_(${i},'op',this.value)" style="${S}">`+FIND_OPS.map(o=>`<option value="${o[0]}"${o[0]===cur?" selected":""}>${esc(o[1])}</option>`).join("")+`</select>`;
+  const vin=(i,r)=>{ if(r.op==="blank"||r.op==="some") return ""; const opts=findValOpts_(r.f);
+    if(opts.length && opts.length<=300 && (r.op==="eq"||r.op==="ne")) return `<select onchange="findSetRule_(${i},'v',this.value)" style="${S}"><option value="">— choose —</option>`+opts.map(o=>`<option value="${esc(o.v)}"${o.v===r.v?" selected":""}>${esc(o.l)}</option>`).join("")+`</select>`;
+    return `<input type="text" value="${esc(r.v||"")}" placeholder="value" oninput="findSetRule_(${i},'v',this.value,true)" style="${S}">`; };
+  let h=d.rules.map((r,i)=>`<div style="border:1px solid #2a4a30;border-radius:10px;padding:8px;margin:0 0 8px">`+
+    (i?`<div style="font-size:11px;color:#ffb3e6;margin:-2px 0 6px">${d.all?"AND":"OR"}</div>`:"")+
+    `<div style="display:grid;gap:6px">${fsel(i,r.f)}<div style="display:flex;gap:6px"><div style="flex:1">${osel(i,r.op)}</div>${d.rules.length>1?`<button type="button" class="btn ghost" style="flex:none;padding:6px 10px" onclick="findDelRule_(${i})" title="Remove this condition">✕</button>`:""}</div>${vin(i,r)}</div></div>`).join("");
+  h+=`<button type="button" class="btn ghost" style="width:100%;margin-bottom:8px" onclick="findAddRule_()">＋ Add another condition</button>`;
+  if(d.rules.length>1) h+=`<div style="display:flex;gap:6px;margin-bottom:8px"><button type="button" class="btn ${d.all?"submit":"ghost"}" style="flex:1" onclick="findSetAll_(true)">Match all</button><button type="button" class="btn ${!d.all?"submit":"ghost"}" style="flex:1" onclick="findSetAll_(false)">Match any</button></div>`;
+  const ok=d.rules.filter(r=>r.op==="blank"||r.op==="some"||String(r.v||"").trim()!=="");
+  const n=ok.length?saved.concat(auditPlots).filter(p=>{ const tmp=_findSet; _findSet={rules:ok,all:d.all,mode:"hl"}; const m=findMatch_(p); _findSet=tmp; return m; }).length:0;
+  const tot=saved.length+auditPlots.length;
+  h+=`<div id="findCountLine" style="color:#cfe6d4;font-size:13px;margin:2px 2px 8px"><b>${n}</b> of ${tot} plots on this phone match</div>`;
+  h+=`<div style="display:flex;gap:6px"><button type="button" class="btn submit" style="flex:1" ${ok.length?"":"disabled"} onclick="plotFindRun_('only')">Show only these</button><button type="button" class="btn ghost" style="flex:1" ${ok.length?"":"disabled"} onclick="plotFindRun_('hl')">Highlight them</button></div>`;
+  if(_findSet) h+=`<button type="button" class="btn ghost" style="width:100%;margin-top:8px" onclick="clearFind_()">✕ Clear the search — show every plot</button>`;
+  h+=`<div style="color:#8fae95;font-size:11px;margin-top:8px;line-height:1.4">Searches the plots on this phone (the property shown keeps them up to date). While “Show only these” is on, the crew dots are hidden — they carry no tree data.</div>`;
+  return h; }
+function findRedraw_(){ const b=$("findEditor"); if(b) b.innerHTML=findEditorHtml_(); }
+function findSetRule_(i,k,v,typing){ const d=findDraft_(), r=d.rules[i]; if(!r) return; r[k]=v; if(k==="f"){ r.v=""; if(r.f==="@N"||r.f==="@DBH"||r.f==="AGE"||r.f==="HT"||r.f==="CC") r.op=r.op==="eq"?"ge":r.op; }
+  if(typing){ const c=$("findCountLine"); if(c){ clearTimeout(findSetRule_._t); findSetRule_._t=setTimeout(findRedrawKeepFocus_,350); } return; } findRedraw_(); }
+function findRedrawKeepFocus_(){ const a=document.activeElement, idx=a&&a.tagName==="INPUT"?[...document.querySelectorAll("#findEditor input")].indexOf(a):-1, pos=a&&a.selectionStart;
+  findRedraw_(); if(idx>=0){ const x=document.querySelectorAll("#findEditor input")[idx]; if(x){ x.focus(); try{ x.setSelectionRange(pos,pos); }catch(e){} } } }
+function findAddRule_(){ findDraft_().rules.push({f:"@SP",op:"eq",v:""}); findRedraw_(); }
+function findDelRule_(i){ const d=findDraft_(); d.rules.splice(i,1); if(!d.rules.length) d.rules.push({f:"@SP",op:"eq",v:""}); findRedraw_(); }
+function findSetAll_(v){ findDraft_().all=!!v; findRedraw_(); }
+function plotFindRun_(mode){ const d=findDraft_(); const rules=d.rules.filter(r=>r.op==="blank"||r.op==="some"||String(r.v||"").trim()!=="");
+  if(!rules.length){ toast("Choose a value first",true); return; }
+  _findSet={rules:rules,all:d.all,mode:mode}; _findDraft=null; try{ closeInfoSheet_(); }catch(e){}
+  findApplyMap_(true); const n=findCount_(); toast(`${n} plot${n===1?"":"s"} match`+(mode==="only"?" — the others are hidden":"")); }
 function openMyLabel(){
   if(auditPlots.length){
     showInfoSheet_("Label plot dots", `<div style="color:#a9c9b0;font-size:12px;margin-bottom:8px">Which set do you want to label?</div>`+
@@ -6011,6 +6059,7 @@ function renderCrewPlots(rows, silent, auto){
   crewData = rows||[];                       // cache so re-labelling doesn't need a re-fetch
   try{ sheetMaxUpdate_(crewData); }catch(e){}      // v471: next plot numbers know the Sheet
   crewLayer.clearLayers();
+  if(typeof findOnly_==="function" && findOnly_()) return;      /* v485: a search showing only its matches hides the crew dots (no tree data on them) */
   // Don't redraw YOUR OWN plots here — they already show as your yellow pins. Otherwise a plot you
   // collected appears twice (yellow device copy + a coloured crew copy from the Sheet), and deleting
   // the device copy leaves the crew dot behind.
@@ -8055,7 +8104,8 @@ function collectCoords_(features,out){ features.forEach(f=>{ const g=f&&f.geomet
 
 function renderLayerVis_(){
   const box=$("layerVisList"); if(!box) return;
-  const refN=(typeof refFeatCount!=="undefined"&&refFeatCount)?refFeatCount:((typeof refLabels!=="undefined"&&refLabels)?refLabels.length:0);      // v430: lines count too (a file of trails had no switch)
+  let refN=(typeof refFeatCount!=="undefined"&&refFeatCount)?refFeatCount:((typeof refLabels!=="undefined"&&refLabels)?refLabels.length:0);      // v430: lines count too (a file of trails had no switch)
+  try{ if(typeof REFL!=="undefined"&&REFL.length) refN=REFL.reduce((t,fc)=>t+((fc.features||[]).length),0); }catch(e){}      /* v485: a hidden layer stays listed (it vanished from Layers when switched off) */
   const trkN=(typeof trackLog!=="undefined"&&trackLog)?trackLog.length:0;
   let spG=[]; try{ spG=spGrids_(); }catch(e){} const spN=spG.reduce((a,G)=>a+G.pts.length,0);
   const bndN=(typeof BOUND!=="undefined"&&BOUND&&BOUND.features)?BOUND.features.length:0;
@@ -9050,7 +9100,7 @@ function renderMapPins(){
   const detail = z >= LABEL_ZOOM_MIN;                      // labels and full markers only up close
   const view = (detail && fmap) ? fmap.getBounds().pad(0.25) : null;
   const onlyK=(typeof mapOnly!=="undefined"&&mapOnly)?propK_(mapOnly):"", onlyP=p=>!onlyK||!String(p.TRACT||"").trim()||propK_(p.TRACT)===onlyK;   // v406
-  saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)||!onlyP(p)) return;
+  saved.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)||!onlyP(p)||findHides_(p)) return;
     const hit=_findHit_(p); const needs=plotNeedsWork_(p,false);
     // a plot you have done is the thing that matters here — draw it bigger than everything else
     /* Colour by who collected it. After a restore the device holds the whole crew's work, and drawing
@@ -9068,7 +9118,7 @@ function renderMapPins(){
   });
   // Imported reference plots. Blue = not yet visited; GREEN with a ✓ = edited/completed in the field,
   // so the whole crew can see progress at a glance. Amber = possible duplicate of an existing plot.
-  auditPlots.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)||!onlyP(p)) return;
+  auditPlots.forEach((p,i)=>{ const lat=parseFloat(p.Y), lon=parseFloat(p.X); if(isNaN(lat)||isNaN(lon)||!onlyP(p)||findHides_(p)) return;
     const done=!!p._done;
     const col = done ? "#37c26b" : (p._dup ? "#e8b84b" : "#4aa3e0");
     const hit=_findHit_(p); const needs=plotNeedsWork_(p,true);
@@ -9963,6 +10013,7 @@ function buildStandIndex_(){
       if(tf && f.properties[tf]!=null && String(f.properties[tf]).trim()!=="" && !_gotoTract[key]) _gotoTract[key]=String(f.properties[tf]).trim();
       const pts=[]; collectCoords_([f],pts); pts.forEach(pt=>add(nm,pt[0],pt[1])); });
   }
+  try{ csAll_().forEach(c=>{ const nm=String(c.name||"").trim(); if(!nm) return; if(c.tract&&!_gotoTract[nm]) _gotoTract[nm]=String(c.tract); (c.rings||[]).forEach(r=>(r||[]).forEach(q=>add(nm,q[0],q[1]))); }); }catch(e){}      /* v485: the property's shared compartments */
   const noteTract=p=>{ const s=String(p.STANDID||"").trim(); const t=String(p.TRACT||"").trim(); if(s&&t&&!_gotoTract[s]) _gotoTract[s]=t; };
   saved.forEach(p=>{ add(p.STANDID,parseFloat(p.Y),parseFloat(p.X)); noteTract(p); });
   auditPlots.forEach(p=>{ add(p.STANDID,parseFloat(p.Y),parseFloat(p.X)); noteTract(p); });
@@ -9982,25 +10033,16 @@ function buildStandIndex_(){
 // (highlight + zoom to matches). Combines the old “Stand…” and “Find” tools into one.
 function openSearch(){ try{ _openSearch(); }catch(e){ toast("Couldn't open search: "+(e&&e.message||e),true); } }
 function _openSearch(){
-  const idx=buildStandIndex_();
-  const fopts=FIND_FIELDS.map(([k,l])=>`<option value="${k}">${l}</option>`).join("");
-  const cur=_findRule||{field:"PLOTNUM",op:"zero",value:""};
-  const hasList=idx.names.length>0;
-  const html=
-    `<details class="lgroup" id="searchFilterGrp"><summary>🎛 Filter plots by attribute</summary><div class="lgroup-body">`+
-      `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"><button class="btn ghost" type="button" onclick="quickFind_('PLOTNUM','zero')">Plot # = 0</button><button class="btn ghost" type="button" onclick="quickFind_('STANDID','blank')">No stand</button><button class="btn ghost" type="button" onclick="quickFind_('AGE','blank')">No age</button></div>`+
-      `<label style="font-size:12px;color:#8fb89a">Field</label><select id="findField" style="width:100%;font-size:16px;margin:3px 0 8px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">${fopts}</select>`+
-      `<label style="font-size:12px;color:#8fb89a">Condition</label><select id="findOp" onchange="findOpChange_()" style="width:100%;font-size:16px;margin:3px 0 8px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
-        `<option value="eq">equals</option><option value="ne">does not equal</option><option value="has">contains</option><option value="zero">equals 0</option><option value="blank">is blank</option><option value="gt">greater than</option><option value="lt">less than</option></select>`+
-      `<div id="findValWrap"><label style="font-size:12px;color:#8fb89a">Value</label><input id="findVal" type="text" style="width:100%;font-size:16px;margin:3px 0 10px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></div>`+
-      `<button class="btn" type="button" onclick="applyFind_()">Highlight &amp; zoom to matches</button>`+
-      (_findRule?`<button class="btn ghost" type="button" onclick="clearFind_()" style="margin-top:8px">Clear highlight</button>`:"")+
-    `</div></details>`+
-    `<input id="gotoSearch" type="text" placeholder="Search ${hasList?idx.title.toLowerCase():"…"}" oninput="filterGoto_()" style="width:100%;font-size:16px;margin:10px 0 6px;padding:9px 11px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
-    (hasList?`<div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#7a9a76;margin:2px 2px 4px">${esc(idx.title)} · tap to zoom</div>`:"")+
-    `<div id="gotoList">${gotoRows_(idx.names)}</div>`;
+  const idx=buildStandIndex_(); _findDraft=null;
+  /* v485: the compartments are one drop-down (by property) instead of a list under the box */
+  const by={}; idx.names.forEach(n=>{ const t=_gotoTract[n]||(idx.title==="Plots"?"Plots":"Other"); (by[t]=by[t]||[]).push(n); });
+  const groups=Object.keys(by).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+  const S="width:100%;font-size:16px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6;box-sizing:border-box";
+  const go=idx.names.length?`<label style="font-size:12px;color:#8fb89a">Go to a ${idx.title==="Plots"?"plot":"compartment"}</label><select id="gotoSel" onchange="if(this.value) gotoStand_(this.value)" style="${S};margin:3px 0 12px"><option value="">— choose (${idx.names.length}) —</option>`+
+    groups.map(t=>`<optgroup label="${esc(t)}">`+by[t].map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join("")+`</optgroup>`).join("")+`</select>`:"";
+  const html=go+`<div style="font-size:12px;color:#8fb89a;margin:0 0 6px">Find plots by what was recorded — e.g. Tree species is Pr (red pine)</div><div id="findEditor">${findEditorHtml_()}</div>`+
+    `<details style="margin-top:10px"><summary style="color:#8fae95;font-size:12px">Quick checks</summary><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn ghost" type="button" onclick="quickFind_('PLOTNUM','zero')">Plot # = 0</button><button class="btn ghost" type="button" onclick="quickFind_('STANDID','blank')">No compartment</button></div></details>`;
   showInfoSheet_("Search", html);
-  setTimeout(()=>{ const f=$("findField"),o=$("findOp"); if(f) f.value=cur.field; if(o) o.value=cur.op; findOpChange_(); const v=$("findVal"); if(v&&cur.value!=null) v.value=cur.value; },40);
 }
 function openGoToStand(){ openSearch(); }   // back-compat: both old tools now open the unified Search
 function openFindPlots(){ openSearch(); }
@@ -13721,7 +13763,7 @@ function mmMenuFill_(){ const box=$("mmMenuBox"); if(!box) return; const t=propA
     B(6,"🛰","Detailed map on the aerial photo","MFTIP Map 6 — compartments, plots, points and lines on the photo")+
     B(4,"🗺","Property and surrounding area","MFTIP Map 4 — woodland, roads, water and lots around the property, with a locator map")+
     B(7,"📅","Planned activities","MFTIP Map 7 — compartments coloured by the work planned in the plan period")+
-    B("pk","📦","All MFTIP maps in one PDF","Title page, Maps 4, 6 and 7, compartment and photo appendices")+`</div>`; }
+    B("pk","📦","All MFTIP maps in one PDF","Title page, Maps 4, 6 and 7, compartment and photo appendices")+msMenuHtml_(t)+`</div>`; }
 function mmMenuShow_(){ try{ const m=$("layersMenu"); if(m && m.style.display==="none") toggleLayersMenu(); layersTab_("prop"); }catch(e){} }      // the block is near the top of the tab, under the property chooser
 function mmFromMenu_(k){ const t=propActiveTract_(); if(!t){ toast("Choose the property first (the box at the top of Layers → Property)",true); return; }
   try{ closeLayersMenu(); }catch(e){} _ppTract=t; if(k==="pk") pkOpen_(); else mmOpen_(k); }
@@ -14846,10 +14888,13 @@ function mmOpen_(kind){
      `<div style="font-size:12px;color:#a9c9b0;margin:6px 0 3px">Key map road names</div>`+sel("mmInsetNames",[["auto","Automatic — the roads nearest the property, as many as fit"],["more","More names, smaller text"],["fewer","Fewer names, larger text"],["none","No road names"]],o.insetNames||"auto"):"")+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Road names — untick one to leave it off, or type over it to correct it</div><div id="rnList"></div>`+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Prepared by (printed on the map)</div><input id="mmFirm" type="text" value="${esc(o.firm)}" placeholder="e.g. your company" style="width:100%;box-sizing:border-box;font-size:16px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
-    `<div style="display:flex;gap:8px;margin:14px 0 6px"><button type="button" class="btn submit" style="flex:1" onclick="mmGo_(${kind})">Make ${kind===8?"the map":"Map "+kind}</button><button type="button" class="btn ghost" style="flex:1" onclick="openPropSheet_(_ppTract)">◂ Back</button></div>`);
+    `<div style="display:flex;gap:8px;margin:14px 0 6px"><button type="button" class="btn submit" style="flex:1" onclick="mmGo_(${kind})">Make ${kind===8?"the map":"Map "+kind}</button><button type="button" class="btn ghost" style="flex:1" onclick="openPropSheet_(_ppTract)">◂ Back</button></div>`+
+    `<button type="button" class="btn ghost" style="width:100%;margin:0 0 6px" onclick="msSaveAsk_(${kind})">💾 Save this setup as…</button>`);
   try{ rnPanel_(kind); }catch(e){}
 }
-function mmGo_(kind){
+function mmGo_(kind){ const o=mmRead_(kind); mmMake_(kind,_ppTract,o); }
+/* v486: reading the form is separate from making, so a setup can be saved from it */
+function mmRead_(kind){
   try{ rnSaveForm_(); }catch(e){}
   const o=mmOpts_(kind), v=id=>{ const el=$(id); return el?el:null; };
   Object.keys(o.layers).forEach(k=>{ const el=v("mmL_"+k); if(el) o.layers[k]=!!el.checked; });
@@ -14869,7 +14914,7 @@ function mmGo_(kind){
   const ft=v("mmFeats"); if(ft) o.feats=!!ft.checked; const ln=v("mmLines"); if(ln) o.lines=!!ln.checked; const nm=v("mmNames"); if(nm) o.names=!!nm.checked; const se=v("mmSens"); o.sensitive=se?(se.value==="exact"?true:(se.value==="general"?"general":false)):false;
   const f=v("mmFirm"); if(f) o.firm=String(f.value||"").trim().slice(0,60);
   const py=v("mmPhotoYear"); if(py) o.photoYear=String(py.value||"").trim().slice(0,20); const ins=v("mmInset"); if(ins) o.inset=!!ins.checked; const inn=v("mmInsetNames"); if(inn) o.insetNames=inn.value||"auto"; const ta=v("mmTownArrow"); if(ta) o.townArrow=!!ta.checked; const st=v("mmStand"); if(st) o.standLabels=!!st.checked; const pj=v("mmProj"); if(pj) o.proj=pj.value==="merc"?"merc":"utm"; const al=v("mmAlpha"); if(al) o.fillAlpha=+al.value||100; const ls=v("mmLabel"); if(ls) o.labelScale=+ls.value||100; const af=v("mmActFrom"), at=v("mmActTo"); if(af) o.actFrom=String(af.value||"").trim(); if(at) o.actTo=String(at.value||"").trim();
-  mmMake_(kind,_ppTract,o);
+  return o;
 }
 /* ============ v384 — road names on Map 4 and Map 6 ============
    Chris's choices (2026-10-08): names from Statistics Canada's Road Network File, plus labels typed by
@@ -17471,6 +17516,66 @@ function shpMulti_(feats, st){ st=st||5;
   return {shp:new Uint8Array(sb), shx:new Uint8Array(xb)};
 }
 
+
+/* ============ v486 — named map setups ============
+   Chris, 2026-11-21: "are we able to save the set up for these maps as a file name so that they can be opened in the
+   future?" A saved VERSION (v385) is a frozen copy of one map. A SETUP is the recipe — kind of map, title, layers,
+   background, plot symbols, page, scale, map area, title block, inset, labels, prepared-by — saved under a name, for one
+   property or for any. Make a map lists them; opening one fills the map options with it and today's data. Kept in the
+   Sheet ("Map Setups"), so every phone and the desk have them; a copy stays on this phone for use without signal. */
+let MS_LIST=(function(){ try{ return JSON.parse((STORE&&STORE.getItem("fi_mapsets"))||"[]")||[]; }catch(e){ return []; } })(), _msFetchedAt=0;
+function msPersist_(){ try{ STORE&&STORE.setItem("fi_mapsets",JSON.stringify(MS_LIST.slice(0,200))); }catch(e){} }
+function msOfOpts_(o){ const k=["title","tbLoc","tbOwner","tbTotal","tbProg","aerial","plotSize","plotNums","plotColor","plotComps","layers","hatch","plots","feats","lines","names","inset","standLabels","proj","actFrom","actTo","fillAlpha","labelScale","insetNames","townArrow","scale","page","extent","firm"];
+  const out={}; k.forEach(x=>{ if(o[x]!==undefined) out[x]=(x==="title"&&o.title===o.titleDef)?"":o[x]; }); return out; }
+function msFor_(t){ const k=propK_(t); return MS_LIST.filter(s=>!s.tract||propK_(s.tract)===k).sort((a,b)=>String(a.name).localeCompare(String(b.name),undefined,{numeric:true})); }
+function msMenuHtml_(t){ const vers=t?`<button type="button" onclick="try{ closeLayersMenu(); }catch(e){} _ppTract=propActiveTract_(); mvOpen_()" style="display:block;width:100%;text-align:left;padding:8px 10px;margin:6px 0 2px;border-radius:9px;border:1px solid #2a4a30;background:transparent;color:#cfe6d4;font:13px system-ui">🗂 Saved map versions — maps kept exactly as they were made</button>`:"";
+  return msMenuHtml0_(t)+vers; }
+function msMenuHtml0_(t){ const list=t?msFor_(t):[]; try{ msFetch_(false); }catch(e){}
+  if(!list.length) return `<div style="font-size:11px;color:#8fae95;margin:6px 2px 2px;line-height:1.4">💾 Saved setups: none yet — in a map's options, "Save this setup as…" keeps it under a name.</div>`;
+  return `<div style="font-size:12px;font-weight:600;color:#cfe6d4;margin:10px 2px 4px">💾 My saved setups</div>`+list.map(s=>
+    `<div style="display:flex;gap:6px;align-items:center;margin:4px 0"><button type="button" onclick="msUse_('${s.id}')" style="flex:1;text-align:left;padding:9px 10px;border-radius:9px;border:1px solid #2f7a44;background:#123a1c;color:#eafae8;font:14px system-ui">${esc(s.name)}<div style="font-size:11px;color:#a9c9b0;margin-top:2px">${esc(mmName_(+s.kind))} · ${s.tract?esc(s.tract)+" only":"any property"}</div></button>`+
+    `<button type="button" class="btn ghost" style="flex:none;padding:8px 10px" title="Rename or delete" onclick="msEdit_('${s.id}')">⋯</button></div>`).join(""); }
+function msFetch_(force){ if(!connected||isOffline()) return; if(!force && Date.now()-_msFetchedAt<5*60000) return; _msFetchedAt=Date.now();
+  try{ jsonp_("action=mapsetlist", r=>{ if(!r||!r.ok||!Array.isArray(r.items)) return;
+    const pend=MS_LIST.filter(s=>s._pending); MS_LIST=r.items.concat(pend.filter(p=>!r.items.some(x=>x.id===p.id))); msPersist_(); try{ mmMenuFill_(); }catch(e){} }, 30000); }catch(e){} }
+let _msDraft=null;
+function msSaveAsk_(kind){ const o=mmRead_(kind), t=_ppTract||"";
+  const def=(kind===8?(o.title||"Custom map"):"Map "+kind)+(t?" — "+t:"");
+  _msDraft={o, t, view:(function(){ try{ return o.extent==="view"&&fmap?{lat:+fmap.getCenter().lat.toFixed(6),lon:+fmap.getCenter().lng.toFixed(6),z:fmap.getZoom()}:null; }catch(e){ return null; } })()};
+  showInfoSheet_("Save this map setup",
+    `<div style="font-size:12px;color:#a9c9b0;margin-bottom:4px">Name</div><input id="msName" type="text" maxlength="80" value="${esc(def)}" style="width:100%;box-sizing:border-box;font-size:16px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
+    `<label style="display:flex;align-items:center;gap:8px;padding:10px 0;font-size:14px;color:#e8f0e6"><input type="checkbox" id="msOnly" ${o.extent==="view"?"checked":""} style="width:20px;height:20px"> Only for ${esc(t||"this property")}${o.extent==="view"?" (it uses the map area you are looking at)":" — untick to use it for any property"}</label>`+
+    `<div style="font-size:11px;color:#8fae95;line-height:1.4;margin-bottom:10px">Keeps the kind of map and every option on this screen. Opening it later makes the map from the data of that day — a saved <i>version</i> is what keeps a map exactly as it was.</div>`+
+    `<button type="button" class="btn submit" style="width:100%" onclick="msSave_(${kind})">💾 Save</button>`); }
+function msSave_(kind){ const d=_msDraft; if(!d) return; const name=String(($("msName")||{}).value||"").trim().slice(0,80); if(!name){ toast("Give it a name",true); return; }
+  const only=!!(($("msOnly")||{}).checked);
+  const old=MS_LIST.find(s=>String(s.name).toLowerCase()===name.toLowerCase() && propK_(s.tract||"")===propK_(only?d.t:""));
+  if(old && !confirm("“"+name+"” exists already. Replace it with this setup?")) return;
+  const s={id:old?old.id:"S"+Date.now().toString(36).toUpperCase()+Math.floor(Math.random()*1296).toString(36).toUpperCase(), name, tract:only?d.t:"", kind, opts:msOfOpts_(d.o), view:d.view, by:String(cruiserEmail||cruiser||""), at:new Date().toISOString(), _pending:true};
+  MS_LIST=MS_LIST.filter(x=>x.id!==s.id); MS_LIST.push(s); msPersist_(); _msDraft=null; try{ closeInfoSheet_(); }catch(e){} msPush_(); toast("Saved the setup “"+name+"”"); try{ mmMenuFill_(); }catch(e){} }
+function msPush_(){ const pend=MS_LIST.filter(s=>s._pending), dels=(function(){ try{ return JSON.parse((STORE&&STORE.getItem("fi_mapsetdel"))||"[]"); }catch(e){ return []; } })();
+  if(!connected||isOffline()) return;
+  if(pend.length) sheetPost_({_action:"mapsetsave", setups:pend.map(s=>{ const o=Object.assign({},s); delete o._pending; return o; })}).then(j=>{ const ok=(j&&Array.isArray(j.savedIds))?j.savedIds:[];
+    MS_LIST.forEach(s=>{ if(ok.indexOf(s.id)>=0) delete s._pending; }); msPersist_(); if(j&&j.ok===false&&j.error) toast("The Sheet did not keep the setup: "+j.error,true); }).catch(()=>{});
+  if(dels.length) sheetPost_({_action:"mapsetdel", ids:dels}).then(j=>{ if(j&&j.ok){ try{ STORE&&STORE.setItem("fi_mapsetdel","[]"); }catch(e){} } }).catch(()=>{}); }
+try{ window.addEventListener("online",()=>setTimeout(msPush_,4000)); setTimeout(()=>{ try{ msPush_(); msFetch_(true); }catch(e){} },12000); }catch(e){}
+function msUse_(id){ const s=MS_LIST.find(x=>x.id===id); if(!s) return; const t=propActiveTract_(); if(!t){ toast("Choose the property first",true); return; }
+  const kind=+s.kind||8; const base=mmOpts_(kind), o=Object.assign({}, base, s.opts||{}, {kind}); if(!o.title) o.title=base.titleDef;
+  mmSaveOpts_(o);      /* the options screen opens with them */
+  try{ closeLayersMenu(); }catch(e){} _ppTract=t;
+  if(s.view && s.opts && s.opts.extent==="view" && typeof fmap!=="undefined" && fmap){ try{ fmap.setView([s.view.lat,s.view.lon],s.view.z,{animate:false}); }catch(e){} }
+  mmOpen_(kind); toast("Setup “"+s.name+"” — check the options and tap Make"); }
+function msEdit_(id){ const s=MS_LIST.find(x=>x.id===id); if(!s) return;
+  showInfoSheet_("“"+s.name+"”",
+    `<div style="font-size:12px;color:#a9c9b0;margin-bottom:4px">Name</div><input id="msRen" type="text" maxlength="80" value="${esc(s.name)}" style="width:100%;box-sizing:border-box;font-size:16px;padding:9px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6">`+
+    `<div style="font-size:11px;color:#8fae95;margin:6px 0 10px">${esc(mmName_(+s.kind))} · ${s.tract?esc(s.tract)+" only":"any property"} · saved ${esc(String(s.at||"").slice(0,10))}${s.by?" by "+esc(s.by):""}</div>`+
+    `<div style="display:flex;gap:8px"><button type="button" class="btn submit" style="flex:1" onclick="msRename_('${s.id}')">Rename</button><button type="button" class="btn ghost" style="flex:1;color:#ff8a80" onclick="msDelete_('${s.id}')">✕ Delete</button></div>`); }
+function msRename_(id){ const s=MS_LIST.find(x=>x.id===id); if(!s) return; const n=String(($("msRen")||{}).value||"").trim().slice(0,80); if(!n) return;
+  s.name=n; s._pending=true; msPersist_(); msPush_(); try{ closeInfoSheet_(); }catch(e){} try{ mmMenuFill_(); }catch(e){} toast("Renamed"); }
+function msDelete_(id){ const s=MS_LIST.find(x=>x.id===id); if(!s||!confirm("Delete the setup “"+s.name+"”? Maps already made are not affected.")) return;
+  MS_LIST=MS_LIST.filter(x=>x.id!==id); msPersist_();
+  try{ const d=JSON.parse((STORE&&STORE.getItem("fi_mapsetdel"))||"[]"); d.push(id); STORE&&STORE.setItem("fi_mapsetdel",JSON.stringify(d)); }catch(e){}
+  msPush_(); try{ closeInfoSheet_(); }catch(e){} try{ mmMenuFill_(); }catch(e){} toast("Deleted"); }
 /* ============ v385 — saved map versions ============
    Like the Street Tree app's plan versions: "Save this map as a version" keeps the map's settings and a
    frozen copy of everything drawn on it — compartments with their classes and labels, the outline, the
