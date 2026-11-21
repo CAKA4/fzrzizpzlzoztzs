@@ -838,6 +838,15 @@ try{ (function(){
     <div id="layerStatus" class="layer-status"></div>
     <div id="layerVisList"></div>
 
+    <details class="lgroup" id="lgroupLio" open data-open><summary>🗺 Provincial layers — lots, roads, water, wetlands, contours</summary>
+      <div class="lgroup-body">
+        <div id="lioStatus" class="ls-muted" style="font-size:11px;line-height:1.4;padding:2px"></div>
+        <div id="lioToggles"></div>
+        <button type="button" onclick="closeLayersMenu();lioEnsure_(propActiveTract_(),true)">↻ Refresh provincial layers</button>
+        <div class="ls-muted" style="font-size:10px;line-height:1.4;padding:2px">Lots and concessions, roads, water, wetlands, contours and buildings from Land Information Ontario, fetched for the property and kept on this phone. Contains information licensed under the Open Government Licence – Ontario
+.</div>
+      </div>
+    </details>
     <details class="lgroup" id="lgroupImg"><summary>🛰 Aerial photo — <span id="imgName">Esri world imagery</span></summary>
       <div class="lgroup-body" id="imgList"></div>
     </details>
@@ -853,19 +862,41 @@ try{ (function(){
     <details class="lgroup" open data-open ontoggle="if(this.open&&typeof mapStyleForm_==='function') mapStyleForm_()"><summary>🎨 Map style — colours, widths, sizes</summary>
       <div class="lgroup-body" id="mapStyleBody"></div>
     </details>
+    <details class="lgroup" id="lgroupRef"><summary>📍 Reference layers — points, lines &amp; polygons: look &amp; labels</summary>
+      <div class="lgroup-body">
+        <div class="ls-muted" id="refLayersHint" style="font-size:12px;line-height:1.4;padding:2px">None loaded. Load one under Files → ⬇ Map file.</div>
+        <div id="refLayerList"></div>
+        <div class="map-field" id="refFieldRow" style="display:none">
+          <label>Point label field</label><select id="refFieldSel" onchange="setRefField(this.value)"></select>
+        </div>
+        <div class="map-field" id="refPolyLblRow" style="display:none">
+          <label>Polygon label field</label><select id="refPolyLblSel" onchange="setRefPolyLblField_(this.value)"></select>
+        </div>
+        <div class="map-field" id="refStandRow" style="display:none">
+          <label>Compartment for plots placed inside a polygon (e.g. a sub-compartment ID)</label><select id="refStandSel" onchange="setRefStandField_(this.value)"></select>
+        </div>
+        <div class="ls-muted" id="refStandNote" style="font-size:11px;line-height:1.4;padding:0 2px 6px"></div>
+        <div class="map-field" id="refTapRow" style="display:none">
+          <label>Tapping where a polygon overlaps a compartment shows first</label>
+          <select id="refTapSel" onchange="setRefTapPref_(this.value)"><option value="ref">The reference polygon</option><option value="comp">The compartment</option></select>
+        </div>
+        <button type="button" id="clearRefBtn" class="ls-clear" style="display:none" onclick="clearRef()">✕ Remove every reference layer</button>
+      </div>
+    </details>
     </div>
     <div class="ltab" id="ltab_files">
     <details class="lgroup" open data-open><summary>📁 Load &amp; import layers</summary>
       <div class="lgroup-body">
-        <button type="button" onclick="closeLayersMenu();openImportPlots()">📥 Import plots (another device / source)</button>
-        <button type="button" onclick="closeLayersMenu();restoreFromSheet()">☁ Restore plots from the Sheet</button>
-        <button type="button" onclick="closeLayersMenu();$('boundInput').click()">⬇ Stand boundaries (polygons)</button>
-        <button type="button" onclick="closeLayersMenu();$('pointsInput').click()">⬇ Reference points, lines &amp; polygons</button>
-        <button type="button" id="refClearBtn" onclick="closeLayersMenu();clearRefFiles()" style="display:none">✕ Remove reference points, lines &amp; polygons</button>
+        <div class="layer-hd" style="margin:2px 2px 4px">From a file on this phone</div>
+        <button type="button" onclick="closeLayersMenu();openImportPlots()">📥 Plots — from another device or source</button>
+        <button type="button" onclick="closeLayersMenu();$('mapFileInput').click()">⬇ Map file — compartments, or reference points, lines &amp; polygons</button>
         <button type="button" onclick="closeLayersMenu();$('pdfInput').click()">🗺 PDF map — georeferenced, or pin your own</button>
         <button type="button" id="pdfUnloadBtn" onclick="closeLayersMenu();unloadPDF()" style="display:none">✕ Unload PDF map</button>
+        <div class="layer-hd" style="margin:12px 2px 4px">Shared with the crew</div>
+        <button type="button" onclick="closeLayersMenu();openDriveLayers()">☁ From Drive — plots, map files &amp; PDF maps the crew shared</button>
         <button type="button" id="pdfReloadBtn" onclick="closeLayersMenu();pdfReload_()" style="display:none">🗺 Reload the PDF map from Drive</button>
-        <button type="button" onclick="closeLayersMenu();openDriveLayers()">☁ From Drive — plots, boundaries, points &amp; PDF maps</button>
+        <button type="button" onclick="closeLayersMenu();restoreFromSheet()">☁ Restore every plot from the Sheet (all properties)</button>
+        <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:2px">The plots of the property shown come in by themselves when there is signal, every 15 min.</div>
       </div>
     </details>
 
@@ -916,31 +947,11 @@ try{ (function(){
       </div>
     </details>
 
-    <details class="lgroup" id="lgroupRef"><summary>📍 Reference layers — points, lines &amp; polygons</summary>
-      <div class="lgroup-body">
-        <div class="ls-muted" id="refLayersHint" style="font-size:12px;line-height:1.4;padding:2px">None loaded. Load them under Load &amp; import layers → ⬇ Reference points, lines &amp; polygons.</div>
-        <div id="refLayerList"></div>
-        <div class="map-field" id="refFieldRow" style="display:none">
-          <label>Point label field</label><select id="refFieldSel" onchange="setRefField(this.value)"></select>
-        </div>
-        <div class="map-field" id="refPolyLblRow" style="display:none">
-          <label>Polygon label field</label><select id="refPolyLblSel" onchange="setRefPolyLblField_(this.value)"></select>
-        </div>
-        <div class="map-field" id="refStandRow" style="display:none">
-          <label>Compartment for plots placed inside a polygon (e.g. a sub-compartment ID)</label><select id="refStandSel" onchange="setRefStandField_(this.value)"></select>
-        </div>
-        <div class="ls-muted" id="refStandNote" style="font-size:11px;line-height:1.4;padding:0 2px 6px"></div>
-        <div class="map-field" id="refTapRow" style="display:none">
-          <label>Tapping where a polygon overlaps a compartment shows first</label>
-          <select id="refTapSel" onchange="setRefTapPref_(this.value)"><option value="ref">The reference polygon</option><option value="comp">The compartment</option></select>
-        </div>
-        <button type="button" id="clearRefBtn" class="ls-clear" style="display:none" onclick="clearRef()">✕ Remove reference points, lines &amp; polygons</button>
-      </div>
-    </details>
+
 
     </div>
     <div class="ltab" id="ltab_prop">
-    <details class="lgroup" id="lgroupProp" open data-open><summary>🏠 Property &amp; provincial layers</summary>
+    <details class="lgroup" id="lgroupProp" open data-open><summary>🏠 Property</summary>
       <div class="lgroup-body">
         <div class="map-field"><label>Property shown on the map (picking one zooms to it)</label><select id="propActiveSel" onchange="propPickActive_(this.value)"></select></div>
         <div id="mmMenuBox"></div>
@@ -952,10 +963,7 @@ try{ (function(){
         <button type="button" onclick="closeLayersMenu();cfFromLoaded_()">📋 Save the loaded compartment file's fields (species, age…) to the Sheet</button>
         <button type="button" onclick="closeLayersMenu();cfChooseOpen_()">⚙ Fields shown in the compartment popup</button>
         <button type="button" onclick="closeLayersMenu();cltipOpen_()">🗺 Property outline from the CLTIP viewer…</button>
-        <div id="lioStatus" class="ls-muted" style="font-size:11px;line-height:1.4;padding:2px"></div>
-        <div id="lioToggles"></div>
-        <button type="button" onclick="closeLayersMenu();lioEnsure_(propActiveTract_(),true)">↻ Refresh provincial layers</button>
-        <div class="ls-muted" style="font-size:10px;line-height:1.4;padding:2px">Lots and concessions, roads, water, wetlands, contours and buildings from Land Information Ontario, fetched for the property and kept on this phone. Contains information licensed under the Open Government Licence – Ontario.</div>
+        <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:2px">The provincial layers (lots, roads, water, wetlands, contours, buildings) are under Layers → 🗺 Provincial layers.</div>
       </div>
     </details>
 
@@ -1104,6 +1112,7 @@ try{ (function(){
 </div>
 <input type="file" id="boundInput" style="display:none">
 <input type="file" id="pointsInput" style="display:none">
+<input type="file" id="mapFileInput" style="display:none">
 <input type="file" id="importPlotsInput" accept=".zip,.shp,.dbf,.geojson,.json,.csv,.tsv,.txt" style="display:none">
 <input type="file" id="pdfInput" accept=".pdf,application/pdf,image/jpeg,image/png" style="display:none">
 
@@ -1437,7 +1446,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-20 · v482";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-21 · v484";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -6258,6 +6267,26 @@ function renderCrewRoutes(routes, silent){
 }
 
 let _goneIds=null;
+/* ============ v484 — the Sheet's plots for the property shown, kept up to date by themselves ============
+   Chris, 2026-11-21: "I often have to press restore plots from the sheet … Why would we not want to have the plots
+   restored from the sheet all the time?" A full restore is every plot of every property (2,875, ~10 MB), so it stays a
+   button. What runs by itself is the same restore for the property shown only, sent compactly: when the app opens with
+   signal, when the property changes, and every AUTO_PULL_MS while the app is open. New plots arrive (on a phone that has
+   restored before — a crew phone that never has only keeps its own plots in step), office changes
+   (INANALYSIS, STANDID, TRACT, AGE …) reach plots already here, and plots deleted in the Sheet leave this phone.
+   Unsent work is never touched, and nothing runs while a plot is open for editing. */
+const AUTO_PULL_MS=15*60000;
+let _restoreBusy=false;
+function _autoPulls_(){ try{ return JSON.parse((STORE&&STORE.getItem("fi_autopull"))||"{}")||{}; }catch(e){ return {}; } }
+function _autoPullSet_(t){ const m=_autoPulls_(); m[propK_(t)]=Date.now(); try{ STORE&&STORE.setItem("fi_autopull",JSON.stringify(m)); }catch(e){} }
+function autoRestore_(force){ try{
+  const t=String((typeof propActiveTract_==="function"&&propActiveTract_())||"").trim(); if(!t) return false;
+  if(!connected||isOffline()||document.hidden) return false;
+  const last=+_autoPulls_()[propK_(t)]||0; if(!force && Date.now()-last<AUTO_PULL_MS) return false;
+  restoreFromSheet(true,{tract:t,auto:true}); return true; }catch(e){ return false; } }
+try{ setTimeout(()=>autoRestore_(), 8000); setInterval(()=>autoRestore_(), 60000);
+  window.addEventListener("online",()=>setTimeout(()=>autoRestore_(),3000));
+  document.addEventListener("visibilitychange",()=>{ if(!document.hidden) setTimeout(()=>autoRestore_(),2000); }); }catch(e){}
 function restoreDropGone_(){
   /* A plot open for editing is remembered by its POSITION in the list; removing others while it is
      open would make "Update" land on a different plot. */
@@ -6275,15 +6304,25 @@ function restoreDropGone_(){
   try{ if(typeof updateLayerStatus==="function") updateLayerStatus(); }catch(e){}
   toast(`${n} plot${n>1?"s":""} removed from this device`);
 }
-function restoreFromSheet(quiet){
-  if(!connected){ toast("Not connected to a Sheet",true); return; }
-  if(isOffline()){ toast("Need internet to restore from the Sheet",true); return; }
-  toast("Fetching plots from the Sheet…");
+function restoreFromSheet(quiet, opts){
+  opts=opts||{}; const auto=!!opts.auto, scopeT=String(opts.tract||"").trim();
+  /* v484: by itself, a phone that has never restored (a crew phone) only keeps ITS plots in step — new plots of others
+     arrive only on a phone where someone chose Restore before (the office / lead phone) */
+  const addNew=!auto || !!_lastSheetPull;
+  if(!connected){ if(!auto) toast("Not connected to a Sheet",true); return; }
+  if(isOffline()){ if(!auto) toast("Need internet to restore from the Sheet",true); return; }
+  if(auto && (_restoreBusy || editingNow_())) return;
+  _restoreBusy=true; setTimeout(()=>{ _restoreBusy=false; }, 120000);
+  if(!auto) toast("Fetching plots from the Sheet…");
   const cb="__plk"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?";
   const sc=document.createElement("script");
   const cleanup=()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
   window[cb]=resp=>{ try{
-      const rows=(resp&&resp.plots)||[]; let added=0, imp=0;
+      _restoreBusy=false;
+      /* v484: a compact reply (one property, empty cells left out) is filled back out to every column */
+      let rows=(resp&&resp.plots)||[]; if(resp&&Array.isArray(resp.head)) rows=rows.map(r=>{ const o={}; resp.head.forEach(h=>{ o[h]=""; }); return Object.assign(o,r); });
+      if(auto) _autoPullSet_(scopeT);
+      let added=0, imp=0;
       // Identity by the UNIQUE PlotID (every Sheet row has one), so unnumbered plots that share
       // Stand/Plot/Date aren't wrongly treated as duplicates of each other. Falls back to a full
       // field+coord key only when a row somehow has no PlotID.
@@ -6326,6 +6365,7 @@ function restoreFromSheet(quiet){
         const key=rid||fullKey(r);
         if(seen.has(key)) return; seen.add(key);              // within this restore
         if(rid && haveIds.has(rid)) return;                    // already on the device
+        if(!addNew) return;
         let n=0; for(let i=1;i<=28;i++){ if(r["T"+i+"SP"]) n++; }
         r._id = r.PlotID || genId();      // KEEP the Sheet's PlotID so later edits update the row (not duplicate)
         r._sent=true; r._ts=r.DATE||nowStr(); r._trees=n; r._base=baseOf_(r);   // v377: exactly what the Sheet holds
@@ -6339,8 +6379,9 @@ function restoreFromSheet(quiet){
         if(/^(imported|audit)$/i.test(String(r.PLOTSRC||"").trim())) imp++;
         if(rid) haveIds.add(rid); added++; });
       if(added){ persist(); persistAudit(); renderSaved(); netDot(); if(fmap) renderMapPins(); if(typeof renderLayerVis_==="function") renderLayerVis_(); if(typeof updateLayerStatus==="function") updateLayerStatus(); }
-      noteSheetPull_();
-      toast(added?`Restored ${added} plot${added>1?"s":""} from the Sheet`+(imp?` (${imp} originally imported)`:""):"No new plots in the Sheet");
+      if(addNew) noteSheetPull_();
+      if(!auto) toast(added?`Restored ${added} plot${added>1?"s":""} from the Sheet`+(imp?` (${imp} originally imported)`:""):"No new plots in the Sheet");
+      else if(added) toast(`↻ ${added} new plot${added>1?"s":""} from the Sheet for ${scopeT}`);
       // if the summary is open, redraw it against what just arrived
       try{ if($("standSummary") && $("standSummary").style.display!=="none"){ populateSummaryCollectors_(); populateSummaryTracts_(); populateSummaryStands_(); renderSummary(); } }catch(e){}
       /* Restore only ever adds, so a plot deleted in the Sheet stayed on the device for good. Offer to
@@ -6349,10 +6390,11 @@ function restoreFromSheet(quiet){
          touched, because losing unsent fieldwork is far worse than a stale pin. */
       setTimeout(()=>{
         try{
-          const gone=p=>p && p._sent && String(p._id||"").trim() && !sheetIds.has(String(p._id).trim());
+          const gone=p=>p && p._sent && String(p._id||"").trim() && !sheetIds.has(String(p._id).trim()) && (!scopeT || propK_(p.TRACT)===propK_(scopeT));      /* v484: one property's reply speaks only for that property */
           const goneMine=saved.filter(gone), goneImp=auditPlots.filter(gone);
           const n=goneMine.length+goneImp.length;
           if(!n) return;
+          if(auto){ _goneIds=new Set(goneMine.concat(goneImp).map(p=>String(p._id).trim())); restoreDropGone_(); return; }      /* v484: deleted in the Sheet → off this phone too (they were sent; DELETED_PLOTS keeps them) */
           showInfoSheet_("Plots removed in the Sheet",
             `<div style="color:#a9c9b0;font-size:13px;line-height:1.55">`+
             `<p style="margin:0 0 8px"><b>${n}</b> plot${n>1?"s":""} on this device ${n>1?"are":"is"} no longer in the Sheet`+
@@ -6364,8 +6406,8 @@ function restoreFromSheet(quiet){
         }catch(e){}
       },400);
     }catch(e){ toast("Restore failed",true); } cleanup(); };
-  sc.onerror=()=>{ cleanup(); toast("Restore failed — check connection",true); };
-  sc.src=SCRIPT_URL+sep+tokQ_()+"action=plots&callback="+cb;
+  sc.onerror=()=>{ cleanup(); _restoreBusy=false; if(!auto) toast("Restore failed — check connection",true); };
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=plots"+(scopeT?"&tract="+encodeURIComponent(scopeT)+"&c=1":"")+"&callback="+cb;
   document.body.appendChild(sc);
 }
 
@@ -7600,6 +7642,7 @@ function initMap(){
     try{ schedulePinRender_(); }catch(e){} });   // rebuild the on-screen pin subset for the new view
   $("boundInput").addEventListener("change",e=>{ const f=e.target.files[0]; e.target.value=""; if(f) loadBoundaries(f); });
   $("pointsInput").addEventListener("change",e=>{ const f=e.target.files[0]; e.target.value=""; if(f) importRefFile(f); });
+  { const mi=$("mapFileInput"); if(mi) mi.addEventListener("change",e=>{ const f=e.target.files[0]; e.target.value=""; if(f) mapFileAsk_(f); }); }      /* v483 */
   $("pdfInput").addEventListener("change",e=>{ const f=e.target.files[0]; e.target.value=""; if(f) loadPdfOverlay(f); });
 }
 let _mapViewedThisSession=false, _lastMapView=null;
@@ -8024,7 +8067,7 @@ function renderLayerVis_(){
              ["mine","📍 Plots on this device", saved.length, false],
              ["sheet","👥 Plots from the Sheet", shtN, false],
              ["bound","▧ Stand boundaries", bndN, true],
-             ["ref","• Imported points/lines", refN, true],
+             ["ref","📍 Reference layers", refN, true],
              ["sample","⊞ Sample points", spN, true],
              ["track","〰 Track log", trkN, false],
              ["pdf","🗺 PDF map", hasPdf?1:0, false]]
@@ -8043,7 +8086,7 @@ function renderLayerVis_(){
     const lblBtn = canLabel ? `<button type="button" class="visbtn ${labelVis[k]!==false?"on":""}" title="Labels on/off" onclick="event.stopPropagation();toggleLabels('${k}')">🏷</button>` : "";
     const rmBtn = (k==="imported"&&cnt) ? `<button type="button" class="visbtn" title="Remove imported plots from this device" onclick="event.stopPropagation();clearAuditPlots()">🗑</button>`
       : (k==="sample"&&cnt) ? `<button type="button" class="visbtn ${_spRmOpen?"on":""}" title="Remove sample points" onclick="event.stopPropagation();_spRmOpen=!_spRmOpen;renderLayerVis_()">🗑</button>` : "";
-    const sub = (k==="sample"&&cnt&&_spRmOpen) ? spRmRows_(spG) : "";
+    const sub = (k==="sample"&&cnt&&_spRmOpen) ? spRmRows_(spG) : (k==="ref") ? refVisRows_() : "";
     return `<div class="visrow"><span onclick="${onTap}" style="flex:1;cursor:pointer${k==="sample"?";white-space:normal":""}">${esc(label)}${cnt&&k!=="pdf"?` <small>(${cnt})</small>`:""}</span>`+
       `<button type="button" class="visbtn" title="Zoom to this layer" onclick="event.stopPropagation();zoomToLayer('${k}')">⤢</button>`+
       lblBtn+rmBtn+
@@ -8060,6 +8103,27 @@ function renderLayerVis_(){
     go("⊙ Find or filter plots…", "closeLayersMenu();openSearch()", "lvSearch")+
     go("🏷 Label plot dots by…", "closeLayersMenu();openMyLabel()", "lvLabel");
 }
+/* v483 — Chris, 2026-11-21: "the ability to remove a reference point and line such as having a little X in the layers
+   menu beside each one that was imported". Under 📍 Reference layers, a row for each: its swatch and name, ✕ remove,
+   ON/OFF (⤢ on the 📍 row zooms to them all; refZoom_ is kept for one). Its look is set in Style → 📍 Reference layers. */
+function refVisRows_(){ if(typeof REFL==="undefined"||!REFL.length) return "";
+  return REFL.map(fc=>{ const st=fc._sty||{}, on=!st.hid;
+    return `<div class="visrow" style="padding-left:14px"><span onclick="refStyleSet_('${fc._id}',{hid:${on}});renderLayerVis_()" style="flex:1;min-width:0;cursor:pointer;display:flex;align-items:center;gap:6px">${refSwatch_(st).replace('width="40" height="20"','width="26" height="13"')}<span style="white-space:normal;overflow-wrap:break-word;line-height:1.2">${esc(fc._name||"Reference layer")} <small>(${(fc.features||[]).length})</small></span></span>`+
+      `<button type="button" class="visbtn" title="Remove this layer" onclick="event.stopPropagation();refRemove_('${fc._id}');renderLayerVis_()">✕</button>`+
+      `<span class="visdot ${on?"on":""}" onclick="refStyleSet_('${fc._id}',{hid:${on}});renderLayerVis_()" style="cursor:pointer">${on?"ON":"OFF"}</span></div>`; }).join(""); }
+function refZoom_(id){ const fc=(REFL||[]).find(x=>x._id===id); if(!fc) return; const b=[]; collectCoords_(fc.features||[],b);
+  if(!b.length){ toast("Nothing to zoom to",true); return; } try{ fmap.fitBounds(b,{padding:[40,40],maxZoom:18}); closeLayersMenu(); }catch(e){} }
+/* v483 — one button for map files: the person says what the file is. Compartments become the property's compartment
+   layer (to the Sheet; plots get their compartment, area and age); a reference layer is only drawn to look at. */
+function mapFileAsk_(file){ const nm=String(file&&file.name||"");
+  if(/\.(gpx|kml|kmz|csv)$/i.test(nm)){ importRefFile(file); return; }
+  _mapFile=file;
+  showInfoSheet_("What is "+(nm||"this file")+"?",
+    `<button type="button" class="btn submit" style="width:100%;min-height:52px;text-align:left;margin-bottom:8px" onclick="mapFileUse_('bound')">▧ <b>Compartments</b> (stand boundaries)<div style="font-size:12px;font-weight:normal;opacity:.85;margin-top:2px">They become the property's compartments — saved to the Sheet; plots inside them get the compartment, area and age.</div></button>`+
+    `<button type="button" class="btn ghost" style="width:100%;min-height:52px;text-align:left" onclick="mapFileUse_('ref')">📍 <b>A reference layer</b> — points, lines or polygons<div style="font-size:12px;opacity:.85;margin-top:2px">Only drawn to look at (trails, stakes, wetlands, a neighbour's layout…). Nothing goes to the Sheet. Each file has its own look.</div></button>`+
+    `<div style="color:#8fae95;font-size:11px;margin-top:8px;line-height:1.4">Either way you choose which features of the file to bring in.</div>`); }
+let _mapFile=null;
+function mapFileUse_(w){ const f=_mapFile; _mapFile=null; try{ closeInfoSheet_(); }catch(e){} if(!f) return; if(w==="bound") loadBoundaries(f); else importRefFile(f); }
 function normalizeFC(gj){
   let feats=[]; const cols=Array.isArray(gj)?gj:[gj];
   cols.forEach(fc=>{ if(fc&&fc.features) feats=feats.concat(fc.features); else if(fc&&fc.type==="Feature") feats.push(fc); });
@@ -12570,7 +12634,7 @@ function propActiveTract_(){
   if(!t){ const el=$("TRACT"); t=(el&&el.value&&el.value!==ADD_TRACT)?el.value:""; }
   return t||manualTract||"";
 }
-function propSetActive_(t){ try{ STORE&&STORE.setItem("fi_proptract",String(t||"")); }catch(e){} }
+function propSetActive_(t){ try{ STORE&&STORE.setItem("fi_proptract",String(t||"")); }catch(e){} try{ setTimeout(()=>autoRestore_(),1500); }catch(e){} }      /* v484: a new property's plots come in by themselves */
 /* v386 — a compartment's areas.
    · Hectares: the layer's hectares field where filled, else calculated from the shape.
    · Acres: the layer's acres field where filled, else the hectares in acres.
@@ -13296,7 +13360,7 @@ function lioStatus_(msg){ const el=$("lioStatus"); if(el) el.innerHTML=msg; }
 /* Make sure the property's layers are on this phone: from the phone, else the account's Drive,
    else the province. `force` = Refresh: always the province. `quiet` = no "nothing to do" toasts. */
 async function lioEnsure_(tract, force, quiet){
-  tract=String(tract||"").trim(); if(!tract){ if(!quiet) toast("Choose the property first (Layers → Property & provincial layers)",true); return; }
+  tract=String(tract||"").trim(); if(!tract){ if(!quiet) toast("Choose the property first (Layers → Property)",true); return; }
   const k=propK_(tract); if(_lioBusy[k]) return; _lioBusy[k]=1;
   try{
     const ext=propExtent_(tract);
@@ -14993,7 +15057,7 @@ function mnDelete_(id){ const n=(PROPS.notes||{})[id]; if(!n) return;
   if(!confirm(n.kind==="arrow"?"Delete this arrow?":"Delete this note?")) return;
   delete PROPS.notes[id]; if(propDirty.notes) delete propDirty.notes[id];
   (propDirty.noteDel=propDirty.noteDel||[]).push(id); propPersist_(); mnRender_(); mnOpen_();
-  if(propBackendOk) propPush_().then(()=>{}); }
+  if(propBackendOk) propPush_().then(()=>{}); else propSync_();      /* v483: a delete before this session's first sync went nowhere until the next Sync */ }
 /* ---- on the phone's map ---- */
 function mnRender_(){
   if(typeof fmap==="undefined"||!fmap||!window.L) return;
@@ -15139,7 +15203,7 @@ function ftDelete_(id){ const f=(PROPS.feats||{})[id]; if(!f) return;
   if(!confirm("Delete this point — "+ftKindName_(f.kind)+(f.name?" "+f.name:"")+"?"+((f.photos||[]).length?"\n\nIts photos stay in Drive.":""))) return;
   delete PROPS.feats[id]; if(propDirty.feats) delete propDirty.feats[id];
   (propDirty.featDel=propDirty.featDel||[]).push(id); propPersist_(); ftRender_(); ftOpen_();
-  if(propBackendOk) propPush_().then(()=>{}); }
+  if(propBackendOk) propPush_().then(()=>{}); else propSync_();      /* v483: a delete before this session's first sync went nowhere until the next Sync */ }
 /* ---- the symbols: the same shapes on the phone, on the printed map and in its legend ---- */
 function ftSvg_(kind, px){ const c=ftCol_(kind); let body="";
   if(kind==="building") body=`<circle cx="50" cy="50" r="30" fill="${c}"/>`;
@@ -15875,7 +15939,7 @@ function lnDelete_(id){ const l=(PROPS.lines||{})[id]; if(!l) return;
   if(!confirm("Delete this "+(lnIsArea_(l)?"area":"line")+" — "+lnKindName_(l.kind)+(l.name?" "+l.name:"")+" ("+lnMeasure_(l)+")?")) return;
   delete PROPS.lines[id]; if(propDirty.lines) delete propDirty.lines[id];
   (propDirty.lineDel=propDirty.lineDel||[]).push(id); propPersist_(); lnRender_(); lnOpen_();
-  if(propBackendOk) propPush_().then(()=>{}); }
+  if(propBackendOk) propPush_().then(()=>{}); else propSync_();      /* v483: a delete before this session's first sync went nowhere until the next Sync */ }
 /* ---- the track log → a line: smoothed, then simplified so the jitter goes and the bends stay ---- */
 function lnDP_(xy, tol){
   if(xy.length<3) return xy.slice();
@@ -16937,7 +17001,7 @@ function spMake_(){ const A=_sp.area, s=spSpacing_(), pts=_sp.grid||[];
 function spDeleteGrid_(gid, quiet){ const G=spGrids_().find(x=>x.gid===gid); if(!G) return;
   if(!quiet && !confirm(`Delete the ${G.pts.length} sample points in ${G.stand||"this compartment"}? (Plots already made at them stay.)`)) return;
   G.ids.forEach(id=>{ delete PROPS.lines[id]; if(propDirty.lines) delete propDirty.lines[id]; (propDirty.lineDel=propDirty.lineDel||[]).push(id); });
-  propPersist_(); spRender_(); if(propBackendOk) propPush_().then(()=>{}); if(!quiet){ toast("Sample points deleted"); if(_sp) spBar_(); }
+  propPersist_(); spRender_(); if(propBackendOk) propPush_().then(()=>{}); else propSync_();      /* v483: a delete before this session's first sync went nowhere until the next Sync */ if(!quiet){ toast("Sample points deleted"); if(_sp) spBar_(); }
   try{ if(!spGrids_().length) _spRmOpen=false; renderLayerVis_(); }catch(e){} }
 /* ---- on the map: like reference points (white, dark ring); the number shows when zoomed in ---- */
 var _spSigLbl="";
@@ -17106,7 +17170,7 @@ function lioBldgShown_(f){ const id=String(((f||{}).properties||{}).OGF_ID||"");
 function lioBldgs_(t){ const ok=lioCache&&propK_(lioCacheTract)===propK_(t); const d=ok&&lioCache.layers&&lioCache.layers.building; return (d&&d.fc&&d.fc.features)||null; }
 function lioBldgToggle_(t, f){ const id=String(((f||{}).properties||{}).OGF_ID||""); if(!id){ toast("That building has no provincial id — it cannot be hidden",true); return; }
   const h=lioHidden_();
-  if(h[id]){ const fid=h[id]; delete PROPS.feats[fid]; if(propDirty.feats) delete propDirty.feats[fid]; (propDirty.featDel=propDirty.featDel||[]).push(fid); propPersist_(); if(propBackendOk) propPush_().then(()=>{}); toast("Building shown again"); }
+  if(h[id]){ const fid=h[id]; delete PROPS.feats[fid]; if(propDirty.feats) delete propDirty.feats[fid]; (propDirty.featDel=propDirty.featDel||[]).push(fid); propPersist_(); if(propBackendOk) propPush_().then(()=>{}); else propSync_();      /* v483: a delete before this session's first sync went nowhere until the next Sync */ toast("Building shown again"); }
   else { const g=mmGeomParts_(f.geometry); let la=0,lo=0,n=0; g.pts.forEach(q=>{ la+=q[0]; lo+=q[1]; n++; }); g.polys.forEach(pg=>(pg[0]||[]).forEach(q=>{ la+=q[0]; lo+=q[1]; n++; }));
     if(!n) return; ftTouch_({id:ftNewId_(), tract:t, kind:"hide", lat:la/n, lon:lo/n, name:"OGF:"+id, note:"hidden: a provincial building not on the property", photos:[], sens:false}); toast("Building hidden on the map and on printed maps"); }
   try{ lioRender_(); }catch(e){} }
