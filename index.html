@@ -392,6 +392,8 @@ try{ (function(){
   .mgroup>summary::after{ content:"▸"; color:#6f9a78; transition:transform .15s; }
   .mgroup[open]>summary::after{ transform:rotate(90deg); color:#f0c860; }
   .mgroup>button{ display:block; width:100%; margin:6px; margin-bottom:0; width:calc(100% - 12px); }
+  .mgroup .ls-muted{ color:#8fae95; }
+  .mgroup>button .msub{ display:block; font-size:11px; font-weight:400; opacity:.72; margin-top:2px; line-height:1.35; }      /* v489: the detail under each menu item */
   .mgroup>button:last-child{ margin-bottom:6px; }
   /* summary */
   .summary-body{ font-size:13px; color:#dfeede; line-height:1.55; }
@@ -1159,85 +1161,78 @@ try{ (function(){
 <div class="modal" id="moreMenu" style="display:none" onclick="if(event.target===this)closeMore()">
   <div class="modal-card">
     <div class="modal-title" style="display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--card);padding:6px 0 12px;margin:0 0 8px;z-index:2">Menu <button type="button" onclick="closeMore()" style="background:#16271a;border:1px solid #33623a;border-radius:8px;color:#cdebcf;width:40px;height:40px;font-size:20px;line-height:1;cursor:pointer;flex:none" aria-label="Close">✕</button></div>
-      <details class="mgroup" open><summary>📈 View the analysis</summary>
-        <button type="button" onclick="closeMore();openSummary()">📊 Stand summary — quick totals per stand</button>
-        <button type="button" onclick="closeMore();openFullAnalysis('main')">📈 Full analysis — every summary tab</button>
-        <button type="button" onclick="closeMore();openDataTable()">▦ Plot data table — every field, every plot</button>
-        <button type="button" onclick="closeMore();openPlotFinder()">🔎 Who did what, and when — by crew &amp; date</button>
+      <div class="more-list">      <!-- v489: the wrapper that styles the menu buttons had been lost; restored -->
+      <!-- v489 menu review (Chris, 2026-11-22: "a lot there — organize / rename to be more user friendly").
+           Grouped by what the person wants to do, most-used first; each button says what it does in plain words,
+           with a grey second line for the detail. The seven export buttons became two (geodatabase; shapefile or CSV,
+           which opens a chooser). Reports sit in their own group, away from the data exports: the summaries button
+           was once pressed by people after shapefiles (v347) and must keep saying summaries · Excel or PDF · by property. -->
+      <details class="mgroup" open><summary>📊 Results</summary>
+        <button type="button" onclick="closeMore();openSummary()">📊 Stand summary<span class="msub">Quick totals for each stand</span></button>
+        <button type="button" onclick="closeMore();openFullAnalysis('main')">📈 Full analysis<span class="msub">Every summary table</span></button>
+        <button type="button" onclick="closeMore();openDataTable()">▦ Plot data<span class="msub">Every field of every plot, in a table</span></button>
+        <button type="button" onclick="closeMore();openPlotFinder()">👥 Crew progress<span class="msub">Who did which plots, and when</span></button>
+        <button type="button" onclick="closeMore();openInventoryDesc()">📖 Inventory description<span class="msub">A written page for each property</span></button>
+        <button type="button" onclick="closeMore();openNoteGen()">✎ Write compartment summaries<span class="msub">Every compartment that doesn't have one yet</span></button>
       </details>
 
-      <details class="mgroup"><summary>✍️ Written summaries</summary>
-        <button type="button" onclick="closeMore();openInventoryDesc()">📖 Inventory description — a page per tract</button>
-        <button type="button" onclick="closeMore();openNoteGen()">✎ Write compartment summaries (all missing)</button>
+      <details class="mgroup" id="mgReports"><summary>📗 Reports &amp; printed maps</summary>
+        <button type="button" onclick="closeMore();openReportModal()">📗 Email me the summaries — Excel or PDF, by property<span class="msub">Plot data and every summary table, for one property or all. Rebuilt from the Sheet first, so today's synced plots are in.</span></button>
+        <button type="button" onclick="closeMore();openCompRpt()">📄 Compartment reports (PDF)<span class="msub">One compartment, a property, or all</span></button>
+        <button type="button" onclick="closeMore();mmMenuShow_()">🖨 Printable map of a property<span class="msub">Your title, the layers you choose, plot sizes</span></button>
+        <button type="button" onclick="closeMore();exportTractMapsPdf()">🗺 Property maps (PDF)<span class="msub">One page for each property</span></button>
       </details>
 
-      <details class="mgroup"><summary>📤 Send &amp; export</summary>
-        <!-- This used to read "Email analysis report — Excel / PDF" and sat at the top of the group,
-             the only item with an envelope on it. Someone wanting their shapefiles emailed pressed it,
-             because it is the button that says "Email", and got a spreadsheet. The shapefile items
-             below do offer email, but only afterwards, in the panel that appears once the file is
-             built — which is easy to miss and impossible to guess from here. Moved down, renamed for
-             what it actually attaches, and the shapefile group now says where its email lives. -->
-        <button type="button" onclick="closeMore();exportCSV()">📋 Plots on this phone → CSV</button>
-        <button type="button" onclick="closeMore();exportShapefile()">📍 Plots on this phone → shapefile</button>
-        <button type="button" onclick="closeMore();openMap().then(()=>openMapExport())">📤 Plots or compartments + analysis → shapefile (choose)…</button>
-        <button type="button" onclick="closeMore();exportPlotsRawShp()">📋 All plot data → shapefile (every column)</button>
-        <button type="button" onclick="closeMore();exportPlotsFullSummaryShp()">📊 All plots + full summary → shapefile</button>
-        <button type="button" onclick="closeMore();exportPlotsAnalysisShp('main')">📍 Plots + short analysis → shapefile</button>
-        <button type="button" onclick="closeMore();exportCompartmentsAnalysisShp('main')">⬠ Compartments + analysis → shapefile</button>
-        <button type="button" onclick="closeMore();exportTractMapsPdf()">🗺 Tract maps → PDF (one page per tract)</button>
-        <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:6px 2px 8px">Each of the five above downloads to this device, then offers to email it to you once it has reached Drive.</div>
-        <button type="button" onclick="closeMore();mmMenuShow_()">🖨 Make a printable map of a property (your title, layers, plot sizes)…</button>
-        <!-- The wording here has now been wrong in two different directions. It began as "Email
-             analysis report — Excel / PDF (by property)" and sat at the top of the group, so people
-             after their shapefiles pressed it and got a spreadsheet (v347 moved and renamed it).
-             The rename then dropped "(by property)" — the one phrase that said you can pick a single
-             tract — and the next question was "how do I email the Excel summaries for the tract I
-             finished today?", which is exactly what this button does. Say all four things it does:
-             summaries, Excel or PDF, one tract or all, emailed. -->
-        <button type="button" onclick="closeMore();openReportModal()">📗 Email me the summaries — Excel or PDF, by tract</button>
-        <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:4px 2px 2px">Plot data plus every summary tab, for one property or all of them. Rebuilt from the Sheet first, so it includes today's plots once they have synced.</div>
-        <button type="button" onclick="closeMore();openMapFiles()">🗂 Map files on Drive — tracks, routes, areas</button>
-        <button type="button" onclick="closeMore();openCompRpt()">📄 Compartment PDF reports — one, a tract, or all</button>
+      <details class="mgroup" id="mgExport"><summary>📤 Export data</summary>
+        <button type="button" onclick="closeMore();gxOpen_()">🗂 Geodatabase for ArcGIS — with photos<span class="msub">Every layer and the plot photos, for one property or all</span></button>
+        <button type="button" onclick="closeMore();openMap().then(()=>openMapExport())">📍 Shapefile or CSV…<span class="msub">Plots or compartments, with or without the analysis — you choose</span></button>
+        <button type="button" onclick="closeMore();openMapFiles()">📁 Map files saved on Drive<span class="msub">Tracks, routes and areas</span></button>
+        <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:6px 2px 8px">Files download to this device; shapefiles then offer to email them to you once they are in Drive.</div>
       </details>
 
-      <details class="mgroup"><summary>🗂 Plots &amp; stands</summary>
-        <button type="button" onclick="closeMore();autoAssignStands()">▧ Auto-assign stand · age · tract from boundaries</button>
-        <button type="button" onclick="closeMore();openTractAssign()">🏷 Assign tract / property to plots</button>
-        <button type="button" onclick="closeMore();openDeletedPlots()">↩ Restore deleted plots</button>
-        <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:6px 2px 2px">Rebuilding the Sheet&rsquo;s summary tabs takes a few minutes and is best started from the Sheet itself.</div>
-        <button type="button" onclick="closeMore();buildAllSummary()">🗂 Rebuild the Sheet&rsquo;s summary tabs</button>
+      <details class="mgroup"><summary>🛠 Fix plot details</summary>
+        <button type="button" onclick="closeMore();autoAssignStands()">▧ Fill in stand, age &amp; property from the boundaries<span class="msub">For plots that are missing them</span></button>
+        <button type="button" onclick="closeMore();openTractAssign()">🏷 Set the property on chosen plots</button>
+        <button type="button" onclick="closeMore();openDeletedPlots()">↩ Bring back deleted plots</button>
+        <button type="button" onclick="closeMore();buildAllSummary()">🗂 Rebuild the Sheet's summary tabs<span class="msub">Takes a few minutes — best started from the Sheet itself</span></button>
       </details>
 
       <details class="mgroup" id="auditGroup"><summary>🔍 Imported plots</summary>
-        <button type="button" id="pushAuditBtn" onclick="closeMore();pushAuditToSheet()" style="display:none">📤 Push imported plots to the Sheet</button>
-        <button type="button" id="auditSumBtn" data-office="1" onclick="closeMore();buildAuditSummary()" style="display:none">📊 Build imported-set summary (separate)</button>
-        <button type="button" data-office="1" onclick="closeMore();openFullAnalysis('audit')">📈 Full analysis — imported set only</button>
+        <button type="button" id="pushAuditBtn" onclick="closeMore();pushAuditToSheet()" style="display:none">📤 Send the imported plots to the Sheet</button>
+        <button type="button" id="auditSumBtn" data-office="1" onclick="closeMore();buildAuditSummary()" style="display:none">📊 Summary of the imported plots (kept separate)</button>
+        <button type="button" data-office="1" onclick="closeMore();openFullAnalysis('audit')">📈 Full analysis — imported plots only</button>
         <button type="button" onclick="closeMore();exportPlotsAnalysisShp('audit')">📍 Imported plots + analysis → shapefile</button>
         <button type="button" onclick="closeMore();exportCompartmentsAnalysisShp('audit')">⬠ Imported compartments + analysis → shapefile</button>
-        <button type="button" id="auditLabelBtn" onclick="closeMore();openAuditLabelPicker()" style="display:none">🏷 Label imported plots by…</button>
-        <button type="button" id="clearAuditBtn" onclick="closeMore();clearAuditPlots()" style="display:none;color:#e9a89f">🗑 Clear imported plots from this device</button>
+        <button type="button" id="auditLabelBtn" onclick="closeMore();openAuditLabelPicker()" style="display:none">🏷 Label the imported plots by…</button>
+        <button type="button" id="clearAuditBtn" onclick="closeMore();clearAuditPlots()" style="display:none;color:#e9a89f">🗑 Remove the imported plots from this device</button>
       </details>
 
-      <details class="mgroup"><summary>⚙️ This device</summary>
-        <button type="button" onclick="closeMore();openCruiser()">👤 Your name &amp; email — set this first</button>
-        <button type="button" onclick="closeMore();accountPanel_()">🔐 Account — log in or sign out</button>
-        <button type="button" id="codesBtn" onclick="codesToggle_()">🔤 Show the Sheet's column codes on the form (office)</button>
-        <button type="button" id="sunBtn" onclick="sunToggle_()">☀ Sunlight mode — brighter, bigger text</button>
-        <button type="button" onclick="closeMore();appStatus_()">ℹ️ App status — build, storage, connection</button>
-        <button type="button" onclick="closeMore();storagePanel_()">🧮 Storage — what&rsquo;s using space, and free it</button>
-        <button type="button" onclick="closeMore();bigStorePanel_()">📦 The phone&rsquo;s big store — photos, layers per property, tiles</button>
-        <button type="button" onclick="closeMore();clearSyncedPanel_()">🧹 Clear synced data — plots and photos already safe</button>
-        <button type="button" onclick="closeMore();tilesPanel_()">🛰 Offline imagery — download an area, or clear it</button>
+      <details class="mgroup"><summary>👤 You &amp; your account</summary>
+        <button type="button" onclick="closeMore();openCruiser()">👤 Your name &amp; email<span class="msub">Set this first — it goes on every plot</span></button>
+        <button type="button" onclick="closeMore();accountPanel_()">🔐 Sign in or sign out</button>
         <button type="button" onclick="closeMore();reportPanel_()">✉ Report a problem to the administrator</button>
-        <button type="button" onclick="closeMore();exportBackup()">⬆ Back up all data to a file</button>
+      </details>
+
+      <details class="mgroup"><summary>⚙️ Display</summary>
+        <button type="button" id="sunBtn" onclick="sunToggle_()">☀ Sunlight mode<span class="msub">Black and white, bigger text — for bright days</span></button>
+        <button type="button" id="codesBtn" onclick="codesToggle_()">🔤 Show the Sheet's column codes on the form<span class="msub">For the office (TRACT, STANDID …)</span></button>
+      </details>
+
+      <details class="mgroup"><summary>💾 Phone storage &amp; backup</summary>
+        <button type="button" onclick="closeMore();appStatus_()">ℹ️ App status<span class="msub">Version, storage and connection</span></button>
+        <button type="button" onclick="closeMore();storagePanel_()">🧮 What's using space on this phone</button>
+        <button type="button" onclick="closeMore();clearSyncedPanel_()">🧹 Free up space<span class="msub">Clear plots and photos already safe in the Sheet</span></button>
+        <button type="button" onclick="closeMore();bigStorePanel_()">📦 Saved for each property<span class="msub">Photos, layers and imagery kept on this phone</span></button>
+        <button type="button" onclick="closeMore();tilesPanel_()">🛰 Offline imagery<span class="msub">Download an area for no-signal days, or clear it</span></button>
+        <button type="button" onclick="closeMore();exportBackup()">⬆ Back up everything to a file</button>
         <button type="button" onclick="closeMore();document.getElementById('restoreInput').click()">⬇ Restore from a backup file</button>
       </details>
 
       <details class="mgroup"><summary style="color:#e9a89f">⚠️ Start over</summary>
         <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:6px 2px">Erases every plot, photo and layer on this device. Plots already sent to the Sheet stay there. Back up first.</div>
-        <button type="button" onclick="closeMore();clearAllData()" style="color:#e9a89f">🗑 Start new project — erase all data on this device</button>
+        <button type="button" onclick="closeMore();clearAllData()" style="color:#e9a89f">🗑 Erase everything on this phone<span class="msub">Start a new project</span></button>
       </details>
+      </div>
     <div class="modal-actions"><button class="btn ghost" type="button" onclick="closeMore()">Close</button></div>
   </div>
 </div>
@@ -1446,7 +1441,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-21 · v487";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-22 · v489";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1738,7 +1733,7 @@ function capSeen_(c, full){
     _capTold=true;
     try{ showInfoSheet_("This account is at its plot limit",
       `<div style="font-size:13px;line-height:1.55;color:#e8f0e6">${esc(_capMsg)}<br><br><b>Nothing is lost:</b> your new plots are saved on this phone and will go to the Sheet as soon as there is room. Corrections to plots already in the Sheet still go through.`+
-      `<div style="color:#8fae95;font-size:12px;margin-top:10px">Tell whoever manages the Sheet. The phone tries again every ten minutes, or use Menu → Send queued plots.</div></div>`); }catch(e){}
+      `<div style="color:#8fae95;font-size:12px;margin-top:10px">Tell whoever manages the Sheet. The phone tries again every ten minutes, or tap the ● status chip at the top and choose ⬆ Send now.</div></div>`); }catch(e){}
     return;
   }
   if(!c || !c.cap) return;
@@ -3365,7 +3360,7 @@ function storageFailed_(){
          : ` This device also has no backup store, so <b>a plot is only safe once it reaches the Sheet</b>. Send them as soon as you have signal.`)+
     `</div>`+
     `<div style="font-size:12px;line-height:1.5;color:#8fae95;margin-top:10px">`+
-    `To free the main storage: <b>◫ Layers</b> &rsaquo; unload the PDF map, or Menu &rsaquo; This device &rsaquo; storage, and clear what you no longer need. `+
+    `To free the main storage: <b>◫ Layers</b> &rsaquo; unload the PDF map, or ☰ Menu &rsaquo; Phone storage &amp; backup, and clear what you no longer need. `+
     `Your plots are never cleared by that.</div>`); }catch(e){}
 }
 
@@ -4190,7 +4185,7 @@ function backupFailed_(){
     `<div style="font-size:13px;line-height:1.55;color:#e8f0e6">`+(_plotsInIdb?`This phone has more plots than its ordinary storage holds, so they are kept in its larger store — and that could not be written just now`:`Your plots are normally kept twice on this phone. The second copy could not be written just now`)+
     (both?(_plotsInIdb?`, so <b>new plots and changes are held in memory only and will be lost if the app closes</b>. Keep the app open and get to signal.`:` — and the ordinary storage is full as well, so <b>new plots are held in memory only and will be lost if the app closes</b>. Keep the app open and get to signal.`)
               :`. They are still saved in the ordinary storage, and nothing is lost — but get them into the Sheet when you next have signal.`)+
-    `</div><div style="font-size:12px;line-height:1.5;color:#8fae95;margin-top:10px">This usually means the phone is very low on space, or the browser is in private mode. Tools &rsaquo; This device &rsaquo; Clear synced data frees space safely.</div>`); }catch(e){}
+    `</div><div style="font-size:12px;line-height:1.5;color:#8fae95;margin-top:10px">This usually means the phone is very low on space, or the browser is in private mode. ☰ Menu &rsaquo; Phone storage &amp; backup &rsaquo; Free up space clears it safely.</div>`); }catch(e){}
 }
 function plotBackupSave_(arr, json){
   if(!window.indexedDB) return;
@@ -4331,7 +4326,7 @@ function handlePhoto(input){
       /* v371: a photo the phone's storage would not take is held in memory only. That used to read
          "saved on phone" all the same. */
       if(memOnly){ $("photoHint").textContent=`Photo ${num} could NOT be stored on this phone — it is held in memory until it uploads. Keep the app open.`;
-        if(HAS_IDB && !_photoStoreWarned){ _photoStoreWarned=true; toast("This phone's photo storage is full or blocked — photos are held in memory only until they upload. Free space: Tools › This device › Clear synced data.",true); } }
+        if(HAS_IDB && !_photoStoreWarned){ _photoStoreWarned=true; toast("This phone's photo storage is full or blocked — photos are held in memory only until they upload. Free space: ☰ Menu › Phone storage & backup › Free up space.",true); } }
       else $("photoHint").textContent=`Photo ${num} saved on phone — ${filename}`;
       updateArchiveBadge(); flushPhotos(); });
   }).catch(()=>{ $("photoHint").textContent=`Photo # ${num} recorded (image couldn't be processed on this device).`; });
@@ -4633,6 +4628,7 @@ function openMore(){ const mm=$("moreMenu"); mm.style.display="flex";
   /* v375: tools that only the office account can run are not shown to any other account. */
   try{ const lim=isLimited_(); mm.querySelectorAll("[data-office]").forEach(b=>{ if(lim){ if(!b._offHid){ b._offHid=true; b._offWas=b.style.display; } b.style.display="none"; } else if(b._offHid){ b._offHid=false; b.style.display=b._offWas||""; } }); }catch(e){}
   try{ const pbm=$("pushAuditBtnMore"); if(pbm) pbm.style.display=auditPlots.length?"block":"none"; }catch(e){}
+  try{ const ag=$("auditGroup"); if(ag) ag.style.display=(auditPlots&&auditPlots.length)?"":"none"; }catch(e){}      /* v489: only when there are imported plots */
   try{ const groups=mm.querySelectorAll("details.mgroup");
     groups.forEach(d=>{ d.open=false;
       if(!d._accordion){ d._accordion=true; d.addEventListener("toggle",()=>{ if(d.open) groups.forEach(o=>{ if(o!==d) o.open=false; }); }); }
@@ -4894,7 +4890,7 @@ function autoPrune_(force){
 let _csState=null;
 function clearSyncedPanel_(){
   const lbl=p=>`Stand ${esc(p.STANDID||"—")} plot ${esc(p.PLOTNUM||"—")}`;
-  const frame=body=>showInfoSheet_("Clear synced data", `<div style="font-size:13px;line-height:1.55;color:#e8f0e6">${body}</div>`);
+  const frame=body=>showInfoSheet_("Free up space", `<div style="font-size:13px;line-height:1.55;color:#e8f0e6">${body}</div>`);
   const toggle=`<label style="display:flex;gap:8px;align-items:flex-start;margin-top:14px;color:#a9c9b0;font-size:12px;line-height:1.4"><input type="checkbox" ${photoPurgeOn?"checked":""} onchange="setPhotoPurge_(this.checked)" style="margin-top:2px"> <span>Clear uploaded photos from this phone automatically once they are a day old.</span></label>`+
     `<label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;color:#a9c9b0;font-size:12px;line-height:1.4"><input type="checkbox" ${autoPruneOn?"checked":""} onchange="setAutoPrune_(this.checked)" style="margin-top:2px"> <span>After each sync, remove older plots this phone no longer needs. It always keeps plots not yet in the Sheet, plots changed here, and plots collected in the last ${KEEP_DAYS} days. Removed plots stay in the Sheet and on the map.</span></label>`;
   if(!connected || isOffline()){ frame("This needs a connection: the phone checks each plot and photo against the Sheet before clearing anything."+toggle); return; }
@@ -5118,13 +5114,13 @@ async function bigStorePanel_(){
   const active=propK_(propActiveTract_());
   const rows=Object.keys(per).sort((a,b)=>per[b].bytes-per[a].bytes).map(t=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #1d3320"><div style="flex:1;color:#eafae8;font-size:13px">${esc(propGet_(t)?propGet_(t).tract:t)}${propK_(t)===active?' <span style="color:#8fae95;font-size:11px">(shown)</span>':""}</div><div style="color:#8fae95;font-size:12px">${mb(per[t].bytes)}</div>`+
     (propK_(t)===active?`<div style="width:44px"></div>`:`<button type="button" onclick="bigStoreClear_('${esc(t)}')" style="padding:5px 9px;border-radius:7px;border:1px solid #7a3a3a;background:#2a1212;color:#e9c9c9;font:inherit;font-size:11px">Clear</button>`)+`</div>`).join("");
-  showInfoSheet_("The phone's big store",
+  showInfoSheet_("Saved for each property",
     (est&&est.quota?`<div style="font-size:20px;font-weight:700;color:#eafae8">${mb(est.usage||0)} used <span style="font-size:13px;font-weight:400;color:#8fae95">· of about ${mb(est.quota)} the browser allows</span></div><div style="height:6px;border-radius:3px;background:#1d3320;margin:8px 0 12px;overflow:hidden"><div style="height:100%;width:${Math.min(100,Math.round((est.usage||0)/est.quota*100))}%;background:#5aa860"></div></div>`:`<div style="color:#8fae95;font-size:12px;margin-bottom:10px">This browser does not say how much room it allows.</div>`)+
     `<div style="display:flex;padding:6px 0;border-bottom:1px solid #1d3320"><div style="flex:1;color:#eafae8;font-size:13px">Photos — ${ph.n}${ph.waiting?", "+ph.waiting+" waiting to upload":""}</div><div style="color:#8fae95;font-size:12px">${mb(ph.bytes)}</div></div>`+
     `<div style="display:flex;padding:6px 0;border-bottom:1px solid #1d3320"><div style="flex:1;color:#eafae8;font-size:13px">Offline photo tiles</div><div style="color:#8fae95;font-size:12px">${tiles} tiles</div></div>`+
     `<div style="display:flex;padding:6px 0;border-bottom:1px solid #1d3320"><div style="flex:1;color:#eafae8;font-size:13px">Property records (all properties)</div><div style="color:#8fae95;font-size:12px">${mb(props)}</div></div>`+
     `<div style="color:#a9c9b0;font-size:12px;margin:12px 0 4px">Provincial layers and road names saved per property — ${mb(layerBytes-props)}. Clearing one only means it is fetched again when that property is next shown.</div>`+(rows||`<div style="color:#5a7a62;font-size:12px">None saved yet.</div>`)+
-    `<div style="color:#5a7a62;font-size:11px;margin-top:10px;line-height:1.4">Photos already uploaded can be cleared under Clear synced data; tiles under Offline imagery. iPhones can drop this store after a week unused unless the app is on the Home Screen.</div>`);
+    `<div style="color:#5a7a62;font-size:11px;margin-top:10px;line-height:1.4">Photos already uploaded can be cleared under Free up space; imagery under Offline imagery. iPhones can drop this store after a week unused unless the app is on the Home Screen.</div>`);
 }
 async function bigStoreClear_(t){ let n=0; const keys=[]; await ldbEach_(k=>{ const m=k.match(/^(lio|rn):(.*)$/); if(m&&m[2]===t) keys.push(k); }); for(const k of keys){ if(await ldbDelete_(k)) n++; } toast(n?"Cleared the saved layers for "+t:"Nothing to clear"); try{ const tr=propGet_(t); if(tr){ const key=lioKey_(tr.tract); if(lioCache&&propK_(lioCacheTract)===propK_(t)) lioCache=null; } }catch(e){} bigStorePanel_(); }
 function storageClear_(k){
@@ -5220,7 +5216,7 @@ function saveCruiser(){
   cruiserEmail=em;
   const kept=whoSave_();
   renderCruiser(); closeCruiser(); try{ setLiveBtn(); }catch(e){}
-  if(!kept) toast("Saved for now, but this phone would not store it — its storage may be full (Menu → About shows storage used). A backup copy was kept.",true);
+  if(!kept) toast("Saved for now, but this phone would not store it — its storage may be full (Menu → Phone storage & backup → App status shows storage used). A backup copy was kept.",true);
   else if(cruiser) toast(`Data entry: ${cruiser}`);
 }
 /* v477 — Hs's email went missing twice (Nov 18–19) while her name stayed: a write the phone refused was
@@ -5424,14 +5420,21 @@ function openMyLabel(){
   } else openMyLabelPicker();
 }
 // Map chip → the enriched shapefile exports, right where you're looking at the plots.
-function openMapExport(){
-  const imp = auditPlots.length ? `<div style="color:#8fb89a;font-size:11px;margin:10px 2px 4px">Imported set</div>`+
-    `<button type="button" onclick="closeInfoSheet_();exportPlotsAnalysisShp('audit')" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6;font:inherit;font-size:13px">📍 Imported plots + analysis</button>`+
-    `<button type="button" onclick="closeInfoSheet_();exportCompartmentsAnalysisShp('audit')" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6;font:inherit;font-size:13px">⬠ Imported compartments + analysis</button>` : "";
-  showInfoSheet_("Export to shapefile (ArcGIS)",
-    `<div style="color:#a9c9b0;font-size:12px;margin-bottom:8px">Each feature carries its full analysis (forest type, BA, QMD, stems, age, %AGS, volume, Plonski, stocking). UTM Zone 17N. Build the summary first for current numbers.</div>`+
-    `<button type="button" onclick="closeInfoSheet_();exportPlotsAnalysisShp('main')" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">📍 Plots + analysis → shapefile</button>`+
-    `<button type="button" onclick="closeInfoSheet_();exportCompartmentsAnalysisShp('main')" style="display:block;width:100%;text-align:left;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">⬠ Compartments + analysis → shapefile</button>`+imp);
+function openMapExport(){      /* v489: the one chooser for every shapefile / CSV export (the menu had seven buttons) */
+  const B=(fn,title,sub,imp)=>`<button type="button" onclick="closeInfoSheet_();${fn}" style="display:block;width:100%;text-align:left;padding:11px 12px;margin:5px 0;border-radius:8px;border:1px solid ${imp?"#33623a":"#2f7a44"};background:${imp?"#16271a":"#123a1c"};color:#e8f0e6;font:inherit;font-size:13px"><b>${title}</b><span style="display:block;font-size:11px;opacity:.75;margin-top:2px">${sub}</span></button>`;
+  const H=t=>`<div style="color:#8fb89a;font-size:11px;margin:12px 2px 2px;text-transform:uppercase;letter-spacing:.04em">${t}</div>`;
+  showInfoSheet_("Shapefile or CSV",
+    `<div style="color:#a9c9b0;font-size:12px;margin-bottom:4px">Shapefiles are in UTM Zone 17N. For a geodatabase with the photos, use Menu → Export data → Geodatabase for ArcGIS.</div>`+
+    H("All plots, from the Sheet")+
+    B("exportPlotsRawShp()","Plots — every column","Exactly what the Sheet holds; you pick the properties")+
+    B("exportPlotsFullSummaryShp()","Plots + the full summary","Every column plus forest type, BA, QMD, stems, age, %AGS, volume, Plonski, stocking")+
+    B("exportPlotsAnalysisShp('main')","Plots + a short analysis","The main numbers for each plot")+
+    B("exportCompartmentsAnalysisShp('main')","Compartments + their analysis","One polygon per compartment with its stand numbers")+
+    H("Only the plots on this phone")+
+    B("exportShapefile()","Plots on this phone → shapefile","Including ones not yet synced")+
+    B("exportCSV()","Plots on this phone → CSV","A spreadsheet file")+
+    (auditPlots.length? H("Imported plots")+B("exportPlotsAnalysisShp('audit')","Imported plots + analysis","",1)+B("exportCompartmentsAnalysisShp('audit')","Imported compartments + analysis","",1) : "")+
+    `<div style="color:#8fae95;font-size:11px;margin-top:8px">Rebuild the Sheet's summary tabs first for current numbers. Each shapefile downloads, then offers to email it to you once it's in Drive.</div>`);
 }
 function setPlotLabel(field){ plotLabelField=field||"none"; try{ STORE&&STORE.setItem("fi_plotlabel",plotLabelField); }catch(e){}
   if(crewShown && crewData.length) renderCrewPlots(crewData, true); }   // re-label from cache, no re-fetch
@@ -5893,7 +5896,7 @@ function crBatch_(){
   document.body.appendChild(sc);
 }
 function openPlotFinder(){
-  showDataSheet_("Who did what, and when",
+  showDataSheet_("Crew progress — who did what, and when",
     `<div id="pfBody" style="font-size:13px;color:#cfe3d2">Loading plots…</div>`);
   // Always fetched fresh: crewData holds only the field set, so reusing it would hide imported plots.
   if(!connected || isOffline()){
@@ -8578,7 +8581,7 @@ function rptReady_(f){
     `<button type="button" onclick="rptSave_('${esc(f.id)}')" style="display:block;width:100%;text-align:left;padding:12px;margin:0 0 7px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">⬇ Save to this device<div style="color:#8fae95;font-size:11px;margin-top:2px">No account needed</div></button>`+
     (mail
       ? `<button type="button" onclick="rptMail_('${esc(f.id)}')" style="display:block;width:100%;text-align:left;padding:12px;margin:0 0 7px;border-radius:8px;border:1px solid #2f7a44;background:#123a1c;color:#e8f0e6;font:inherit;font-size:13px">✉️ Email it to me<div style="color:#8fae95;font-size:11px;margin-top:2px">${esc(mail)}</div></button>`
-      : `<div style="color:#e8a33a;font-size:11px;line-height:1.4;margin:0 0 7px">Set your email in Menu → This device to have reports sent to you.</div>`)+
+      : `<div style="color:#e8a33a;font-size:11px;line-height:1.4;margin:0 0 7px">Set your email in ☰ Menu → You &amp; your account to have reports sent to you.</div>`)+
     (isLimited_()?"":`<a href="${esc(f.url)}" target="_blank" rel="noopener" style="display:block;padding:11px;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#a9c9b0;text-decoration:none;text-align:center;font-size:12px">📄 Open in Drive <span style="color:#5a7a62">— needs a Google account</span></a>`));
 }
 function rptSave_(id){
@@ -14918,6 +14921,190 @@ function mmWorldFile_(view){
   const prj='PROJCS["WGS 84 / Pseudo-Mercator",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Mercator_1SP"],PARAMETER["central_meridian",0],PARAMETER["scale_factor",1],PARAMETER["false_easting",0],PARAMETER["false_northing",0],UNIT["metre",1],EXTENSION["PROJ4","+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs"],AUTHORITY["EPSG","3857"]]';
   return {jgw, prj, epsg:3857, A, E, C, F};
 }
+/* ============ v488 — Export for ArcGIS: a GeoPackage of every layer + the photos + a Pro toolbox ============
+   Chris (2026-11-22): the client wants a geodatabase, with the plot photos. The phone can't write ArcGIS's own
+   format, so it writes the open one ArcGIS Pro reads (a GeoPackage, built with sql.js), puts the photos beside it
+   with a match table per layer, and adds FRI_to_Geodatabase.pyt — in Pro, one tool makes the .gdb (projected to
+   NAD 1983 UTM) and attaches the photos to the plots and map points. One property or all; photos in the package
+   or as Drive links only (quick, for big sets on a phone). Photos come from this phone when it still has them,
+   else from the Sheet (action=photoget, Code.gs v488). */
+const GX_SQL_VER="1.13.0", GX_SQL_BASE="https://cdn.jsdelivr.net/npm/sql.js@"+GX_SQL_VER+"/dist/";
+const GX_BIG_PHOTOS=300;
+/* the ArcGIS Pro toolbox that goes in the package (FRI_to_Geodatabase.pyt) */
+const GX_PYT="# -*- coding: utf-8 -*-\n\"\"\"FRI Plot Card -> file geodatabase, with the photos as attachments.\n\nMade by the FRI Plot Card's \"Export for ArcGIS\" (Menu > Export data). Open this folder in ArcGIS Pro\n(Catalog > Add Folder Connection), expand this toolbox and double-click \"Make geodatabase (with photos)\".\nThe geodatabase is written next to the GeoPackage. Every layer is projected to NAD 1983 UTM (the zone\nthe data falls in) unless another coordinate system is chosen. Plots and map points get their photos\nas attachments, from the photos folder, matched by PHOTO_KEY.\n\"\"\"\nimport arcpy\nimport csv\nimport datetime\nimport glob\nimport os\nimport re\n\n\ndef _here():\n    try:\n        return os.path.dirname(os.path.abspath(__file__))\n    except Exception:\n        return os.getcwd()\n\n\nclass Toolbox(object):\n    def __init__(self):\n        self.label = \"FRI Plot Card\"\n        self.alias = \"friplotcard\"\n        self.tools = [MakeGeodatabase]\n\n\nclass MakeGeodatabase(object):\n    def __init__(self):\n        self.label = \"Make geodatabase (with photos)\"\n        self.description = (\"Copies every layer of the FRI Plot Card GeoPackage into a new file geodatabase, \"\n                            \"projected, and attaches the plot and map point photos.\")\n        self.canRunInBackground = False\n\n    def getParameterInfo(self):\n        here = _here()\n        found = sorted(glob.glob(os.path.join(here, \"*.gpkg\")))\n        p0 = arcpy.Parameter(displayName=\"GeoPackage from the FRI Plot Card\", name=\"gpkg\",\n                             datatype=\"DEFile\", parameterType=\"Required\", direction=\"Input\")\n        p0.filter.list = [\"gpkg\"]\n        if found:\n            p0.value = found[0]\n        p1 = arcpy.Parameter(displayName=\"Geodatabase name\", name=\"gdb_name\",\n                             datatype=\"GPString\", parameterType=\"Required\", direction=\"Input\")\n        if found:\n            p1.value = os.path.splitext(os.path.basename(found[0]))[0]\n        p2 = arcpy.Parameter(displayName=\"Coordinate system (leave empty for NAD 1983 UTM, the data's zone)\",\n                             name=\"sr\", datatype=\"GPCoordinateSystem\", parameterType=\"Optional\", direction=\"Input\")\n        p3 = arcpy.Parameter(displayName=\"Attach the photos\", name=\"photos\",\n                             datatype=\"GPBoolean\", parameterType=\"Optional\", direction=\"Input\")\n        p3.value = True\n        return [p0, p1, p2, p3]\n\n    def isLicensed(self):\n        return True\n\n    def updateParameters(self, parameters):\n        p0, p1 = parameters[0], parameters[1]\n        if p0.altered and not p0.hasBeenValidated and p0.valueAsText and not p1.altered:\n            p1.value = os.path.splitext(os.path.basename(p0.valueAsText))[0]\n        return\n\n    def updateMessages(self, parameters):\n        return\n\n    def execute(self, parameters, messages):\n        gpkg = parameters[0].valueAsText\n        folder = os.path.dirname(gpkg)\n        name = re.sub(r\"[^A-Za-z0-9_]\", \"_\", parameters[1].valueAsText or \"FRI\") or \"FRI\"\n        if name[0].isdigit():\n            name = \"FRI_\" + name\n        gdb = os.path.join(folder, name + \".gdb\")\n        if arcpy.Exists(gdb):\n            name = name + \"_\" + datetime.datetime.now().strftime(\"%Y%m%d_%H%M%S\")\n            gdb = os.path.join(folder, name + \".gdb\")\n        arcpy.AddMessage(\"Creating \" + gdb)\n        arcpy.management.CreateFileGDB(folder, name + \".gdb\")\n\n        arcpy.env.workspace = gpkg\n        fcs = arcpy.ListFeatureClasses() or []\n        if not fcs:\n            arcpy.AddError(\"The GeoPackage has no layers.\")\n            return\n        sr = parameters[2].value if len(parameters) > 2 else None\n        if not sr:\n            lons = []\n            for fc in fcs:\n                try:\n                    e = arcpy.Describe(os.path.join(gpkg, fc)).extent\n                    if e and e.XMin is not None and -180 <= e.XMin <= 180:\n                        lons.append((e.XMin + e.XMax) / 2.0)\n                except Exception:\n                    pass\n            lon = sum(lons) / len(lons) if lons else -79.5\n            zone = int((lon + 180.0) / 6.0) + 1\n            sr = arcpy.SpatialReference(26900 + zone)\n            arcpy.AddMessage(\"Coordinate system: NAD 1983 UTM zone %dN\" % zone)\n\n        done = {}\n        for fc in fcs:\n            src = os.path.join(gpkg, fc)\n            base = fc.split(\".\")[-1]\n            out_name = arcpy.ValidateTableName(base, gdb)\n            out = os.path.join(gdb, out_name)\n            try:\n                tr = \"\"\n                try:\n                    ins = arcpy.Describe(src).spatialReference\n                    tl = arcpy.ListTransformations(ins, sr) or []\n                    tr = tl[0] if tl else \"\"\n                except Exception:\n                    tr = \"\"\n                if tr:\n                    arcpy.management.Project(src, out, sr, tr)\n                else:\n                    arcpy.management.Project(src, out, sr)\n            except Exception as ex:\n                arcpy.AddWarning(\"Could not project %s (%s) - copying it as it is.\" % (base, ex))\n                arcpy.conversion.FeatureClassToFeatureClass(src, gdb, out_name)\n            done[base] = out\n            arcpy.AddMessage(\"  %s: %s features\" % (out_name, arcpy.management.GetCount(out)[0]))\n\n        want = parameters[3].value if len(parameters) > 3 else True\n        if want is None or want:\n            photos = os.path.join(folder, \"photos\")\n            for layer, csv_name in ((\"plots\", \"photos_plots.csv\"), (\"map_points\", \"photos_map_points.csv\")):\n                match = os.path.join(folder, csv_name)\n                if layer not in done or not os.path.exists(match):\n                    continue\n                with open(match, newline=\"\", encoding=\"utf-8\") as f:\n                    rows = [r for r in csv.DictReader(f) if os.path.exists(os.path.join(photos, r.get(\"PHOTO\", \"\")))]\n                if not rows:\n                    continue\n                tgt = done[layer]\n                arcpy.AddMessage(\"Attaching %d photos to %s\" % (len(rows), layer))\n                arcpy.management.EnableAttachments(tgt)\n                arcpy.management.AddAttachments(tgt, \"PHOTO_KEY\", match, \"PHOTO_KEY\", \"PHOTO\", photos)\n        arcpy.AddMessage(\"Done: \" + gdb)\n        return\n";
+let _gxSql=null, _gx=null;
+function gxSql_(){ if(_gxSql) return _gxSql;
+  _gxSql=new Promise((res,rej)=>{ const go=()=>{ try{ initSqlJs({locateFile:f=>GX_SQL_BASE+f}).then(res,rej); }catch(e){ rej(e); } };
+    if(typeof initSqlJs==="function") return go();
+    const s=document.createElement("script"); s.src=GX_SQL_BASE+"sql-wasm.js"; s.onload=go; s.onerror=()=>rej(new Error("could not load the GeoPackage writer (no connection?)")); document.head.appendChild(s); });
+  _gxSql.catch(()=>{ _gxSql=null; }); return _gxSql; }
+/* ---- GeoPackage geometry: GP header (+ envelope) then little-endian WKB, lon/lat EPSG:4326 ---- */
+function gxWkb_(g){ const parts=[]; let n=0;
+  const u8=b=>{ parts.push(["u8",b]); n+=1; }, u32=v=>{ parts.push(["u32",v]); n+=4; }, f64=v=>{ parts.push(["f64",v]); n+=8; };
+  const pt=q=>{ f64(+q[1]); f64(+q[0]); };            /* q = [lat, lon] → x = lon, y = lat */
+  const ring=r=>{ const c=r.slice(); const a=c[0], z=c[c.length-1]; if(a[0]!==z[0]||a[1]!==z[1]) c.push(a); u32(c.length); c.forEach(pt); };
+  const geom=(t,c)=>{ u8(1);
+    if(t==="POINT"){ u32(1); pt(c); }
+    else if(t==="LINESTRING"){ u32(2); u32(c.length); c.forEach(pt); }
+    else if(t==="POLYGON"){ u32(3); u32(c.length); c.forEach(ring); }
+    else if(t==="MULTIPOLYGON"){ u32(6); u32(c.length); c.forEach(p=>geom("POLYGON",p)); } };
+  geom(g.t,g.c); const out=new Uint8Array(n), dv=new DataView(out.buffer); let o=0;
+  parts.forEach(p=>{ if(p[0]==="u8"){ dv.setUint8(o,p[1]); o+=1; } else if(p[0]==="u32"){ dv.setUint32(o,p[1],true); o+=4; } else { dv.setFloat64(o,p[1],true); o+=8; } });
+  return out; }
+function gxAllPts_(g){ return g.t==="POINT"?[g.c]:g.t==="LINESTRING"?g.c:g.t==="POLYGON"?[].concat(...g.c):[].concat(...g.c.map(p=>[].concat(...p))); }
+function gxGeomBlob_(g){ if(!g) return null; const w=gxWkb_(g), point=g.t==="POINT", h=point?8:40, out=new Uint8Array(h+w.length), dv=new DataView(out.buffer);
+  out[0]=0x47; out[1]=0x50; out[2]=0; out[3]=point?1:3; dv.setInt32(4,4326,true);
+  if(!point){ const ps=gxAllPts_(g); let x0=1/0,x1=-1/0,y0=1/0,y1=-1/0; ps.forEach(q=>{ x0=Math.min(x0,+q[1]); x1=Math.max(x1,+q[1]); y0=Math.min(y0,+q[0]); y1=Math.max(y1,+q[0]); });
+    dv.setFloat64(8,x0,true); dv.setFloat64(16,x1,true); dv.setFloat64(24,y0,true); dv.setFloat64(32,y1,true); }
+  out.set(w,h); return out; }
+/* field names ArcGIS and QGIS both accept; numbers stay numbers (but "007" stays text) */
+function gxFieldNames_(cols){ const used={fid:1,geom:1,objectid:1,shape:1,shape_length:1,shape_area:1};
+  return cols.map(c=>{ let n=String(c).replace(/[^A-Za-z0-9_]/g,"_").replace(/^_+|_+$/g,"")||"F"; if(/^\d/.test(n)) n="F_"+n; n=n.slice(0,60);
+    let m=n, k=1; while(used[m.toLowerCase()]){ m=n.slice(0,56)+"_"+(k++); } used[m.toLowerCase()]=1; return m; }); }
+function gxType_(vals){ let any=false; for(const v of vals){ if(v==null||v==="") continue; any=true; const s=String(v).trim();
+    if(!/^-?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(s) || /^-?0\d/.test(s) || s.length>17) return "TEXT"; } return any?"REAL":"TEXT"; }
+/* layers: [{name, title, gtype, cols:[...], rows:[{g, v:{col:value}}]}] → Uint8Array of the .gpkg */
+function gxGpkg_(SQL, layers){ const db=new SQL.Database();
+  const WKT4326='GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]]';
+  db.run("PRAGMA application_id=1196444487; PRAGMA user_version=10300;");
+  db.run("CREATE TABLE gpkg_spatial_ref_sys (srs_name TEXT NOT NULL, srs_id INTEGER NOT NULL PRIMARY KEY, organization TEXT NOT NULL, organization_coordsys_id INTEGER NOT NULL, definition TEXT NOT NULL, description TEXT);");
+  db.run("INSERT INTO gpkg_spatial_ref_sys VALUES ('Undefined cartesian SRS',-1,'NONE',-1,'undefined','undefined cartesian coordinate reference system'),('Undefined geographic SRS',0,'NONE',0,'undefined','undefined geographic coordinate reference system'),('WGS 84 geodetic',4326,'EPSG',4326,?,'longitude/latitude coordinates in decimal degrees on the WGS 84 spheroid');",[WKT4326]);
+  db.run("CREATE TABLE gpkg_contents (table_name TEXT NOT NULL PRIMARY KEY, data_type TEXT NOT NULL, identifier TEXT UNIQUE, description TEXT DEFAULT '', last_change DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), min_x DOUBLE, min_y DOUBLE, max_x DOUBLE, max_y DOUBLE, srs_id INTEGER, CONSTRAINT fk_gc_r_srs_id FOREIGN KEY (srs_id) REFERENCES gpkg_spatial_ref_sys(srs_id));");
+  db.run("CREATE TABLE gpkg_geometry_columns (table_name TEXT NOT NULL, column_name TEXT NOT NULL, geometry_type_name TEXT NOT NULL, srs_id INTEGER NOT NULL, z TINYINT NOT NULL, m TINYINT NOT NULL, CONSTRAINT pk_geom_cols PRIMARY KEY (table_name, column_name), CONSTRAINT uk_gc_table_name UNIQUE (table_name), CONSTRAINT fk_gc_tn FOREIGN KEY (table_name) REFERENCES gpkg_contents(table_name), CONSTRAINT fk_gc_srs FOREIGN KEY (srs_id) REFERENCES gpkg_spatial_ref_sys (srs_id));");
+  layers.forEach(L=>{ if(!L.rows.length) return;
+    const names=gxFieldNames_(L.cols), types=L.cols.map(c=>gxType_(L.rows.map(r=>r.v[c])));
+    db.run(`CREATE TABLE "${L.name}" (fid INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, geom ${L.gtype}`+names.map((n,i)=>`, "${n}" ${types[i]}`).join("")+");");
+    let x0=1/0,x1=-1/0,y0=1/0,y1=-1/0;
+    L.rows.forEach(r=>{ if(r.g) gxAllPts_(r.g).forEach(q=>{ x0=Math.min(x0,+q[1]); x1=Math.max(x1,+q[1]); y0=Math.min(y0,+q[0]); y1=Math.max(y1,+q[0]); }); });
+    if(!isFinite(x0)){ x0=x1=y0=y1=null; }
+    db.run("INSERT INTO gpkg_contents (table_name,data_type,identifier,description,min_x,min_y,max_x,max_y,srs_id) VALUES (?,?,?,?,?,?,?,?,4326);",[L.name,"features",L.title||L.name,L.desc||"",x0,y0,x1,y1]);
+    db.run("INSERT INTO gpkg_geometry_columns VALUES (?,?,?,4326,0,0);",[L.name,"geom",L.gtype]);
+    const st=db.prepare(`INSERT INTO "${L.name}" (geom`+names.map(n=>`, "${n}"`).join("")+") VALUES (?"+names.map(()=>",?").join("")+");");
+    db.run("BEGIN;");
+    L.rows.forEach(r=>{ st.run([gxGeomBlob_(r.g)].concat(L.cols.map((c,i)=>{ const v=r.v[c]; if(v==null||v==="") return null; return types[i]==="REAL"?+v:String(v); }))); });
+    db.run("COMMIT;"); st.free(); });
+  const out=db.export(); db.close(); return out; }
+/* ---- what goes in ---- */
+function gxPlotsFetch_(tract){ return new Promise((res,rej)=>{ jsonp_("action=plots&c=1"+(tract?"&tract="+encodeURIComponent(tract):""), (r,why)=>{
+    if(!r||!Array.isArray(r.plots)) return rej(new Error(why==="offline"?"no connection — the plots come from the Sheet":"the Sheet did not answer ("+(why||"no reply")+")"));
+    const head=Array.isArray(r.head)?r.head:(r.plots[0]?Object.keys(r.plots[0]):[]);
+    res({head, rows:r.plots.map(p=>{ const o={}; head.forEach(h=>{ o[h]=""; }); return Object.assign(o,p); })}); }, 180000); }); }
+function gxPhotoNames_(cell){ return String(cell||"").split(/[;,]/).map(x=>x.trim()).filter(Boolean); }
+function gxScalar_(o, skip){ const v={}; Object.keys(o||{}).forEach(k=>{ if(skip&&skip.indexOf(k)>=0) return; const x=o[k]; if(x==null||typeof x==="object"||typeof x==="function") return; v[k]=typeof x==="boolean"?(x?"Y":"N"):x; }); return v; }
+function gxLayers_(plots, tracts){ const K={}; tracts.forEach(t=>{ K[propK_(t)]=t; }); const inT=t=>!!K[propK_(t)];
+  const L=[];
+  /* plots */
+  const pc=plots.head.slice(); ["PHOTO_KEY"].forEach(c=>{ if(pc.indexOf(c)<0) pc.push(c); });
+  const prow=plots.rows.map((p,i)=>{ p.PHOTO_KEY="P"+(i+1); const lat=parseFloat(p.Y), lon=parseFloat(p.X);
+    return {g:(isFinite(lat)&&isFinite(lon)&&(lat||lon))?{t:"POINT",c:[lat,lon]}:null, v:p}; });
+  L.push({name:"plots", title:"Plots", gtype:"POINT", cols:pc, rows:prow, desc:"FRI Plot Card plots — every column of the Sheet"});
+  /* compartments */
+  const cRows=[], cCols=["TRACT","COMPARTMENT","CALC_HA","SOURCE"];
+  tracts.forEach(t=>{ let cs=[]; try{ cs=propCompsGeo_(t)||[]; }catch(e){}
+    cs.forEach(c=>{ const polys=(c.polygons||[]).filter(p=>p&&p[0]&&p[0].length>=3); if(!polys.length) return;
+      const v={TRACT:t, COMPARTMENT:c.name, CALC_HA:c.calcHa!=null?c.calcHa:(function(){ try{ return +geoPolysHa_(polys).toFixed(4); }catch(e){ return ""; } })(), SOURCE:c.src==="made"?"shared compartments":(c.file||"file")};
+      try{ const cf=cfGet_(t,c.name); if(cf&&cf.fields) Object.keys(cf.fields).forEach(k=>{ const kk=String(k).toUpperCase(); if(v[kk]!==undefined) return; v[kk]=cf.fields[k]; if(cCols.indexOf(kk)<0) cCols.push(kk); }); }catch(e){}
+      cRows.push({g:{t:"MULTIPOLYGON",c:polys}, v}); }); });
+  L.push({name:"compartments", title:"Compartments", gtype:"MULTIPOLYGON", cols:cCols, rows:cRows});
+  /* property outlines */
+  const oRows=[], oCols=["TRACT"];
+  tracts.forEach(t=>{ const p=propGet_(t)||{}; const rings=(Array.isArray(p.boundary)?p.boundary:[]).filter(r=>r&&r.length>=3); if(!rings.length) return;
+    const v=Object.assign({TRACT:t}, gxScalar_(p,["tract","bndAuto","at","by","updated","_v"])); delete v.tract;
+    Object.keys(v).forEach(k=>{ if(oCols.indexOf(k)<0) oCols.push(k); });
+    oRows.push({g:{t:"MULTIPOLYGON",c:rings.map(r=>[r])}, v}); });
+  L.push({name:"property_outline", title:"Property outline", gtype:"MULTIPOLYGON", cols:oCols, rows:oRows});
+  /* map points */
+  const fRows=[];
+  (typeof ftAll_==="function"?ftAll_():[]).filter(f=>inT(f.tract)).forEach((f,i)=>{ f.__key="M"+(i+1);
+    fRows.push({g:{t:"POINT",c:[+f.lat,+f.lon]}, v:{TRACT:f.tract, KIND:ftKindName_(f.kind), NAME:f.name||"", NOTE:f.note||"", SENSITIVE:f.sens?"Y":"N", PHOTOS:(f.photos||[]).join("; "), PHOTO_KEY:f.__key, ID:f.id}}); });
+  L.push({name:"map_points", title:"Map points", gtype:"POINT", cols:["TRACT","KIND","NAME","NOTE","SENSITIVE","PHOTOS","PHOTO_KEY","ID"], rows:fRows});
+  /* map lines and areas */
+  const lRows=[], aRows=[];
+  (typeof lnAll_==="function"?lnAll_():[]).filter(l=>inT(l.tract)&&Array.isArray(l.pts)).forEach(l=>{ const area=lnIsArea_(l);
+    if(area){ if(l.pts.length<3) return; let ha=""; try{ ha=+geoPolysHa_([[l.pts]]).toFixed(4); }catch(e){}
+      aRows.push({g:{t:"POLYGON",c:[l.pts]}, v:{TRACT:l.tract, KIND:lnKindName_(l.kind), NAME:l.name||"", NOTE:l.note||"", AREA_HA:ha, ID:l.id}}); }
+    else { if(l.pts.length<2) return; let m=""; try{ m=Math.round(lnLenM_(l.pts)); }catch(e){}
+      lRows.push({g:{t:"LINESTRING",c:l.pts}, v:{TRACT:l.tract, KIND:lnKindName_(l.kind), NAME:l.name||"", NOTE:l.note||"", LENGTH_M:m, ID:l.id}}); } });
+  L.push({name:"map_lines", title:"Map lines", gtype:"LINESTRING", cols:["TRACT","KIND","NAME","NOTE","LENGTH_M","ID"], rows:lRows});
+  L.push({name:"map_areas", title:"Map areas", gtype:"POLYGON", cols:["TRACT","KIND","NAME","NOTE","AREA_HA","ID"], rows:aRows});
+  /* map notes (the text, at the note; an arrow at its head) */
+  const nRows=[];
+  (typeof mnAll_==="function"?mnAll_():[]).filter(n=>inT(n.tract)&&Array.isArray(n.pts)&&n.pts.length).forEach(n=>{ const q=n.pts[n.pts.length-1];
+    nRows.push({g:{t:"POINT",c:[+q[0],+q[1]]}, v:{TRACT:n.tract, KIND:n.kind||"note", TEXT:n.text||"", MAPS:n.maps||"both"}}); });
+  L.push({name:"map_notes", title:"Map notes", gtype:"POINT", cols:["TRACT","KIND","TEXT","MAPS"], rows:nRows});
+  return L; }
+/* ---- photos ---- */
+function gxPhotoGet_(id){ return new Promise(res=>{ jsonp_("action=photoget&id="+encodeURIComponent(id), r=>res(r&&r.ok&&r.data?r:null), 90000); }); }
+function gxB64_(s){ const b=atob(s), u=new Uint8Array(b.length); for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return u; }
+function gxSafeName_(n){ return String(n||"photo.jpg").replace(/[^A-Za-z0-9_.\-]/g,"-").slice(0,120); }
+/* want: [{name, key, layer}] → {files:[{name,data}], match:{plots:[[key,file]], map_points:[...]}, missing:[names]} */
+async function gxPhotos_(want, onStep){ const files=[], match={plots:[],map_points:[]}, missing=[], seen={};
+  let idx={}; try{ _photoIdx=null; _photoIdxTried=false; idx=(await photoIndex_())||{}; }catch(e){}
+  const ids=Object.assign({}, PROPS.fphotos||{}, idx);
+  let i=0, done=0;
+  const one=async w=>{ const fn=gxSafeName_(w.name);
+    if(seen[fn]===undefined){ seen[fn]=null;
+      let data=null; try{ const rec=await ftPhotoRec_(w.name); if(rec&&rec.data){ const m=String(rec.data).match(/^data:[^;]+;base64,(.*)$/); if(m) data=gxB64_(m[1]); } }catch(e){}
+      if(!data&&ids[w.name]){ const r=await gxPhotoGet_(ids[w.name]); if(r) data=gxB64_(r.data); }
+      if(data){ files.push({name:"photos/"+fn, data}); seen[fn]=fn; } else { missing.push(w.name); } }
+    if(seen[fn]) match[w.layer].push([w.key, fn]);
+    done++; if(onStep) onStep(done, want.length); };
+  const lane=async()=>{ while(i<want.length){ if(_gx&&_gx.stop) return; const w=want[i++]; await one(w); } };
+  await Promise.all([lane(),lane(),lane()]);
+  return {files, match, missing}; }
+/* ---- the sheet ---- */
+function gxOpen_(){ const ts=propTracts_(), cur=(typeof propActiveTract_==="function"&&propActiveTract_())||_ppTract||"";
+  const opt=t=>`<option value="${esc(t)}"${propK_(t)===propK_(cur)?" selected":""}>${esc(t)}</option>`;
+  showInfoSheet_("🗂 Export for ArcGIS (geodatabase)",
+    `<div style="font-size:13px;line-height:1.45;margin-bottom:10px">One package: a <b>GeoPackage</b> with every layer (plots with all their columns, compartments, property outline, map points, lines, areas and notes), the <b>photos</b>, and an <b>ArcGIS Pro tool</b> that turns it into a file geodatabase with the photos attached. QGIS opens the GeoPackage as it is.</div>`+
+    `<label style="display:block;font-size:12px;color:#8fae95;margin-bottom:4px">Property</label><select id="gxTract" style="width:100%;padding:8px;border-radius:8px;margin-bottom:12px">${ts.map(opt).join("")}<option value="*"${cur?"":" selected"}>Every property</option></select>`+
+    `<div style="font-size:12px;color:#8fae95;margin-bottom:4px">Photos</div>`+
+    `<label style="display:block;margin:4px 0"><input type="radio" name="gxPh" value="in" checked> In the package — attached in the geodatabase <span style="color:#8fae95;font-size:12px">(one property: a minute or two on Wi-Fi; a whole season: use a laptop)</span></label>`+
+    `<label style="display:block;margin:4px 0 12px"><input type="radio" name="gxPh" value="link"> As Drive links only — quick, opens for people who can see "FRI Photos"</label>`+
+    `<div id="gxProg" style="font-size:13px;min-height:1.4em;margin-bottom:8px"></div>`+
+    `<button type="button" id="gxGo" class="btn" style="width:100%" onclick="gxRun_()">Build the package</button>`); }
+function gxSay_(s){ const e=$("gxProg"); if(e) e.innerHTML=s; }
+async function gxRun_(opts){ if(_gx&&_gx.busy) return;
+  opts=opts||{}; const tv=opts.tract!==undefined?opts.tract:(($("gxTract")||{}).value||"*"), withPh=opts.photos!==undefined?!!opts.photos:!!(document.querySelector('input[name="gxPh"]:checked')||{value:"in"}).value.match(/^in$/);
+  _gx={busy:true, stop:false}; const btn=$("gxGo"); if(btn) btn.disabled=true;
+  try{
+    gxSay_("Loading the GeoPackage writer…"); const SQL=await gxSql_();
+    gxSay_("Reading the plots from the Sheet…"); const plots=await gxPlotsFetch_(tv==="*"?"":tv);
+    let tracts=tv==="*"?propTracts_():[tv];
+    if(tv==="*"){ const s={}; tracts.forEach(t=>{ s[propK_(t)]=t; }); plots.rows.forEach(p=>{ const t=String(p.TRACT||"").trim(); if(t&&!s[propK_(t)]) s[propK_(t)]=t; }); tracts=Object.values(s); }
+    const layers=gxLayers_(plots, tracts);
+    const want=[]; if(withPh){ layers[0].rows.forEach(r=>gxPhotoNames_(r.v.PHOTOS).forEach(n=>want.push({name:n, key:r.v.PHOTO_KEY, layer:"plots"})));
+      layers.find(l=>l.name==="map_points").rows.forEach(r=>gxPhotoNames_(r.v.PHOTOS).forEach(n=>want.push({name:n, key:r.v.PHOTO_KEY, layer:"map_points"}))); }
+    if(want.length>GX_BIG_PHOTOS && !opts.yes && !confirm(want.length+" photos — roughly "+Math.round(want.length*0.25)+"–"+Math.round(want.length*0.6)+" MB to download and pack.\n\nOn a phone this is slow and can run out of memory; a laptop on Wi-Fi is better. Go ahead?")){ gxSay_("Stopped — choose one property, or Drive links only."); return null; }
+    /* Drive links for every photo, whichever way */
+    let idx={}; try{ _photoIdx=null; _photoIdxTried=false; idx=(await photoIndex_())||{}; }catch(e){}
+    const ids=Object.assign({}, PROPS.fphotos||{}, idx), link=n=>ids[n]?"https://drive.google.com/file/d/"+ids[n]+"/view":"";
+    layers.forEach(L=>{ if(L.name!=="plots"&&L.name!=="map_points") return; if(L.cols.indexOf("PHOTO_URLS")<0) L.cols.push("PHOTO_URLS");
+      L.rows.forEach(r=>{ r.v.PHOTO_URLS=gxPhotoNames_(r.v.PHOTOS).map(link).filter(Boolean).join(" ; "); }); });
+    let ph={files:[], match:{plots:[],map_points:[]}, missing:[]};
+    if(want.length){ gxSay_("Photos 0 of "+want.length+"…"); ph=await gxPhotos_(want,(d,n)=>gxSay_("Photos "+d+" of "+n+"…")); }
+    if(_gx.stop){ gxSay_("Stopped."); return null; }
+    gxSay_("Writing the GeoPackage…"); const gpkg=gxGpkg_(SQL, layers);
+    const day=new Date().toISOString().slice(0,10), base=(tv==="*"?"All_properties":String(tv).replace(/[^A-Za-z0-9]+/g,"_").replace(/^_|_$/g,""))+"_"+day.replace(/-/g,"");
+    const enc=new TextEncoder(), csv=rows=>enc.encode("PHOTO_KEY,PHOTO\r\n"+rows.map(r=>r[0]+","+r[1]).join("\r\n")+(rows.length?"\r\n":""));
+    const counts=layers.filter(l=>l.rows.length).map(l=>"  "+l.name+": "+l.rows.length).join("\n");
+    const readme="FRI Plot Card — export for ArcGIS — "+(tv==="*"?"every property":tv)+" — "+day+"\n\n"+
+      base+".gpkg  — every layer, in WGS 84 (EPSG:4326):\n"+counts+"\n"+
+      (withPh?"photos/  — "+ph.files.length+" photos; photos_plots.csv and photos_map_points.csv say which belongs to which (PHOTO_KEY)\n":"Photos: as Drive links only (PHOTO_URLS on plots and map points).\n")+
+      "FRI_to_Geodatabase.pyt — the ArcGIS Pro tool\n\n"+
+      "TO MAKE THE GEODATABASE (ArcGIS Pro):\n 1. Unzip this folder.\n 2. Catalog pane > Folders > Add Folder Connection > choose the unzipped folder.\n 3. Expand FRI_to_Geodatabase.pyt and double-click \"Make geodatabase (with photos)\". Run.\n"+
+      " 4. "+base+".gdb appears in the same folder: every layer in NAD 1983 UTM (the data's zone, or the system you choose), "+(withPh?"with the photos attached to the plots and map points (open a plot's pop-up).":"with PHOTO_URLS linking each plot's photos.")+"\n\n"+
+      "QGIS: drag "+base+".gpkg into the map.\n"+(ph.missing.length?"\nNot found (no copy on the phone or in Drive): "+ph.missing.length+" photo(s):\n"+ph.missing.slice(0,200).map(n=>"  "+n).join("\n")+"\n":"");
+    const files=[{name:base+".gpkg", data:gpkg}, {name:"FRI_to_Geodatabase.pyt", data:enc.encode(GX_PYT)}, {name:"README.txt", data:enc.encode(readme)}];
+    if(withPh){ files.push({name:"photos_plots.csv", data:csv(ph.match.plots)}, {name:"photos_map_points.csv", data:csv(ph.match.map_points)}); ph.files.forEach(f=>files.push(f)); }
+    gxSay_("Zipping…"); const zip=zipStore_(files), name=base+"_ArcGIS.zip", blob=new Blob([zip],{type:"application/zip"});
+    const summary=layers[0].rows.length+" plots"+(withPh?", "+ph.files.length+" photos":"")+(ph.missing.length?" ("+ph.missing.length+" not found — listed in README)":"")+" · "+(zip.length/1048576).toFixed(1)+" MB";
+    gxSay_("✓ "+esc(name)+" — "+summary); window.__gxLast={name, zip, files:files.map(f=>({name:f.name, size:f.data.length})), gpkg, missing:ph.missing, match:ph.match};
+    if(!opts.noSave){ try{ if(typeof File!=="undefined" && navigator.canShare){ const f=new File([blob],name,{type:"application/zip"}); if(navigator.canShare({files:[f]})){ await navigator.share({files:[f],title:name}).catch(()=>{}); return window.__gxLast; } } }catch(e){}
+      const url=URL.createObjectURL(blob), a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),120000); }
+    return window.__gxLast;
+  }catch(e){ gxSay_("✗ "+esc(String(e&&e.message||e))); toast("Export stopped: "+String(e&&e.message||e),true); return null; }
+  finally{ if(_gx) _gx.busy=false; const b=$("gxGo"); if(b) b.disabled=false; } }
 function mmGisZip_(){ const m=_mmLast; if(!m||!m.view){ toast("Make the map first",true); return; }
   const wf=mmWorldFile_(m.view), enc=new TextEncoder();
   const readme="FRI Plot Card — "+m.base+"\n\n"+m.base+".jpg is the map page at "+MM_DPI+" dpi; "+m.base+".jgw is its world file and "+m.base+".prj its projection (EPSG:"+wf.epsg+(wf.epsg===3857?", WGS 84 / Pseudo-Mercator":", NAD83 / UTM zone "+(wf.epsg-26900)+"N — GPS positions are WGS 84, within a metre of NAD83 (CSRS) here")+").\n"+
