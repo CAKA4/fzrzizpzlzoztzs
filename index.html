@@ -1441,7 +1441,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-22 · v489";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-23 · v490";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -12058,6 +12058,41 @@ function fpSetAll_(v){ if(!_fp) return; _fp.E.forEach(e=>{ e.sel=v; fpStyle_(e);
 function fpInView_(){ if(!_fp) return; const bb=fmap.getBounds(); let n=0;
   _fp.E.forEach(e=>{ const c=L.latLngBounds([[e.bb[0],e.bb[1]],[e.bb[2],e.bb[3]]]); if(bb.intersects(c) && !e.sel && !e.have){ e.sel=true; fpStyle_(e); n++; } });
   fpBar_(); toast(n?"Added "+n+" in view":"Nothing new in view"+(_fp.E.some(e=>e.have)?" (ones the Sheet already has are left for you to tap)":"")); }
+/* ============ v490 — chosen polygons far from the rest ============
+   Chris (2026-11-23): picking one property's compartments from a client file of many properties brought in 13, three
+   of them 8 km and 57 km away; the outline was made round all of them and the property's label sat between, 20 km off.
+   When the picked features go into a property (Stand boundaries, or to the property's map points/lines), ones more than
+   FP_FAR_M from the main group are named before anything is brought in: leave them out, keep them, or show them. */
+const FP_FAR_M=1000;
+function fpBox_(e){ let a=90,b=-90,c=180,d=-180; const P=e.parts||fpGeomParts_(e.f&&e.f.geometry);
+  const add=q=>{ a=Math.min(a,+q[0]); b=Math.max(b,+q[0]); c=Math.min(c,+q[1]); d=Math.max(d,+q[1]); };
+  (P.pts||[]).forEach(add); (P.lines||[]).forEach(l=>l.forEach(add)); (P.polys||[]).forEach(pg=>(pg[0]||[]).forEach(add));
+  return a<=b?[a,b,c,d]:null; }
+function fpBoxGapM_(p,q){ const lat=((p[0]+p[1]+q[0]+q[1])/4)*Math.PI/180;
+  const dy=Math.max(0,q[0]-p[1],p[0]-q[1])*110540, dx=Math.max(0,q[2]-p[3],p[2]-q[3])*111320*Math.cos(lat); return Math.hypot(dx,dy); }
+/* the chosen entries outside the biggest group (groups: boxes within FP_FAR_M of each other) → [{e, km}] */
+function fpFar_(sel){ const S=sel.map(e=>({e, b:fpBox_(e)})).filter(x=>x.b); if(S.length<2) return [];
+  const par=S.map((_,i)=>i), root=i=>{ while(par[i]!==i) i=par[i]=par[par[i]]; return i; };
+  for(let i=0;i<S.length;i++) for(let j=i+1;j<S.length;j++) if(root(i)!==root(j) && fpBoxGapM_(S[i].b,S[j].b)<=FP_FAR_M) par[root(i)]=root(j);
+  const G={}; S.forEach((x,i)=>{ (G[root(i)]=G[root(i)]||[]).push(x); });
+  const groups=Object.values(G); if(groups.length<2) return [];
+  const area=g=>g.reduce((s,x)=>s+(x.b[1]-x.b[0])*(x.b[3]-x.b[2]),0);
+  groups.sort((a,b)=>b.length-a.length||area(b)-area(a)); const main=groups[0];
+  const mb=main.reduce((m,x)=>[Math.min(m[0],x.b[0]),Math.max(m[1],x.b[1]),Math.min(m[2],x.b[2]),Math.max(m[3],x.b[3])],[90,-90,180,-180]);
+  return [].concat(...groups.slice(1)).map(x=>({e:x.e, km:fpBoxGapM_(x.b,mb)/1000})); }
+function fpFarNeeded_(){ if(!_fp||_fp.farOk) return false; const k=_fp.opts&&_fp.opts.kind;
+  if(k==="bound"||k==="copy") return true; return !!(_fp.dest && Object.values(_fp.dest).some(v=>v&&v!=="ref")); }
+function fpFarBar_(){ const bar=$("fpBar")||_fpBarEl; if(!bar||!_fp||!_fp.far) return;
+  const far=_fp.far, n=_fp.E.filter(e=>e.sel).length, kms=[...new Set(far.map(x=>x.km<10?x.km.toFixed(1):String(Math.round(x.km))))].sort((a,b)=>a-b);
+  const B=(fn,label,cls)=>`<button type="button" class="btn ${cls||"ghost"}" style="flex:1;min-width:0;padding:8px 4px;font-size:13px" onclick="${fn}">${label}</button>`;
+  bar.innerHTML=`<div style="margin-bottom:6px;line-height:1.4">⚠ <b>${far.length} of the ${n}</b> you chose ${far.length===1?"is":"are"} far from the rest — ${kms.length===1?"about "+kms[0]+" km":"about "+kms.slice(0,-1).join(", ")+" and "+kms[kms.length-1]+" km"} away.<div style="color:#bfe3c4;margin-top:3px">One property's compartments sit together; ${far.length===1?"this one is":"these are"} probably another property's. They would stretch its outline and move its label.</div></div>`+
+    `<div style="display:flex;gap:6px;margin-bottom:6px">`+B("fpFarShow_()","◎ Show "+(far.length===1?"it":"them"))+B("fpFarBack_()","‹ Back to choosing")+`</div>`+
+    `<div style="display:flex;gap:6px">`+B("fpFarKeep_()","Keep all "+n)+B("fpFarDrop_()","✓ Leave "+(far.length===1?"it":"them")+" out · bring in "+(n-far.length),"submit")+`</div>`; }
+function fpFarShow_(){ if(!_fp||!_fp.far) return; let a=90,b=-90,c=180,d=-180; _fp.far.forEach(x=>{ const q=fpBox_(x.e); if(!q) return; a=Math.min(a,q[0]); b=Math.max(b,q[1]); c=Math.min(c,q[2]); d=Math.max(d,q[3]); });
+  try{ fmap.fitBounds([[a,c],[b,d]],{padding:[40,40],maxZoom:16,animate:false}); }catch(e){} }
+function fpFarBack_(){ if(!_fp) return; _fp.far=null; fpBar_(); }
+function fpFarKeep_(){ if(!_fp) return; _fp.far=null; _fp.farOk=true; fpDone_(); }
+function fpFarDrop_(){ if(!_fp||!_fp.far) return; _fp.far.forEach(x=>{ x.e.sel=false; try{ fpStyle_(x.e); }catch(e){} }); _fp.far=null; _fp.farOk=true; fpDone_(); }
 function fpBar_(){ if(!_fp){ fpBarRemove_(); return; }
   let bar=$("fpBar")||_fpBarEl; if(!bar){ bar=document.createElement("div"); bar.id="fpBar"; document.body.appendChild(bar); } _fpBarEl=bar; document.body.classList.add("bar-open");      /* the bar has the bottom of the screen */
   bar.style.cssText="position:fixed;left:8px;right:8px;bottom:10px;z-index:5450;background:rgba(16,36,15,.96);border:1px solid #ff9800;border-radius:12px;padding:8px;color:#eafae8;font:13px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.5)";
@@ -12069,6 +12104,7 @@ function fpBarRemove_(){ const b=$("fpBar")||_fpBarEl; _fpBarEl=null; try{ if(b&
 function featPickEnd_(quiet){ if(!_fp){ fpBarRemove_(); return; } const r=_fp.res; try{ fmap.removeLayer(_fp.lyr); }catch(e){} _fp=null; fpBarRemove_(); try{ closeDataSheet_(); }catch(e){}
   if(!quiet){ toast("Nothing brought in"); } if(r) r(null); }
 function fpDone_(){ if(!_fp) return; const chosen=_fp.E.filter(e=>e.sel).map(e=>e.f); if(!chosen.length){ toast("Choose at least one",true); return; }
+  if(fpFarNeeded_()){ const far=fpFar_(_fp.E.filter(e=>e.sel)); if(far.length){ _fp.far=far; fpFarBar_(); return; } }      /* v490: far from the rest — ask first */
   if(_fp.dest){ const miss=fpDestMissing_(chosen); if(miss){ toast("Choose what the "+miss+" become ("+miss[0].toUpperCase()+miss.slice(1)+" →)",true); return; } chosen.dest=Object.assign({},_fp.dest); }      /* v487 */
   const r=_fp.res; _fp.res=null; featPickEnd_(true); r(chosen); }
 /* the list: search by any name or value, take or leave what is shown */
@@ -17178,10 +17214,27 @@ function cfFromLoaded_(){ if(!(boundFiles||[]).length){ toast("Load the compartm
   if(saved && !Array.isArray(cfPopup)) setTimeout(cfChooseOpen_, 600); }
 function cfChooseOpen_(){ const keys=cfKeys_(), on=cfShown_();
   if(!keys.length){ toast("No layer fields saved yet — load the compartment file, or Layers → Property → Save the loaded file's fields",true); return; }
-  const n={}; Object.values(PROPS.cfields||{}).forEach(m=>Object.values(m).forEach(c=>Object.keys((c&&c.fields)||{}).forEach(k=>{ n[k]=(n[k]||0)+1; })));
-  showDataSheet_("Fields shown in the compartment popup", `<div style="font-size:12px;color:#a9c9b0;margin-bottom:8px">From the compartment layer, kept on the Sheet (Compartment Fields tab). Tick the ones to show when you tap a compartment.</div>`+
-    `<div id="cfChooseList" style="max-height:52vh;overflow-y:auto">`+keys.map(k=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:14px;color:#e8f0e6"><input type="checkbox" value="${esc(k)}" ${on.includes(k)?"checked":""} onchange="cfToggle_(this.value,this.checked)" style="width:18px;height:18px"> ${esc(k)} <small style="color:#8fae95">(${n[k]})</small></label>`).join("")+`</div>`+
+  /* v490: 106 fields from every property's files, in the order they arrived, put two odd files' fields first (Chris,
+     2026-11-23: "the list is much different than before"). Now: the property shown first, its most-used fields first;
+     every other field below, folded, most-used first with the properties it comes from; a search box; ticked ones always shown. */
+  const t=(typeof propActiveTract_==="function"&&propActiveTract_())||_ppTract||"", tk=t?propK_(t):"";
+  const n={}, own={}, from={};
+  Object.keys(PROPS.cfields||{}).forEach(pk=>Object.values(PROPS.cfields[pk]||{}).forEach(c=>Object.keys((c&&c.fields)||{}).forEach(k=>{ n[k]=(n[k]||0)+1; if(pk===tk) own[k]=(own[k]||0)+1; (from[k]=from[k]||{})[pk]=1; })));
+  const pname=pk=>{ const pr=(PROPS.props||{})[pk]; if(pr&&pr.tract) return pr.tract; const t2=(typeof propTracts_==="function"?propTracts_():[]).find(x=>propK_(x)===pk); return t2||pk; };
+  const byUse=(m)=>(a,b)=>(m[b]||0)-(m[a]||0) || keys.indexOf(a)-keys.indexOf(b);
+  const mine=keys.filter(k=>own[k]).sort(byUse(own)), rest=keys.filter(k=>!own[k]).sort(byUse(n));
+  const row=(k,cnt,note)=>`<label class="cfRow" data-k="${esc(k.toLowerCase())}" style="display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:14px;color:#e8f0e6"><input type="checkbox" value="${esc(k)}" ${on.includes(k)?"checked":""} onchange="cfToggle_(this.value,this.checked)"> <span>${esc(k)}</span> <span style="color:#8fae95;font-size:12px">(${cnt})${note?" · "+esc(note):""}</span></label>`;
+  const who=k=>{ const ps=Object.keys(from[k]||{}); return ps.length<=2?ps.map(pname).join(", "):ps.length+" properties"; };
+  const restOn=rest.filter(k=>on.includes(k)).length;
+  showDataSheet_("Fields shown in the compartment popup", `<div style="font-size:12px;color:#a9c9b0;margin-bottom:8px">From the compartment layers, kept on the Sheet (Compartment Fields tab). Tick the ones to show when you tap a compartment. The number is how many compartments have the field.</div>`+
+    `<input type="search" placeholder="Search fields" oninput="cfFilter_(this.value)" style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;border:1px solid #33623a;background:#10240f;color:#eafae8;font:14px system-ui;margin-bottom:6px">`+
+    `<div id="cfChooseList" style="max-height:52vh;overflow-y:auto">`+
+    (mine.length?`<div style="color:#8fb89a;font-size:11px;margin:6px 2px 2px;text-transform:uppercase;letter-spacing:.04em">${esc(t)}</div>`+mine.map(k=>row(k,own[k])).join(""):(t?`<div style="color:#8fae95;font-size:12px;margin:6px 2px">${esc(t)} has no saved layer fields.</div>`:""))+
+    (rest.length?`<details id="cfRest" ${(!mine.length||restOn)?"open":""} style="margin-top:8px"><summary style="cursor:pointer;color:#8fb89a;font-size:12px;padding:4px 2px">${mine.length?"Fields from other properties":"Every field"} (${rest.length})${restOn?" · "+restOn+" ticked":""}</summary>`+rest.map(k=>row(k,n[k],(n[k]<=5||!mine.length)&&(from[k]&&Object.keys(from[k]).length<=2)?who(k):"")).join("")+`</details>`:"")+
+    `</div>`+
     `<button type="button" class="btn submit" style="width:100%;margin-top:10px" onclick="closeDataSheet_()">Done</button>`); }
+function cfFilter_(q){ q=String(q||"").trim().toLowerCase(); document.querySelectorAll("#cfChooseList .cfRow").forEach(r=>{ r.style.display=!q||r.getAttribute("data-k").indexOf(q)>=0?"flex":"none"; });
+  const d=$("cfRest"); if(d&&q) d.open=true; }
 function cfToggle_(k,on){ let l=cfShown_().slice(); if(on){ if(!l.includes(k)) l.push(k); } else l=l.filter(x=>x!==k);
   const order=cfKeys_(); cfPopup=l.sort((a,b)=>order.indexOf(a)-order.indexOf(b)); try{ STORE&&STORE.setItem("fi_cfpopup",JSON.stringify(cfPopup)); }catch(e){} }
 function csFeature_(pc){ const rec=propComp_(pc.tract,pc.name)||{}, same=csOf_(pc.tract).filter(c=>propK_(c.name)===propK_(pc.name)), ha=same.length>1?same.reduce((t,c)=>t+cgPieceHa_(c.rings),0):cgPieceHa_(pc.rings);
