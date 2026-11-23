@@ -1441,7 +1441,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-23 · v491";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-23 · v492";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -13333,13 +13333,19 @@ function propUseDrawn_(i){ if(i==="") return; const pg=(polys||[])[+i]; if(!pg||
 function propDelete_(tract){ const t=String(tract||_ppTract||propActiveTract_()||"").trim(); if(!t) return; const k=propK_(t);
   const n={comps:Object.keys((PROPS.comps||{})[k]||{}).length, shapes:csOf_(t).length, feats:Object.values(PROPS.feats||{}).filter(f=>f&&propK_(f.tract)===k).length, lines:Object.values(PROPS.lines||{}).filter(f=>f&&propK_(f.tract)===k).length, notes:Object.values(PROPS.notes||{}).filter(f=>f&&propK_(f.tract)===k).length, acts:Object.values(PROPS.acts||{}).filter(f=>f&&propK_(f.tract)===k).length};
   const plots=(saved||[]).filter(p=>propK_(p.TRACT)===k).length;
-  if(!confirm("Delete the property "+t+"?\n\nGone from this phone and the Sheet: its record and outline, "+n.comps+" compartment record"+(n.comps===1?"":"s")+", "+n.shapes+" piece"+(n.shapes===1?"":"s")+", "+n.feats+" point"+(n.feats===1?"":"s")+", "+n.lines+" line"+(n.lines===1?"":"s")+", "+n.notes+" note"+(n.notes===1?"":"s")+", "+n.acts+" planned activit"+(n.acts===1?"y":"ies")+".\n"+(plots?plots+" plot"+(plots===1?"":"s")+" keep the tract name and stay.":"No plots are affected.")+"\n\nThis cannot be undone.")) return;
+  /* v492: its polygons in boundary files loaded on this phone — left there, they rebuilt the property's compartments and
+     outline and sent them to the Sheet again (Chris, 2026-11-23: deleted, "after a while it reappears") */
+  const fileN=(boundFiles||[]).reduce((s,bf)=>s+(bf.features||[]).filter(f=>propK_(featTract_(f))===k).length,0);
+  if(!confirm("Delete the property "+t+"?\n\nGone from this phone and the Sheet: its record and outline, "+n.comps+" compartment record"+(n.comps===1?"":"s")+", "+n.shapes+" piece"+(n.shapes===1?"":"s")+", "+n.feats+" point"+(n.feats===1?"":"s")+", "+n.lines+" line"+(n.lines===1?"":"s")+", "+n.notes+" note"+(n.notes===1?"":"s")+", "+n.acts+" planned activit"+(n.acts===1?"y":"ies")+(fileN?", and its "+fileN+" polygon"+(fileN===1?"":"s")+" in compartment files loaded on this phone":"")+", and anything else the Sheet holds for it.\n"+(plots?plots+" plot"+(plots===1?"":"s")+" keep the tract name and stay.":"No plots are affected.")+"\n\nThis cannot be undone.")) return;
   if(!confirm("Really delete "+t+"? Tap OK to go ahead.")) return;
   const dropIds=(map,delList)=>{ Object.keys(map||{}).forEach(id=>{ const f=map[id]; if(f&&propK_(f.tract)===k){ delete map[id]; if(delList&&delList.indexOf(id)<0) delList.push(id); } }); };
   propDirty.shapeDel=propDirty.shapeDel||[]; propDirty.featDel=propDirty.featDel||[]; propDirty.lineDel=propDirty.lineDel||[]; propDirty.noteDel=propDirty.noteDel||[]; propDirty.actDel=propDirty.actDel||[];
   dropIds(PROPS.shapes,propDirty.shapeDel); dropIds(PROPS.feats,propDirty.featDel); dropIds(PROPS.lines,propDirty.lineDel); dropIds(PROPS.notes,propDirty.noteDel); dropIds(PROPS.acts,propDirty.actDel);
   [propDirty.shapes,propDirty.feats,propDirty.lines,propDirty.notes,propDirty.acts].forEach(d=>{ if(d) Object.keys(d).forEach(id=>{ if(!(PROPS.shapes||{})[id]&&!(PROPS.feats||{})[id]&&!(PROPS.lines||{})[id]&&!(PROPS.notes||{})[id]&&!(PROPS.acts||{})[id]) delete d[id]; }); });
   delete PROPS.props[k]; delete PROPS.comps[k]; delete propDirty.props[k]; delete propDirty.comps[k]; delete (PROPS.lio||{})[k];
+  try{ delete (PROPS.cfields||{})[k]; delete (propDirty.cfields||{})[k]; }catch(e){}
+  if(fileN){ try{ boundFiles=(boundFiles||[]).map(bf=>Object.assign(bf,{features:(bf.features||[]).filter(f=>propK_(featTract_(f))!==k)})).filter(bf=>bf.features.length);
+      rebuildBound(); cacheBoundaries(); renderBoundaries(); renderLayerList(); updateLayerStatus(); }catch(e){} }      /* v492 */
   (propDirty.propDel=propDirty.propDel||[]).push(t);
   try{ if(!plots) tracts=(tracts||[]).filter(x=>propK_(x)!==k); }catch(e){}
   try{ ldbDelete_(lioKey_(t)); }catch(e){}
