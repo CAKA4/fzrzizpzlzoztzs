@@ -1441,7 +1441,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-23 · v490";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-23 · v491";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -7896,7 +7896,10 @@ function loadBoundaries(file){
     /* v482: choose which compartments to bring in first */
     if(fc.features.length>1 && !add._picked){ featPick_(fc.features.map(f=>({f, have:fpHaveComp_(f)})), {name:file.name||"the file", kind:"bound"}).then(ch=>{
         if(!ch||!ch.length) return; add._picked=true; add({type:"FeatureCollection", features:ch}); }); return; }
+    /* v491: which file field names the compartments, and which go to the Sheet under which Sheet field */
+    if(fc.features.length>1 && !add._matched){ cfMatchAsk_(fc.features, file.name).then(m=>{ if(!m){ toast("Not loaded",true); return; } add._matched=m; add({type:"FeatureCollection", features:fc.features}); }); return; }
     const bf={id:genId(), name:file.name||"shapefile", features:fc.features};
+    if(add._matched && !add._matched.off){ cfmApplyName_(fc.features, add._matched); bf.cfMap=add._matched.map; }
     /* v421: a file with no tract field is asked which property it is for (it was going to the property shown — Chris,
        2026-10-14); one polygon is that property's outline, more are its compartments */
     const tagged=fc.features.some(f=>tractField&&String((f.properties||{})[tractField]==null?"":(f.properties||{})[tractField]).trim());
@@ -17180,22 +17183,101 @@ function cfSet_(t,n,fields,source){ const k=propK_(t), nk=propK_(n); if(!k||!nk)
   if(!fields||!Object.keys(fields).length){ if(!had) return false; delete m[nk]; if(!Object.keys(m).length) delete PROPS.cfields[k]; }
   else { if(had&&JSON.stringify(had.fields)===JSON.stringify(fields)) return false; m[nk]={tract:t, name:n, fields, source:source||(had&&had.source)||""}; }
   propDirty.cfields=propDirty.cfields||{}; (propDirty.cfields[k]||(propDirty.cfields[k]={}))[nk]={t:Date.now(), name:n, tract:t}; return true; }
+/* ============ v491 — match a compartment file's fields to the Sheet's ============
+   Chris (2026-11-23): "I don't want to add any new fields to the sheet, but there may be field names that contain
+   attributes in the imported polygon layer that I want transferred to the sheet such as compartment name. The
+   compartment name field in the imported layer may be different than the one in the sheet … so match may be necessary."
+   After the polygons are picked, a sheet pairs each of the Sheet's compartment fields (the usual set, CF_STD_) with a field
+   of the file — pre-filled by name, by the usual abbreviations, and remembered for that file layout — and asks which file
+   field names the compartments (or numbers them 1, 2, 3 … when the file has no usable names). Only the matched fields go
+   to the Sheet, under the Sheet's names; the rest of the file stays on this phone. Chris's own layout is matched silently. */
+const CF_STD_=["HA","FORETYPE","CERTCATE","AVERDBH","AGE","AGECLASS","HT","OVERDENS","OVERSTEM","AGSPCNT","BASAAREA","BASATOTA","STOCKING","BASAPLI","BAPOLES","BASMALL","BAMEDIUM","BALARGE","BAXLARGE","VTOTPETHA","VTOTPET","VHAPLONKHA","VPLONTOT","DENSAPLI","DENPOLES","DENSMALL","DENMEDIU","DENLARGE","DENXLARG","TOTSAPLI","TOTPOLES","TOTSMALL","TOTMEDIU","TOTLARGE","TOTXLARG","DENSADVA","TOTADV","DENSEARL","TOTEARL","DENSSHRU","SNAGDBH","DENSSNAG","CAVDBH","DENSCAV","CWDDBH","DENSCWD","PCTHERB","PCTMOSS","PCTGRASS","CANOPYCL","NUMPLOTS","SPECCOMP","SAPLCOMP","COMPADVA","COMPEARL","COMPSHRU","GRNDSPEC","INVASPEC","HARVEST","RENEWAL","TENDING","HISTORY","COMMENT","SAROSPP","INVEDATE","PLANTSTAGE","LEGATYPE","RPD","STICNEST"];
+const CF_LABEL_={HA:"Area (ha)",FORETYPE:"Forest type",CERTCATE:"Certification category",AVERDBH:"Average / QMD DBH (cm)",AGE:"Age",AGECLASS:"Age class",HT:"Height (m)",OVERDENS:"Overstorey density (stems/ha)",OVERSTEM:"Overstorey stems",AGSPCNT:"% AGS",BASAAREA:"Basal area (m²/ha)",BASATOTA:"Basal area total (m²)",STOCKING:"Stocking",CANOPYCL:"Canopy closure",NUMPLOTS:"Number of plots",SPECCOMP:"Species composition",SAPLCOMP:"Sapling composition",COMPADVA:"Advance regeneration composition",COMPEARL:"Early regeneration composition",COMPSHRU:"Shrub composition",GRNDSPEC:"Ground species",INVASPEC:"Invasive species",HARVEST:"Harvest",RENEWAL:"Renewal",TENDING:"Tending",HISTORY:"History",COMMENT:"Comment",SAROSPP:"Species at risk",INVEDATE:"Inventory date",PLANTSTAGE:"Plantation stage",LEGATYPE:"Legacy type",VTOTPETHA:"Volume (m³/ha)",VTOTPET:"Volume total (m³)",VHAPLONKHA:"Plonski volume (m³/ha)",VPLONTOT:"Plonski volume total (m³)"};
+const CF_TOP_=["HA","AGE","FORETYPE","SPECCOMP","HT","STOCKING","CANOPYCL","AVERDBH","BASAAREA","OVERDENS","AGSPCNT","CERTCATE"];
+/* other names files use for the Sheet's fields (upper case; the first that is in the file wins) */
+const CF_SYN_={HA:["HECTARES","HECTARE","AREA_HA","HA_","CALC_HA","GIS_HA"],AGE:["AVGOFAGE","STANDAGE","STAND_AGE","AGE_"],HT:["AVGOFHEIGH","HEIGHT","AVGHT","HT_"],
+  SPECCOMP:["SPCOMP","SP_COMP","SPECIES","SPECIESCOM","SPEC_COMP","SPCOMPOS"],FORETYPE:["FORESTTYPE","FOREST_TYP","FTYPE","FORTYPE","WG","WORKGROUP"],STOCKING:["STKG","STOCK"],
+  CANOPYCL:["AVGOFCANOP","CANOPY","CANOPYCLOS","CC"],AVERDBH:["QUADMEANDB","QMD","AVGDBH","AVG_DBH"],BASAAREA:["SUMOFBA","BA_HA","BAHA"],OVERDENS:["SUMOFDENSI","DENSITY","STEMSHA"],
+  AGSPCNT:["ZAGS","PCTAGS","PCT_AGS","AGS"],CERTCATE:["CERTCAT","CERT_CAT"],INVEDATE:["INVDATE","INV_DATE"],COMMENT:["COMMENTS","NOTES","NOTE"]};
+const CF_NAME_RX_=/^(comp(artment|artmen|artme|t)?(_?(no|num|name|id))?|cmpt|cmp|stand(_?(no|num|name|id))?(_\d+)?|stand_no_1|polyname|unit|sfu|label|name)$/i;
+let _cfm=null;
+function cfmSig_(keys){ return keys.map(k=>String(k).toUpperCase()).sort().join("|").slice(0,900); }
+function cfmStore_(){ try{ return JSON.parse(STORE.getItem("fi_cfmatch")||"{}")||{}; }catch(e){ return {}; } }
+function cfmVals_(feats,k){ return feats.map(f=>{ const v=(f.properties||{})[k]; return v==null?"":String(v).trim(); }); }
+function cfmBlank_(vals){ return vals.every(v=>v===""||/^0+(\.0+)?$/.test(v)); }
+function cfmDistinct_(vals){ const s={}; vals.forEach(v=>{ if(v!==""&&!/^0+(\.0+)?$/.test(v)) s[v]=1; }); return Object.keys(s).length; }
+/* the fields of the file worth offering: not the shape bookkeeping, not the property field */
+function cfmFileKeys_(feats){ const seen={}, out=[]; feats.slice(0,400).forEach(f=>Object.keys(f.properties||{}).forEach(k=>{ if(seen[k]) return; seen[k]=1; if(CF_SKIP_.test(k)||k===tractField) return; out.push(k); })); return out; }
+/* a first guess for each Sheet field: the same name, a known other name, or a cut-short DBF name; never an empty column */
+function cfmGuess_(keys, feats){ const U={}; keys.forEach(k=>{ U[String(k).toUpperCase()]=k; }); const used={}, map={};
+  const ok=k=>k&&!used[k]&&!cfmBlank_(cfmVals_(feats,k));
+  CF_STD_.forEach(t=>{ let k=U[t]; if(!ok(k)) k=(CF_SYN_[t]||[]).map(s=>U[s]).find(ok);
+    if(!ok(k)) k=keys.find(x=>{ const X=String(x).toUpperCase(); return X.length>=5 && (t.indexOf(X)===0||X.indexOf(t)===0) && ok(x); });
+    if(ok(k)){ map[t]=k; used[k]=1; } }); return map; }
+/* the field that names the compartments: the usual names first, the one with most different values; "#" = number them */
+function cfmNameGuess_(keys, feats){ const n=feats.length;
+  const score=k=>{ const vals=cfmVals_(feats,k), d=cfmDistinct_(vals); return d; };
+  const named=keys.filter(k=>CF_NAME_RX_.test(k)).map(k=>({k, d:score(k)})).filter(x=>x.d>0).sort((a,b)=>b.d-a.d);
+  if(standField && keys.indexOf(standField)>=0 && score(standField)>=Math.max(1,Math.ceil(n*0.6))) return standField;
+  if(named.length && named[0].d>=Math.max(1,Math.ceil(n*0.6))) return named[0].k;
+  return n===1&&named.length?named[0].k:"#"; }
+/* Chris's own layout: nearly every field is one of the Sheet's — matched by name, no question */
+function cfmIsStandard_(keys){ const rest=keys.filter(k=>k!==standField&&!CF_NAME_RX_.test(k)); if(!rest.length) return true;      /* nothing but names: nothing to match */
+  const hit=rest.filter(k=>CF_STD_.indexOf(String(k).toUpperCase())>=0).length; return hit>=Math.max(3,Math.ceil(rest.length*0.8)); }
+function cfmSample_(feats,k){ const s=[]; cfmVals_(feats,k).forEach(v=>{ if(v!==""&&s.indexOf(v)<0&&s.length<3) s.push(v.length>18?v.slice(0,17)+"…":v); }); return s.length?s.join(", "):"empty"; }
+/* → Promise {name:"<file field>"|"#", map:{SHEETFIELD:"file field"}} or null (Cancel) */
+function cfMatchAsk_(feats, fileName){ return new Promise(res=>{
+  if(_cfm){ const old=_cfm; _cfm=null; try{ old.res(null); }catch(e){} }      /* one left open by another sheet */
+  const keys=cfmFileKeys_(feats), sig=cfmSig_(keys), mem=cfmStore_()[sig];
+  if(globalThis.__FP_OFF||globalThis.__CFM_OFF) return res({off:true});
+  if(!mem && cfmIsStandard_(keys) && cfmNameGuess_(keys,feats)!=="#"){ const map={}; keys.forEach(k=>{ const U=String(k).toUpperCase(); if(CF_STD_.indexOf(U)>=0&&!map[U]) map[U]=k; }); return res({name:cfmNameGuess_(keys,feats), map, auto:true}); }
+  const map=Object.assign({}, mem?mem.map:cfmGuess_(keys,feats));      /* remembered as it was left, else guessed */ Object.keys(map).forEach(t=>{ if(keys.indexOf(map[t])<0) delete map[t]; });
+  let name=mem&&(mem.name==="#"||keys.indexOf(mem.name)>=0)?mem.name:cfmNameGuess_(keys,feats);
+  _cfm={feats, keys, sig, map, name, res, file:fileName||"the file"}; cfmShow_(); }); }
+function cfmOpt_(k,sel){ return `<option value="${esc(k)}"${sel?" selected":""}>${esc(k)} — ${esc(cfmSample_(_cfm.feats,k))}</option>`; }
+function cfmNameWarn_(){ if(!_cfm||_cfm.name==="#") return ""; const vals=cfmVals_(_cfm.feats,_cfm.name), d=cfmDistinct_(vals), n=_cfm.feats.length;
+  return d<n?`<div style="color:#f0c860;font-size:12px;margin-top:4px">⚠ ${d===0?"Every polygon is blank or 0 in "+esc(_cfm.name):"Only "+d+" different name"+(d===1?"":"s")+" for "+n+" polygons"} — choose another field, or number them.</div>`:""; }
+function cfmShow_(){ if(!_cfm) return; const C=_cfm, sel=t=>`<select data-t="${t}" onchange="cfmSet_('${t}',this.value)" style="flex:1;min-width:0;max-width:62%;padding:6px;border-radius:7px;border:1px solid #33623a;background:#10240f;color:#eafae8;font:13px system-ui"><option value="">— none —</option>${C.keys.map(k=>cfmOpt_(k,C.map[t]===k)).join("")}</select>`;
+  const row=t=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #1f3a24"><div style="flex:1;min-width:0;font-size:13px"><b>${t}</b>${CF_LABEL_[t]?`<div style="color:#8fae95;font-size:11px">${esc(CF_LABEL_[t])}</div>`:""}</div>${sel(t)}</div>`;
+  const more=CF_STD_.filter(t=>CF_TOP_.indexOf(t)<0), moreSet=more.filter(t=>C.map[t]).length, n=Object.keys(C.map).length;
+  showDataSheet_("Match the fields — "+C.file,
+    `<div style="font-size:12.5px;color:#a9c9b0;line-height:1.45;margin-bottom:10px">Pair the file's fields with the Sheet's. <b>Only the matched fields go to the Sheet</b>, under the Sheet's names; the file's other fields stay on this phone. Remembered for files laid out like this one.</div>`+
+    `<div style="background:#12251a;border:1px solid #2f7a44;border-radius:9px;padding:8px 10px;margin-bottom:10px"><div style="font-size:13px;font-weight:700;margin-bottom:4px">Compartment name</div>`+
+      `<select id="cfmName" onchange="cfmSetName_(this.value)" style="width:100%;padding:7px;border-radius:7px;border:1px solid #33623a;background:#10240f;color:#eafae8;font:13px system-ui"><option value="#"${C.name==="#"?" selected":""}>— number them 1, 2, 3 … —</option>${C.keys.map(k=>cfmOpt_(k,C.name===k)).join("")}</select><div id="cfmNameWarn">${cfmNameWarn_()}</div></div>`+
+    `<div style="font-size:13px;font-weight:700;margin:4px 0">Sheet field ← file field <span style="font-weight:400;color:#8fae95">(${n} matched)</span></div>`+
+    CF_TOP_.map(row).join("")+
+    `<details ${moreSet?"open":""} style="margin-top:8px"><summary style="cursor:pointer;color:#8fb89a;font-size:12px;padding:4px 0">More Sheet fields (${more.length})${moreSet?" · "+moreSet+" matched":""}</summary>${more.map(row).join("")}</details>`+
+    `<div style="display:flex;gap:8px;margin-top:12px"><button type="button" class="btn ghost" style="flex:1" onclick="cfmEnd_(false)">Cancel</button><button type="button" class="btn submit" style="flex:2" onclick="cfmEnd_(true)">✓ Bring in with ${n} field${n===1?"":"s"}</button></div>`);
+  try{ const hb=$("dataSheet").querySelector("button"); if(hb){ hb.textContent="Cancel"; hb.className="btn ghost"; hb.onclick=()=>cfmEnd_(false); } }catch(e){} }      /* the header's Done would have left the load waiting */
+function cfmSet_(t,k){ if(!_cfm) return; if(k){ Object.keys(_cfm.map).forEach(x=>{ if(_cfm.map[x]===k&&x!==t) delete _cfm.map[x]; }); _cfm.map[t]=k; } else delete _cfm.map[t]; cfmShow_(); }
+function cfmSetName_(k){ if(!_cfm) return; _cfm.name=k||"#"; const w=$("cfmNameWarn"); if(w) w.innerHTML=cfmNameWarn_(); }
+function cfmEnd_(ok){ const C=_cfm; _cfm=null; try{ const hb=$("dataSheet").querySelector("button"); if(hb){ hb.textContent="Done"; hb.className="btn submit"; hb.onclick=()=>closeDataSheet_(); } }catch(e){} try{ closeDataSheet_(); }catch(e){} if(!C) return;
+  if(!ok){ C.res(null); return; }
+  try{ const m=cfmStore_(); m[C.sig]={name:C.name, map:C.map, at:Date.now()}; const ks=Object.keys(m); if(ks.length>40) ks.sort((a,b)=>(m[a].at||0)-(m[b].at||0)).slice(0,ks.length-40).forEach(k=>delete m[k]); STORE.setItem("fi_cfmatch",JSON.stringify(m)); }catch(e){}
+  C.res({name:C.name, map:Object.assign({},C.map)}); }
+/* write the chosen names into the polygons (under the stand field this phone uses) */
+function cfmApplyName_(feats, m){ if(!m) return; const key=standField||"STAND"; if(!standField) standField=key;
+  feats.forEach((f,i)=>{ f.properties=f.properties||{}; const v=m.name==="#"?String(i+1):String((f.properties[m.name]==null?"":f.properties[m.name])).trim(); f.properties[key]=v||String(i+1); }); }
+/* which file a feature came from, for the matched fields */
+const CF_FMAP_=new WeakMap();
+function cfmIndex_(){ (boundFiles||[]).forEach(bf=>{ if(bf&&bf.cfMap) (bf.features||[]).forEach(f=>{ try{ CF_FMAP_.set(f,bf.cfMap); }catch(e){} }); }); }
 /* every field name any compartment has, in the order first met */
 function cfKeys_(){ const seen={}, out=[]; Object.values(PROPS.cfields||{}).forEach(m=>Object.values(m).forEach(c=>Object.keys((c&&c.fields)||{}).forEach(k=>{ if(!seen[k]){ seen[k]=1; out.push(k); } }))); return out; }
 /* the fields the popup shows: chosen here; before any choice, the ones picked for the loaded file's popup (the old way) */
 function cfShown_(){ if(Array.isArray(cfPopup)) return cfPopup; const keys=cfKeys_(); return (popupFields||[]).filter(k=>keys.includes(k)); }
 function cfFmt_(v){ const t=String(v).trim(); return /^-?\d+\.\d{3,}$/.test(t)?String(+(+t).toFixed(2)):t; }
 /* one compartment's values from a file feature: everything but the name, property and shape-bookkeeping fields */
-function cfFieldsOf_(f){ const p=(f&&f.properties)||{}, out={}; let n=0;
+function cfFieldsOf_(f, map){ const p=(f&&f.properties)||{}, out={}; let n=0;
+  map=map||CF_FMAP_.get(f); if(map){ Object.keys(map).forEach(t=>{ const v=p[map[t]]; if(v==null||typeof v==="object") return; const x=String(v).replace(/[\u0000-\u001f]/g," ").trim().slice(0,300); if(x!=="") out[t]=x; }); return out; }      /* v491: only the matched fields, under the Sheet's names */
   Object.keys(p).forEach(k=>{ if(n>=CF_MAX_||k===standField||k===tractField||CF_SKIP_.test(k)) return; const v=p[k];
     if(v==null||typeof v==="object") return; const t=String(v).replace(/[\u0000-\u001f]/g," ").trim().slice(0,300); if(t==="") return;
     out[String(k).slice(0,60)]=t; n++; }); return out; }
 /* a file's features → the fields of the compartments the Sheet has. Returns {tract: {saved, same, names:[…]}} */
-function cfFromFile_(bf, opt){ opt=opt||{}; const res={}; if(!bf||!standField) return res;
+function cfFromFile_(bf, opt){ opt=opt||{}; const res={}; if(!bf||!standField) return res; try{ cfmIndex_(); }catch(e){}
   const by={};      // tract key → name key → merged fields (a compartment in several parts: the first value of each field)
   (bf.features||[]).forEach(f=>{ const t=featTract_(f)||opt.tract||""; const nm=String(((f.properties||{})[standField])==null?"":(f.properties||{})[standField]).trim(); if(!t||!nm) return;
     const k=propK_(t), m=by[k]||(by[k]={tract:t, names:{}}), nk=propK_(nm), cur=m.names[nk]||(m.names[nk]={name:nm, fields:{}});
-    const fl=cfFieldsOf_(f); Object.keys(fl).forEach(x=>{ if(cur.fields[x]===undefined) cur.fields[x]=fl[x]; }); });
+    const fl=cfFieldsOf_(f, bf.cfMap); Object.keys(fl).forEach(x=>{ if(cur.fields[x]===undefined) cur.fields[x]=fl[x]; }); });
   Object.keys(by).forEach(k=>{ const m=by[k], t=m.tract; let tName=t; try{ const pr=(PROPS.props||{})[k]; if(pr&&pr.tract) tName=pr.tract; }catch(e){}
     const have={}; try{ csOf_(t).forEach(c=>{ have[propK_(c.name)]=c.name; }); }catch(e){} Object.values((PROPS.comps||{})[k]||{}).forEach(c=>{ if(c&&c.name&&!have[propK_(c.name)]) have[propK_(c.name)]=c.name; });
     const r=res[tName]={saved:0, same:0, notOnSheet:0, names:[]};
