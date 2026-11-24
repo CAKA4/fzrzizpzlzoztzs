@@ -1192,6 +1192,11 @@ try{ (function(){
         <div class="ls-muted" style="font-size:11px;line-height:1.4;padding:6px 2px 8px">Files download to this device; shapefiles then offer to email them to you once they are in Drive.</div>
       </details>
 
+      <!-- v498: nursery valuation plots — kept apart from the forest plots (own records, own Sheet tabs) -->
+      <details class="mgroup" id="mgNursery"><summary>🌱 Nursery plots</summary>
+        <button type="button" onclick="closeMore();nurOpen_()">🌱 Nursery valuation plots<span class="msub">Trees by species, size and grade in fixed-radius plots; per-ha figures by compartment</span></button>
+      </details>
+
       <details class="mgroup"><summary>🛠 Fix plot details</summary>
         <button type="button" onclick="closeMore();autoAssignStands()">▧ Fill in stand, age &amp; property from the boundaries<span class="msub">For plots that are missing them</span></button>
         <button type="button" onclick="closeMore();openTractAssign()">🏷 Set the property on chosen plots</button>
@@ -1443,7 +1448,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-24 · v497";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-24 · v499";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -8124,6 +8129,7 @@ function applyLayerVis_(){
 function toggleLayerVis(k){ layerVis[k]=!(layerVis[k]!==false); try{ STORE&&STORE.setItem("fi_layervis",JSON.stringify(layerVis)); }catch(e){}
   if(k==="track"){ trackShown=layerVis.track; setTrackBtn(); }
   if(k==="sample"){ try{ spRender_(); }catch(e){} }
+  if(k==="nursery"){ try{ nurRender_(); }catch(e){} }      /* v498 */
   if(k==="sheet"){ crewShown=layerVis.sheet!==false; setCrewBtn();
     const row=$("plotLabelRow"); if(row) row.style.display = crewShown ? "block" : "none"; }
   applyLayerVis_(); renderLayerVis_(); updateLayerStatus(); }
@@ -8150,6 +8156,7 @@ function zoomToLayer(k){
   else if(k==="bound"){ if(typeof BOUND!=="undefined"&&BOUND&&BOUND.features) collectCoords_(BOUND.features,b); }
   else if(k==="ref") (refLabels||[]).forEach(r=>{ if(isFinite(r.lat)&&isFinite(r.lng)) b.push([r.lat,r.lng]); });
   else if(k==="sample"){ try{ spGrids_().forEach(G=>G.pts.forEach(p=>b.push([p[0],p[1]]))); }catch(e){} }
+  else if(k==="nursery"){ try{ b=nurBounds_(); }catch(e){} }      /* v498 */
   else if(k==="track") b=(trackLog||[]).slice();
   else if(k==="pdf"&&pdfBounds){ try{ fmap.fitBounds(pdfBounds,{padding:[30,30]}); closeLayersMenu(); return; }catch(e){} }
   if(!b.length){ toast("Nothing to zoom to in that layer",true); return; }
@@ -8176,6 +8183,7 @@ function renderLayerVis_(){
              ["bound","▧ Stand boundaries", bndN, true],
              ["ref","📍 Reference layers", refN, true],
              ["sample","⊞ Sample points", spN, true],
+             ["nursery","🌱 Nursery plots", (typeof nurCount_==="function"?nurCount_():0), false],      /* v498 */
              ["track","〰 Track log", trkN, false],
              ["pdf","🗺 PDF map", hasPdf?1:0, false]]
     .filter(r=>r[0]==="mine"||r[0]==="track"||r[2]>0);
@@ -10908,6 +10916,7 @@ const HELP_ROWS=[
   ["lines","⤳","Lines","Trails, private roads, skid trails and streams — and ponds, wetlands and other areas — for the MFTIP maps: made from the track log you recorded, traced over it, or tapped along the map. Each line has a name, a kind with its own line style, and a note. Shared through the Sheet."],
   ["points","📍","Points","Buildings, gates, species at risk, stick nests, dens and other features for the MFTIP maps: pick the kind, then tap the map (or use your position). Each point can carry a name, a note and photos; a sensitive point is left off a printed map unless asked for. Shared through the Sheet."],
   ["sample","⊞","Sample","A grid of sample points in a compartment: tap the compartment (or draw an area), choose points per ha, a spacing or a % of the area, and how far to keep from the edge. The points are made from a random start and numbered in walking order. Every crew phone gets them; tap one → Place plot here. Export as a shapefile, GPX or CSV; switch them on or off, or remove them, in ◫ Layers."],
+  ["nursery","🌱","Nursery plots (☰ Menu)","Valuation plots of nursery stock, kept apart from the forest plots. Set the plot radius, client and valuation date for the property; make a grid with ⊞ Sample, then tap a point → 🌱 Nursery plot here (or ＋ New plot off the grid). For each tree: species code (it stays from tree to tree), caliper or height, grade and health, defects. The summary gives live trees/ha by compartment with SE, CV, ±% at 95 % and the plots needed for ±15 %, then species × size class × grade per ha and stems from the compartment's area. Each plot goes to the Sheet's Nursery Plots and Nursery Trees tabs and is read back before it shows ✓; the 📗 workbook is made on the phone."],
   ["measure","📐","Measure","Tap two or more points for a distance; close the shape for an area. Nothing is saved."],
   ["field","🥾","Field","Opens a row of tools for the walk: Track, Route, Count and Select. It says REC while the track is recording."],
   ["track","⏺","Track","Records where you walk, as a line. Tap again to stop. Export it from ◫ Layers → Files."],
@@ -17573,7 +17582,7 @@ function spRender_(){ if(!fmap||!window.L) return;
   const pick=!!((typeof _sp!=="undefined"&&_sp)||(typeof _cnt!=="undefined"&&_cnt));
   spGrids_().forEach(G=>G.pts.forEach(p=>{ if(!vb.contains([p[0],p[1]])) return;
     L.circleMarker([p[0],p[1]],{radius:4,color:"#1c2b1e",weight:1.5,fillColor:"#ffffff",fillOpacity:.9,interactive:!pick}).addTo(spLayer)
-      .bindPopup(`<div style="font-family:monospace;font-size:11px;color:#16271a"><b>Sample point ${p[2]}</b>${G.stand?" — "+esc(G.stand):""}<br>${G.spacing?G.spacing.toFixed(1)+" m grid · ":""}${p[0].toFixed(5)}, ${p[1].toFixed(5)}<br><a href="javascript:void(0)" onclick="placeFromRef(${p[0]},${p[1]},'${p[2]}')">Place plot here ›</a></div>`);
+      .bindPopup(`<div style="font-family:monospace;font-size:11px;color:#16271a"><b>Sample point ${p[2]}</b>${G.stand?" — "+esc(G.stand):""}<br>${G.spacing?G.spacing.toFixed(1)+" m grid · ":""}${p[0].toFixed(5)}, ${p[1].toFixed(5)}<br><a href="javascript:void(0)" onclick="placeFromRef(${p[0]},${p[1]},'${p[2]}')">Place plot here ›</a><br><a href="javascript:void(0)" onclick="nurFromPoint_(${p[0]},${p[1]},'${p[2]}','${esc(String(G.gid||""))}')">🌱 Nursery plot here ›</a></div>`);
     if(lbl && z>=17 && nLbl++<400) L.marker([p[0],p[1]],{interactive:false,keyboard:false,icon:L.divIcon({className:"",iconSize:[40,14],iconAnchor:[-5,7],html:`<div style="font:700 11px system-ui;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000">${p[2]}</div>`})}).addTo(spLayer); })); }
 /* ---- export: shapefile (UTM 17N), GPX (waypoints named by number), CSV ---- */
 function spExport_(gid, fmt){ const G=spGrids_().find(x=>x.gid===gid); if(!G) return; const base=("FRIsample_"+(G.tract||"")+"_"+(G.stand||"")).replace(/[^A-Za-z0-9_-]+/g,"_");
@@ -18141,6 +18150,440 @@ function mvMake_(i){
 }
 try{ whoRestore_(); }catch(e){}      /* v477 */
 window.__friBooted=1;      /* v448: the whole app script ran — the start-up guard stands down */
+/* ===================== v498 — 🌱 Nursery valuation plots =====================
+   Chris, 2026-11-24 (nursery-plots-brief.md): in-ground valuation of nursery stock inside the Plot Card, with the map's
+   layers and the ⊞ Sample points grid to lay the plots out. Kept apart from the forest inventory on purpose:
+   · its own records — never FRIPLOTS, never `saved`/fi_plots, never computeStand, the summaries or the exports;
+   · on the phone in IndexedDB "fi_nursery" (a write is read back before it counts as kept);
+   · in the Sheet in its own tabs (Nursery Plots, Nursery Trees, and the generated Nursery Summary / Nursery Classes),
+     every row carrying ACCOUNT like the other per-account tabs;
+   · sent with nurserysave, then READ BACK with nurseryget and compared tree by tree (id, species, caliper, height,
+     grade, health) — only a match marks a plot "in the Sheet". A delete is confirmed the same way.
+   Plots are circles of a fixed radius set per property; the strata are the property's compartments. */
+const NUR_DB="fi_nursery", NUR_ST="kv";
+const NUR_DEFECTS=[["DL","Double or codominant leader"],["LN","Lean or crooked stem"],["DB","Deer browse"],["VG","Vole/rodent girdling"],
+  ["PD","Pest or disease (describe in notes)"],["SS","Sunscald, bark or mower damage"],["OG","Overgrown/crowded: too large or tight to dig with a ball"],
+  ["WC","Heavy weed or vine competition at the tree"]];
+const NUR_CAL=[30,40,50,60,70,80,90,100], NUR_CON=[60,80,100,125,150,175,200,250,300], NUR_WHIP=[150,175,200,250];
+const NUR_CONPFX=["PI","AB","TS","TH","JU","LA","PS","TA","CH","MS","CE","SE","CR"];
+const NUR_RADII=["5","3.99","5.64"];
+let NUR=null, _nurView="home", _nurPlot=null, _nurEdit=null, _nurEntry=null, _nurTract="", _nurLayer=null, _nurBusy=null, _nurAgain=false, _nurGps=null, _nurGpsT=null;
+let _nurDbP=null, _nurSaving=null, _nurSaveAgain=false, _nurSaveErr=false;
+function nurDb_(){ if(!_nurDbP) _nurDbP=new Promise((res,rej)=>{ if(!window.indexedDB){ rej(new Error("no IndexedDB")); return; }
+  const r=indexedDB.open(NUR_DB,1); r.onupgradeneeded=()=>r.result.createObjectStore(NUR_ST); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); return _nurDbP; }
+async function nurIdbGet_(k){ const d=await nurDb_(); return new Promise((res,rej)=>{ const q=d.transaction(NUR_ST).objectStore(NUR_ST).get(k); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); }
+async function nurIdbPut_(k,v){ const d=await nurDb_(); return new Promise((res,rej)=>{ const tx=d.transaction(NUR_ST,"readwrite"); tx.objectStore(NUR_ST).put(v,k);
+  tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); tx.onabort=()=>rej(tx.error); }); }
+/* Every change is written at once, one write at a time, and read back: a phone pocketed straight after a tap keeps the tap. */
+function nurSave_(){ if(_nurSaving){ _nurSaveAgain=true; return _nurSaving; }
+  _nurSaving=(async()=>{ try{ do{ _nurSaveAgain=false; await nurWrite_(); }while(_nurSaveAgain); } finally{ _nurSaving=null; } })(); return _nurSaving; }
+async function nurWrite_(){
+  try{ const s=JSON.stringify(NUR); await nurIdbPut_("state", JSON.parse(s)); const back=await nurIdbGet_("state");
+    if(JSON.stringify(back)!==s) throw new Error("read-back did not match");
+    if(_nurSaveErr){ _nurSaveErr=false; toast("Nursery plots saved on this phone"); } }
+  catch(e){ _nurSaveErr=true; toast("⚠ This phone could not keep the nursery plots: "+(e&&e.message||e)+" — export the workbook now",true); } }
+async function nurSaveNow_(){ while(_nurSaving) await _nurSaving; await nurSave_(); while(_nurSaving) await _nurSaving; }
+async function nurLoad_(){ if(NUR) return NUR;
+  let s=null; try{ s=await nurIdbGet_("state"); }catch(e){ s=null; }
+  NUR=(s&&typeof s==="object")?s:{v:1, setups:{}, plots:{}, dels:[], species:{}};
+  NUR.setups=NUR.setups||{}; NUR.plots=NUR.plots||{}; NUR.dels=NUR.dels||[]; NUR.species=NUR.species||{};
+  return NUR; }
+const nurUid_=p=>p+Date.now().toString(36).toUpperCase()+Math.floor(Math.random()*46656).toString(36).toUpperCase().padStart(3,"0");
+const nurNum_=v=>{ if(v===""||v==null) return null; const n=Number(String(v).replace(",",".")); return isFinite(n)?n:null; };
+const nurLive_=t=>t.health!=="D";
+function nurSetup_(tract){ const k=propK_(tract); let s=NUR.setups[k]; if(!s){ s=NUR.setups[k]={tract:String(tract||""), radius:"5", client:"", date:"", areas:{}}; } s.areas=s.areas||{}; return s; }
+function nurPlotsOf_(tract){ const k=propK_(tract); return Object.values(NUR.plots).filter(p=>propK_(p.tract)===k).sort((a,b)=>String(a.plotnum).localeCompare(String(b.plotnum),undefined,{numeric:true})); }
+function nurType_(code){ const s=NUR.species[code]; if(s&&s.type) return s.type; return NUR_CONPFX.indexOf(String(code).slice(0,2))>=0?"C":"D"; }
+/* Size class from the measurements. A class is the lower bound of the price-list size: a 57 mm tree is in the 50 mm class. */
+function nurSize_(t, type){
+  type=type||nurType_(t.sp); const cal=nurNum_(t.cal), ht=nurNum_(t.ht);
+  const floorTo=(v,arr)=>{ let c=null; for(const a of arr) if(v>=a) c=a; return c; };
+  if(type==="C"){ if(ht==null) return {key:"?",label:"no height",basis:"ht",lo:-1};
+    const c=floorTo(ht,NUR_CON); if(c==null) return {key:"h<60",label:"<60 cm",basis:"ht",lo:0};
+    return {key:"h"+c,label:c===300?"300+ cm":c+" cm",basis:"ht",lo:c}; }
+  if(cal!=null&&cal>=30){ const c=floorTo(cal,NUR_CAL); return {key:"c"+c,label:c===100?"100+ mm":c+" mm",basis:"cal",lo:c}; }
+  if(ht!=null){ const c=floorTo(ht,NUR_WHIP); if(c==null) return {key:"w<150",label:"whip <150 cm",basis:"whip",lo:0};
+    return {key:"w"+c,label:"whip "+(c===250?"250+ cm":c+" cm"),basis:"whip",lo:c}; }
+  if(cal!=null) return {key:"c<30",label:"<30 mm (add height)",basis:"cal",lo:0};
+  return {key:"?",label:"no size",basis:"?",lo:-1}; }
+const NUR_BASIS={whip:0,cal:1,ht:2,"?":3};
+/* The SAME two functions are in Code.gs (t_nursery498 compares the text). */
+function nurSig_(rows){ var s=rows.map(function(r){ return r.map(function(v){ return v==null?"":String(v); }).join("|"); }).sort().join("\n");
+  var h=5381; for(var i=0;i<s.length;i++) h=((h*33)^s.charCodeAt(i))>>>0; return rows.length+":"+h.toString(16); }
+function nurStats_(dens){ var n=dens.length, T=[12.706,4.303,3.182,2.776,2.571,2.447,2.365,2.306,2.262,2.228,2.201,2.179,2.16,2.145,2.131,2.12,2.11,2.101,2.093,2.086,2.08,2.074,2.069,2.064,2.06,2.056,2.052,2.048,2.045,2.042];
+  var t=function(df){ return df<1?NaN:(df<=30?T[df-1]:1.96+2.4/df); };
+  var out={n:n, mean:NaN, sd:NaN, se:NaN, cv:NaN, pm:NaN, t:NaN, need:NaN};
+  if(!n) return out; var m=0; dens.forEach(function(x){ m+=x; }); m/=n; out.mean=m; if(n<2) return out;
+  var ss=0; dens.forEach(function(x){ ss+=(x-m)*(x-m); }); var sd=Math.sqrt(ss/(n-1));
+  out.sd=sd; out.se=sd/Math.sqrt(n); out.t=t(n-1);
+  if(m>0){ out.cv=100*sd/m; out.pm=100*out.t*out.se/m;
+    var k=Math.max(2,Math.ceil(Math.pow(1.96*out.cv/15,2))); for(var i=0;i<20;i++){ var k2=Math.max(2,Math.ceil(Math.pow(t(k-1)*out.cv/15,2))); if(k2===k) break; k=k2; } out.need=k; }
+  return out; }
+const nurSigOf_=p=>nurSig_((p.trees||[]).map(t=>[t.id, t.sp, nurNum_(t.cal)==null?"":nurNum_(t.cal), nurNum_(t.ht)==null?"":nurNum_(t.ht), t.grade||"", t.health||""]));
+const nurArea_=p=>{ const r=nurNum_(p.radius); return r>0?Math.PI*r*r/10000:0; };      // ha
+/* The property's compartments and their areas (measured, or typed in the nursery setup). */
+function nurComps_(tract){ let rows=[]; try{ rows=propSummary_(tract).rows||[]; }catch(e){ rows=[]; }
+  const s=nurSetup_(tract), out={}; rows.forEach(r=>{ out[r.name]={name:r.name, ha:isFinite(r.ha)?+r.ha:0, src:"measured"}; });
+  Object.keys(s.areas).forEach(n=>{ const v=nurNum_(s.areas[n]); if(v!=null&&v>=0) out[n]=Object.assign(out[n]||{name:n}, {ha:v, src:"typed"}); });
+  return out; }
+/* Per stratum (compartment): live trees/ha with SE, CV, ±% at 95 % and the plots needed for ±15 %; then species × size class × grade
+   per ha, each the mean over the stratum's plots of (count ÷ plot area); stems = per ha × the compartment's area. */
+function nurSummary_(plots, comps){
+  const by={}; plots.forEach(p=>{ const k=p.stand||"(no compartment)"; (by[k]||(by[k]=[])).push(p); });
+  const strata=[], classes=[];
+  Object.keys(by).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).forEach(st=>{
+    const ps=by[st].filter(p=>nurArea_(p)>0), n=ps.length, c=comps[st]||null, ha=c?c.ha:null;
+    const live=ps.map(p=>p.trees.filter(nurLive_).length/nurArea_(p)), dead=ps.map(p=>p.trees.filter(t=>!nurLive_(t)).length/nurArea_(p));
+    const S=nurStats_(live); const dm=dead.length?dead.reduce((a,b)=>a+b,0)/dead.length:NaN;
+    strata.push({stand:st, plots:n, noRadius:by[st].length-n, ha, areaSrc:c?c.src:"", live:ps.reduce((a,p)=>a+p.trees.filter(nurLive_).length,0), deadN:ps.reduce((a,p)=>a+p.trees.filter(t=>!nurLive_(t)).length,0),
+      perHa:S.mean, se:S.se, cv:S.cv, pm:S.pm, need:S.need, deadHa:dm, stems:(ha!=null&&isFinite(S.mean))?Math.round(S.mean*ha):null});
+    const cl={}; ps.forEach(p=>{ const a=nurArea_(p); p.trees.filter(nurLive_).forEach(t=>{ const z=nurSize_(t), ty=nurType_(t.sp), k=t.sp+"\u0001"+z.key;
+      const r=cl[k]||(cl[k]={stand:st, sp:t.sp, type:ty, cls:z.label, basis:z.basis, lo:z.lo, A:0,B:0,C:0,X:0, n:0}); r.n++; r[t.grade==="A"||t.grade==="B"||t.grade==="C"?t.grade:"X"]+=1/a; }); });
+    Object.values(cl).sort((a,b)=>a.sp.localeCompare(b.sp)||NUR_BASIS[a.basis]-NUR_BASIS[b.basis]||a.lo-b.lo).forEach(r=>{
+      ["A","B","C","X"].forEach(g=>r[g]=n?r[g]/n:0); r.tot=r.A+r.B+r.C+r.X; r.stems=ha!=null?Math.round(r.tot*ha):null; classes.push(r); }); });
+  return {strata, classes}; }
+
+/* ---------- the screen ---------- */
+function nurEl_(){ let el=$("nurScreen"); if(el) return el;
+  el=document.createElement("div"); el.id="nurScreen"; document.body.appendChild(el);
+  const st=document.createElement("style"); st.textContent=`
+#nurScreen{position:fixed;inset:0;z-index:98000;background:#0e1311;color:#e7ebe6;overflow-y:auto;-webkit-overflow-scrolling:touch;font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:none}
+#nurScreen .nhd{position:sticky;top:0;z-index:5;background:#12201a;border-bottom:1px solid #2b362f;padding:max(10px,env(safe-area-inset-top)) 12px 8px;display:flex;gap:8px;align-items:center}
+#nurScreen .nhd h1{margin:0;font-size:15px;font-weight:700;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#nurScreen .nhd .sub{font-size:12px;color:#86a08c;font-weight:400}
+#nurScreen .nb{background:#2b6ea3;border:1px solid #57a0d6;color:#fff;font-weight:700;border-radius:999px;padding:6px 12px;font-size:13px}
+#nurScreen main{padding:12px;max-width:760px;margin:0 auto 60px}
+#nurScreen .card{background:#151d19;border:1px solid #2b362f;border-radius:12px;padding:12px;margin-bottom:12px}
+#nurScreen .card h2{margin:0 0 8px;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#9fc6a8}
+#nurScreen label.f{display:block;font-size:12px;color:#98a299;margin:8px 0 3px}
+#nurScreen input,#nurScreen select,#nurScreen textarea{width:100%;box-sizing:border-box;font:inherit;font-size:16px;color:#e7ebe6;background:#0f1714;border:1px solid #39463b;border-radius:8px;padding:9px 10px}
+#nurScreen .row{display:flex;gap:8px}#nurScreen .row>*{flex:1 1 0;min-width:0}
+#nurScreen .btn{display:inline-block;font:inherit;font-size:15px;font-weight:600;color:#fff;background:#1f5130;border:1px solid #2f7a44;border-radius:10px;padding:11px 14px;cursor:pointer;text-align:center}
+#nurScreen .btn.full{display:block;width:100%;margin-top:8px}#nurScreen .btn.go{background:#2f9d59;border-color:#4cc079;font-size:17px;padding:13px}
+#nurScreen .btn.alt{background:#1d2c23;border-color:#2f4a39;color:#bfe6cb}#nurScreen .btn.danger{background:#3a1512;border-color:#7a2f2a;color:#ffb8ae}#nurScreen .btn.sm{font-size:13px;padding:6px 10px}
+#nurScreen .g2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}#nurScreen .g2>.btn{min-width:0;padding:11px 8px;font-size:14px;white-space:normal}
+#nurScreen .seg{display:flex;gap:6px}
+#nurScreen .seg button{flex:1;font:inherit;font-size:17px;font-weight:700;padding:11px 0;border-radius:9px;border:1px solid #39463b;background:#1b2520;color:#98a299}
+#nurScreen .seg button.on{color:#08120c;border-color:transparent;background:#4cc079}
+#nurScreen .seg button.on.gB,#nurScreen .seg button.on.hF{background:#e0c53a}#nurScreen .seg button.on.gC,#nurScreen .seg button.on.hP{background:#f2792e}#nurScreen .seg button.on.hD{background:#98a299}
+#nurScreen .chips{display:flex;flex-wrap:wrap;gap:6px}
+#nurScreen .chips button{font:14px ui-monospace,Menlo,Consolas,monospace;padding:7px 10px;border-radius:999px;border:1px solid #39463b;background:#1b2520;color:#98a299}
+#nurScreen .chips button.on{background:#1d3a28;border-color:#4cc079;color:#d9f5e2}#nurScreen .spc button.on{background:#2b6ea3;border-color:#57a0d6;color:#fff}
+#nurScreen ul.l{list-style:none;margin:0;padding:0}#nurScreen ul.l li{border-top:1px solid #2b362f;padding:10px 2px;display:flex;align-items:center;gap:10px;cursor:pointer}
+#nurScreen ul.l li:first-child{border-top:0}#nurScreen ul.l .m{flex:1;min-width:0}#nurScreen ul.l .t{font-weight:600}#nurScreen ul.l .s{font:13px ui-monospace,Menlo,Consolas,monospace;color:#98a299}
+#nurScreen .pill{font:12px ui-monospace,Menlo,monospace;padding:2px 7px;border-radius:999px;border:1px solid #39463b;color:#98a299}
+#nurScreen .pill.A{color:#08120c;background:#4cc079;border-color:transparent}#nurScreen .pill.B{color:#08120c;background:#e0c53a;border-color:transparent}#nurScreen .pill.C{color:#08120c;background:#f2792e;border-color:transparent}#nurScreen .pill.D{color:#08120c;background:#98a299;border-color:transparent}
+#nurScreen .note{font-size:13px;color:#98a299;margin-top:6px}#nurScreen .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+#nurScreen .warn{background:#2a2112;border:1px solid #7a5a2f;color:#ffd9a8;border-radius:8px;padding:8px 10px;font-size:14px;margin-top:8px}
+#nurScreen .sync{display:flex;align-items:center;gap:8px;border-radius:10px;padding:9px 12px;margin-bottom:12px;font-size:14px;cursor:pointer;border:1px solid #39463b;background:#1b2520;color:#98a299}
+#nurScreen .sync span{margin-left:auto;font-size:12px;font-weight:700;white-space:nowrap}
+#nurScreen .sync.ok{border-color:#2f7a44;background:#14281b;color:#bfe6cb}#nurScreen .sync.wait{border-color:#7a5a2f;background:#2a2112;color:#ffd9a8}#nurScreen .sync.bad{border-color:#7a2f2a;background:#2a1412;color:#ffb8ae}
+#nurScreen table.t{width:100%;border-collapse:collapse;font:13px ui-monospace,Menlo,Consolas,monospace}
+#nurScreen table.t th,#nurScreen table.t td{border-bottom:1px solid #2b362f;padding:5px 4px;text-align:right;white-space:nowrap}
+#nurScreen table.t th:first-child,#nurScreen table.t td:first-child,#nurScreen table.t .l{text-align:left}#nurScreen table.t th{color:#9fc6a8;font-weight:600;font-size:12px}
+#nurScreen .scroll{overflow-x:auto}#nurScreen .key td{vertical-align:top;padding:5px 4px;border-bottom:1px solid #2b362f;font-size:14px}#nurScreen .key td:first-child{font-weight:700;white-space:nowrap;color:#bfe6cb;padding-right:10px}
+#nurScreen .editing{outline:2px solid #f2792e;outline-offset:2px}`;
+  document.head.appendChild(st); return el; }
+async function nurOpen_(id){ await nurLoad_(); const el=nurEl_(); el.style.display="block";
+  if(!_nurTract) _nurTract=propActiveTract_()||(NUR._last||"");
+  if(id&&NUR.plots[id]){ _nurTract=NUR.plots[id].tract; nurGo_("plot",id); } else nurGo_("home");
+  setTimeout(()=>{ try{ nurSync_(); }catch(e){} },300); }
+function nurClose_(){ nurGpsStop_(); const el=$("nurScreen"); if(el) el.style.display="none"; try{ nurRender_(); }catch(e){} }
+function nurGo_(v, arg){ if(v==="plot"){ _nurPlot=arg; _nurEdit=null; _nurEntry=nurBlank_(nurLastSp_()); } else nurGpsStop_();
+  _nurView=v; nurDraw_(); const el=$("nurScreen"); if(el) el.scrollTop=0; }
+const nurBlank_=sp=>({sp:sp||"", cal:"", ht:"", grade:"", health:"G", def:[], notes:""});
+function nurLastSp_(){ const p=NUR.plots[_nurPlot]; if(p&&p.trees.length) return p.trees[p.trees.length-1].sp;
+  const ps=nurPlotsOf_(_nurTract).sort((a,b)=>String(a.at).localeCompare(String(b.at))); for(let i=ps.length-1;i>=0;i--){ const t=ps[i].trees; if(t.length) return t[t.length-1].sp; } return ""; }
+function nurDraw_(){ const el=nurEl_(); const p=NUR.plots[_nurPlot];
+  const titles={home:"🌱 Nursery plots", plot:p?"Plot "+(p.plotnum||"?"):"Plot", summary:"Summary", key:"Key & codes"};
+  el.innerHTML=`<div class="nhd"><button type="button" class="nb" onclick="${_nurView==="home"?"nurClose_()":"nurGo_('home')"}">‹ ${_nurView==="home"?"Map":"Back"}</button>`+
+    `<h1>${esc(titles[_nurView]||"Nursery plots")}<div class="sub">${esc(_nurTract||"No property chosen")}</div></h1>`+
+    `<button type="button" class="nb" style="background:#1d2c23;border-color:#2f4a39" title="Help" onclick="helpOne_('nursery')">?</button></div><main id="nurMain"></main>`;
+  const m=$("nurMain"); ({home:nurHome_, plot:nurPlotV_, summary:nurSumV_, key:nurKeyV_}[_nurView]||nurHome_)(m); }
+function nurSyncLine_(){ const ps=nurPlotsOf_(_nurTract), wait=ps.filter(p=>(p._rev||0)>(p._sentRev||0)), bad=wait.filter(p=>p._err), dels=NUR.dels.length;
+  let cls="ok", txt;
+  if(!connected) { cls=""; txt="☁ No Sheet connected — the plots stay on this phone"; }
+  else if(_nurBusy) { cls="wait"; txt="☁ Sending to the Sheet…"; }
+  else if(bad.length) { cls="bad"; txt="☁ Not in the Sheet yet: plot "+(bad[0].plotnum||"?")+" — "+bad[0]._err; }
+  else if(wait.length||dels) { cls="wait"; txt="☁ "+(wait.length?wait.length+" plot"+(wait.length===1?"":"s")+" waiting to go to the Sheet":"")+(wait.length&&dels?" · ":"")+(dels?dels+" delete"+(dels===1?"":"s")+" waiting":"")+(isOffline()?" — no signal":""); }
+  else if(ps.length) txt="☁ All "+ps.length+" plot"+(ps.length===1?"":"s")+" checked in the Sheet";
+  else { cls=""; txt="☁ Nothing to send yet"; }
+  return `<div class="sync ${cls}" id="nurSync" onclick="nurSync_(true)">${esc(txt)}<span>${connected?"Send now":""}</span></div>`; }
+function nurRefreshSync_(){ const el=$("nurSync"); if(el) el.outerHTML=nurSyncLine_();
+  if(_nurView==="home"){ const L=$("nurList"); if(L) L.innerHTML=nurListHtml_(); } }
+function nurListHtml_(){ const ps=nurPlotsOf_(_nurTract);
+  if(!ps.length) return '<div class="note">No nursery plots here yet. Tap a sample point on the map → 🌱 Nursery plot here, or ＋ New plot for one off the grid.</div>';
+  return '<ul class="l">'+ps.map(p=>{ const live=p.trees.filter(nurLive_).length, dead=p.trees.length-live, sps=[...new Set(p.trees.map(t=>t.sp))].join(", ");
+    const st=(p._rev||0)>(p._sentRev||0)?(p._err?"⚠":"⏳"):"✓";
+    return `<li onclick="nurGo_('plot','${p.id}')"><div class="m"><div class="t">Plot ${esc(p.plotnum||"?")}${p.stand?" · "+esc(p.stand):""}</div>`+
+      `<div class="s">${live} live${dead?" · "+dead+" dead":""} · r ${esc(p.radius)} m · ${esc(sps||"no trees yet")}${p.gps?" · GPS ±"+Math.round(p.gps.acc)+" m":(p.pt?" · at the sample point":" · no position")}</div></div><span title="${st==="✓"?"In the Sheet":"Not in the Sheet yet"}">${st}</span></li>`; }).join("")+'</ul>'; }
+function nurHome_(m){ const tr=propTracts_().slice().sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+  if(_nurTract&&!tr.some(t=>propK_(t)===propK_(_nurTract))) tr.unshift(_nurTract);
+  if(!_nurTract){ m.innerHTML=`<div class="card"><h2>Property</h2><select id="nurTr"><option value="">Choose the property…</option>${tr.map(t=>`<option>${esc(t)}</option>`).join("")}</select>
+    <div class="note">Nursery plots belong to a property; its compartments are the strata.</div></div>`;
+    $("nurTr").onchange=e=>{ _nurTract=e.target.value; NUR._last=_nurTract; nurSave_(); nurDraw_(); }; return; }
+  const s=nurSetup_(_nurTract), r=String(s.radius||"5"), other=NUR_RADII.indexOf(r)<0;
+  m.innerHTML=nurSyncLine_()+`<div class="card"><h2>Property & set-up</h2>
+    <select id="nurTr">${tr.map(t=>`<option ${propK_(t)===propK_(_nurTract)?"selected":""}>${esc(t)}</option>`).join("")}</select>
+    <div class="row"><div><label class="f">Plot radius (m)</label><select id="nurRad">${NUR_RADII.map(x=>`<option value="${x}" ${x===r?"selected":""}>${x} m (${(Math.PI*x*x).toFixed(1)} m²)</option>`).join("")}<option value="other" ${other?"selected":""}>Other…</option></select></div>
+      <div id="nurRadO" style="${other?"":"display:none"}"><label class="f">Radius (m)</label><input id="nurRadV" type="number" inputmode="decimal" step="0.01" value="${other?esc(r):""}"></div></div>
+    <div class="row"><div><label class="f">Client</label><input id="nurCli" value="${esc(s.client)}"></div><div><label class="f">Valuation date</label><input id="nurDate" type="date" value="${esc(s.date)}"></div></div>
+    <div class="note">The radius goes on each new plot; a plot keeps the radius it was measured with.</div></div>
+    <button class="btn go full" type="button" onclick="nurNew_()">＋ New plot (off the grid)</button>
+    <div class="note" style="margin:6px 2px 0">On the map: ⊞ Sample points makes the grid; tap a point → 🌱 Nursery plot here.</div>
+    <div class="g2" style="margin:10px 0 12px"><button class="btn alt" type="button" onclick="nurGo_('summary')">Summary</button><button class="btn alt" type="button" onclick="nurGo_('key')">Key & codes</button>
+      <button class="btn alt" type="button" onclick="nurXlsx_()">📗 Workbook (.xlsx)</button><button class="btn alt" type="button" onclick="nurFromSheet_()">⬇ Plots from the Sheet</button></div>
+    <div class="card"><h2>Plots</h2><div id="nurList">${nurListHtml_()}</div></div>`;
+  $("nurTr").onchange=e=>{ _nurTract=e.target.value; NUR._last=_nurTract; nurSave_(); nurDraw_(); };
+  $("nurRad").onchange=e=>{ const v=e.target.value; $("nurRadO").style.display=v==="other"?"":"none"; if(v!=="other"){ s.radius=v; nurSave_(); } else $("nurRadV").focus(); };
+  $("nurRadV").onchange=e=>{ const v=nurNum_(e.target.value); if(!(v>0&&v<=50)){ toast("A radius in metres, e.g. 4.5",true); return; } s.radius=String(v); nurSave_(); };
+  $("nurCli").oninput=e=>{ s.client=e.target.value; nurSave_(); }; $("nurDate").oninput=e=>{ s.date=e.target.value; nurSave_(); }; }
+function nurMake_(o){ const s=nurSetup_(o.tract), now=new Date().toISOString();
+  const p=Object.assign({id:nurUid_("NP"), tract:o.tract, stand:"", grid:"", point:"", plotnum:"", radius:String(s.radius||"5"), gps:null, pt:null, weeds:"", notes:"",
+    by:String(cruiserEmail||cruiser||""), at:now, trees:[], _rev:1, _sentRev:0}, o);
+  NUR.plots[p.id]=p; NUR._last=p.tract; return p; }
+function nurNew_(){ const ps=nurPlotsOf_(_nurTract); const n=ps.reduce((a,p)=>Math.max(a, parseInt(p.plotnum,10)||0),0)+1;
+  const last=ps.slice().sort((a,b)=>String(a.at).localeCompare(String(b.at))).pop();
+  const p=nurMake_({tract:_nurTract, plotnum:String(n), stand:last?last.stand:""}); nurSave_(); nurGo_("plot",p.id); nurGps_(); }
+/* From a ⊞ sample point's popup. The point's number is the plot number; its grid's compartment the stratum. */
+async function nurFromPoint_(lat, lon, pn, gid){ await nurLoad_();
+  let G=null; try{ G=spGrids_().find(x=>x.gid===gid)||null; }catch(e){}
+  const tract=(G&&G.tract)||propActiveTract_(); if(!tract){ toast("Choose the property first",true); return; }
+  try{ fmap&&fmap.closePopup(); }catch(e){}
+  const have=Object.values(NUR.plots).find(p=>propK_(p.tract)===propK_(tract)&&p.grid===String(gid||"")&&String(p.point)===String(pn));
+  _nurTract=tract; nurEl_().style.display="block";
+  if(have){ nurGo_("plot",have.id); toast("Plot "+have.plotnum+" is already started — carry on"); return; }
+  let stand=(G&&G.stand)||""; if(!stand){ try{ const h=standAt_(lat,lon); if(h) stand=h; }catch(e){} }
+  const dup=nurPlotsOf_(tract).find(p=>String(p.plotnum)===String(pn));
+  const p=nurMake_({tract, stand, grid:String(gid||""), point:String(pn), plotnum:String(pn), pt:[+(+lat).toFixed(7), +(+lon).toFixed(7)]});
+  if(dup) toast("There is already a plot "+pn+" on this property — change the plot # if it is a different point",true);
+  nurSave_(); nurGo_("plot",p.id); nurGps_(); }
+function standAt_(lat,lon){ let hit=""; try{ propCompsGeo_(_nurTract||propActiveTract_()).forEach(c=>{ if(hit) return; (c.polygons||[]).forEach(pg=>{ const ring=(pg&&pg[0])||[]; let ins=false;
+  for(let i=0,j=ring.length-1;i<ring.length;j=i++){ const yi=ring[i][0], xi=ring[i][1], yj=ring[j][0], xj=ring[j][1]; if(((yi>lat)!==(yj>lat))&&(lon<(xj-xi)*(lat-yi)/(yj-yi)+xi)) ins=!ins; } if(ins) hit=c.name; }); }); }catch(e){} return hit; }
+/* GPS: the best fix from ~25 s of readings, stopping early at ±5 m. */
+function nurGps_(){ const p=NUR.plots[_nurPlot]; if(!p) return; if(!navigator.geolocation){ toast("This browser has no GPS",true); return; }
+  nurGpsStop_(); const pid=p.id; let best=null; const st=$("nurGpsS"); if(st) st.textContent="Finding position…";
+  _nurGps=navigator.geolocation.watchPosition(pos=>{ const c=pos.coords; if(best&&c.accuracy>=best.acc) return;
+    best={lat:+c.latitude.toFixed(7), lon:+c.longitude.toFixed(7), acc:+c.accuracy.toFixed(1), t:new Date(pos.timestamp||Date.now()).toISOString()};
+    const pp=NUR.plots[pid]; if(pp){ pp.gps=best; pp._rev=(pp._rev||0)+1; nurSave_(); }
+    if(_nurView==="plot"&&_nurPlot===pid) nurGpsDraw_(); if(c.accuracy<=5) nurGpsStop_(); },
+    err=>{ const s=$("nurGpsS"); if(s) s.textContent="GPS: "+(err.code===1?"permission denied — allow location for this site":err.message); nurGpsStop_(true); },
+    {enableHighAccuracy:true, maximumAge:0, timeout:30000});
+  _nurGpsT=setTimeout(()=>nurGpsStop_(),25000); }
+function nurGpsStop_(keep){ if(_nurGps!=null&&navigator.geolocation) navigator.geolocation.clearWatch(_nurGps); _nurGps=null; clearTimeout(_nurGpsT); if(!keep) nurGpsDraw_(); }
+function nurGpsDraw_(){ const p=NUR.plots[_nurPlot], s=$("nurGpsS"); if(!p||!s) return;
+  s.textContent=p.gps?`${p.gps.lat.toFixed(6)}, ${p.gps.lon.toFixed(6)}  ±${Math.round(p.gps.acc)} m${_nurGps!=null?" · improving…":""}`:(_nurGps!=null?"Finding position…":(p.pt?"No GPS fix — the sample point's position is used":"No position yet")); }
+function nurBump_(p){ p._rev=(p._rev||0)+1; p._err=""; nurSave_(); clearTimeout(nurBump_._t); nurBump_._t=setTimeout(()=>{ try{ nurSync_(); }catch(e){} },20000); }
+function nurPlotV_(m){ const p=NUR.plots[_nurPlot]; if(!p){ nurGo_("home"); return; }
+  const comps=Object.keys(nurComps_(p.tract)).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})); if(p.stand&&comps.indexOf(p.stand)<0) comps.unshift(p.stand);
+  const recent=[...new Set(Object.values(NUR.plots).filter(x=>propK_(x.tract)===propK_(p.tract)).flatMap(x=>x.trees.map(t=>t.sp)).reverse())].slice(0,8);
+  const e=_nurEntry, live=p.trees.filter(nurLive_).length, dead=p.trees.length-live;
+  m.innerHTML=`<div class="card"><h2>Plot ${esc(p.plotnum)}</h2>
+    <div class="row"><div><label class="f">Plot #</label><input id="nPn" value="${esc(p.plotnum)}" inputmode="numeric"></div>
+      <div><label class="f">Compartment</label><select id="nSt"><option value="">—</option>${comps.map(c=>`<option ${c===p.stand?"selected":""}>${esc(c)}</option>`).join("")}</select></div>
+      <div><label class="f">Radius (m)</label><input id="nRad" type="number" inputmode="decimal" step="0.01" value="${esc(p.radius)}"></div></div>
+    <div class="note">${p.point?"Sample point "+esc(p.point)+(p.grid?" (grid "+esc(p.grid)+")":""):"Off the grid"} · plot area ${(nurArea_(p)*10000).toFixed(1)} m²</div>
+    <label class="f">Weeds</label><div class="seg" id="nWeeds">${["L","M","H"].map(w=>`<button type="button" class="${p.weeds===w?"on hF":""}" onclick="nurWeeds_('${w}')">${w}</button>`).join("")}</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;font:14px ui-monospace,Menlo,monospace"><span id="nurGpsS" style="flex:1"></span><button class="btn sm alt" type="button" onclick="nurGps_()">⌖ GPS</button></div>
+    <label class="f">Plot notes</label><textarea id="nNotes" style="min-height:52px">${esc(p.notes)}</textarea></div>
+  <div class="card ${_nurEdit?"editing":""}" id="nTreeCard"><h2>${_nurEdit?"Edit tree "+(p.trees.findIndex(t=>t.id===_nurEdit)+1):"Add tree "+(p.trees.length+1)}</h2>
+    <label class="f">Species code</label><input id="nSp" list="nSpL" autocapitalize="characters" autocomplete="off" value="${esc(e.sp)}" placeholder="e.g. ACRU, PIGL, ACFR-AB">
+    <datalist id="nSpL">${Object.keys(NUR.species).sort().map(s=>`<option value="${esc(s)}">`).join("")}</datalist>
+    <div class="chips spc" style="margin-top:6px">${recent.map(s=>`<button type="button" class="${s===e.sp?"on":""}" onclick="nurPickSp_('${esc(s)}')">${esc(s)}</button>`).join("")}</div>
+    <div class="note" id="nSpH"></div>
+    <div class="row"><div><label class="f" id="nLCal">Caliper (mm)</label><input id="nCal" type="number" inputmode="decimal" step="1" value="${esc(e.cal)}"></div>
+      <div><label class="f">Height (cm)</label><input id="nHt" type="number" inputmode="numeric" step="1" value="${esc(e.ht)}"></div></div>
+    <div class="note mono" id="nClsH"></div>
+    <label class="f">Grade</label><div class="seg" id="nGrade">${["A","B","C"].map(g=>`<button type="button" class="g${g} ${e.grade===g?"on":""}" onclick="nurSet_('grade','${g}')">${g}</button>`).join("")}</div>
+    <label class="f">Health</label><div class="seg" id="nHealth">${["G","F","P","D"].map(h=>`<button type="button" class="h${h} ${e.health===h?"on":""}" onclick="nurSet_('health','${h}')">${h}</button>`).join("")}</div>
+    <label class="f">Defects</label><div class="chips" id="nDef">${NUR_DEFECTS.map(([c,d])=>`<button type="button" title="${esc(d)}" class="${e.def.indexOf(c)>=0?"on":""}" onclick="nurDef_('${c}')">${c}</button>`).join("")}</div>
+    <label class="f">Tree notes</label><input id="nTNotes" value="${esc(e.notes)}">
+    <div id="nErr"></div>
+    <button class="btn go full" type="button" id="nAdd" onclick="nurTree_()">${_nurEdit?"✓ Save tree":"＋ Add tree"}</button>
+    ${_nurEdit?`<div class="g2" style="margin-top:8px"><button class="btn alt" type="button" onclick="nurEditCancel_()">Cancel</button><button class="btn danger" type="button" onclick="nurTreeDel_()">Delete tree</button></div>`:""}</div>
+  <div class="card"><h2>Trees in this plot (${live} live${dead?", "+dead+" dead":""})</h2>${p.trees.length?'<ul class="l">'+p.trees.map((t,i)=>{ const z=nurSize_(t);
+      return `<li onclick="nurEditTree_('${t.id}')"><span class="mono" style="width:22px;color:#98a299">${i+1}</span><div class="m"><div class="t">${esc(t.sp)} <span style="color:#98a299;font-size:13px">${esc(z.label)}</span></div>`+
+      `<div class="s">${t.cal!==""&&t.cal!=null?esc(t.cal)+" mm ":""}${t.ht!==""&&t.ht!=null?esc(t.ht)+" cm ":""}${t.def.length?"· "+esc(t.def.join(" "))+" ":""}${t.notes?"· "+esc(t.notes):""}</div></div>`+
+      `${t.grade?`<span class="pill ${t.grade}">${t.grade}</span>`:""}<span class="pill ${t.health==="D"?"D":""}">${t.health}</span></li>`; }).join("")+'</ul>':'<div class="note">No trees yet.</div>'}</div>
+  <button class="btn danger full" type="button" onclick="nurPlotDel_()">Delete plot ${esc(p.plotnum)}</button>`;
+  $("nPn").onchange=ev=>{ const v=String(ev.target.value||"").trim().slice(0,20); if(!v){ ev.target.value=p.plotnum; return; }
+    if(nurPlotsOf_(p.tract).some(x=>x!==p&&String(x.plotnum)===v)) toast("There is already a plot "+v+" on this property",true);
+    p.plotnum=v; nurBump_(p); const h=document.querySelector("#nurScreen .nhd h1"); if(h) h.firstChild.textContent="Plot "+v; };
+  $("nSt").onchange=ev=>{ p.stand=ev.target.value; nurBump_(p); };
+  $("nRad").onchange=ev=>{ const v=nurNum_(ev.target.value); if(!(v>0&&v<=50)){ toast("A radius in metres, e.g. 5",true); ev.target.value=p.radius; return; } p.radius=String(v); nurBump_(p); };
+  $("nNotes").oninput=ev=>{ p.notes=ev.target.value; nurBump_(p); };
+  $("nSp").oninput=ev=>{ e.sp=ev.target.value.toUpperCase().trim(); ev.target.value=ev.target.value.toUpperCase(); nurHints_(); };
+  $("nCal").oninput=ev=>{ e.cal=ev.target.value; nurHints_(); }; $("nHt").oninput=ev=>{ e.ht=ev.target.value; nurHints_(); };
+  $("nTNotes").oninput=ev=>{ e.notes=ev.target.value; };
+  nurGpsDraw_(); nurHints_(); }
+function nurHints_(){ const e=_nurEntry, sp=e.sp; if(!$("nSpH")) return;
+  if(!sp){ $("nSpH").textContent=""; $("nClsH").textContent=""; return; }
+  const ty=nurType_(sp), known=!!NUR.species[sp];
+  $("nSpH").innerHTML=(ty==="C"?"Conifer — record <b>height</b>.":"Deciduous — record <b>caliper</b>; whips under 30 mm: add height.")+(known?"":' <span style="color:#e0a33a">New code</span>')+
+    ` <a href="#" onclick="nurFlip_('${esc(sp)}');return false" style="color:#8fc3ff">${ty==="C"?"Set as deciduous":"Set as conifer"}</a>`;
+  $("nLCal").style.color=ty==="C"?"#6f7a71":"";
+  $("nClsH").textContent=(e.cal!==""||e.ht!=="")?"Size class: "+nurSize_({sp, cal:e.cal, ht:e.ht}, ty).label:""; }
+function nurFlip_(sp){ const t=nurType_(sp)==="C"?"D":"C"; NUR.species[sp]=Object.assign(NUR.species[sp]||{}, {type:t}); nurSave_(); nurHints_(); }
+function nurPickSp_(s){ _nurEntry.sp=s; $("nSp").value=s; document.querySelectorAll("#nurScreen .spc button").forEach(b=>b.classList.toggle("on", b.textContent===s)); nurHints_(); }
+function nurSet_(k,v){ _nurEntry[k]=(_nurEntry[k]===v&&k==="grade")?"":v;
+  $(k==="grade"?"nGrade":"nHealth").querySelectorAll("button").forEach(b=>b.classList.toggle("on", b.textContent===_nurEntry[k])); }
+function nurDef_(c){ const d=_nurEntry.def, i=d.indexOf(c); if(i>=0) d.splice(i,1); else d.push(c);
+  $("nDef").querySelectorAll("button").forEach(b=>b.classList.toggle("on", d.indexOf(b.textContent)>=0)); }
+function nurWeeds_(w){ const p=NUR.plots[_nurPlot]; p.weeds=p.weeds===w?"":w; nurBump_(p);
+  $("nWeeds").querySelectorAll("button").forEach(b=>b.className=b.textContent===p.weeds?"on hF":""); }
+function nurTreeCheck_(e){ const errs=[], sp=String(e.sp||"").trim().toUpperCase(), cal=nurNum_(e.cal), ht=nurNum_(e.ht), dead=e.health==="D";
+  if(!sp) errs.push("Enter a species code.");
+  if(sp&&!/^[A-Z0-9][A-Z0-9\-]{1,14}$/.test(sp)) errs.push("Species code: letters, numbers and - only.");
+  if(!dead&&!e.grade) errs.push("Pick a grade (A, B or C).");
+  if(!dead&&cal==null&&ht==null) errs.push(nurType_(sp)==="C"?"Enter the height (cm).":"Enter the caliper (mm), or the height for a whip.");
+  if(cal!=null&&(cal<=0||cal>400)) errs.push("Caliper looks wrong — it is in mm (e.g. 45).");
+  if(ht!=null&&(ht<=0||ht>2000)) errs.push("Height looks wrong — it is in cm (e.g. 175).");
+  return {errs, rec:{sp, cal:cal==null?"":cal, ht:ht==null?"":ht, grade:e.grade||"", health:e.health||"G", def:e.def.slice(), notes:String(e.notes||"").trim().slice(0,300)}}; }
+function nurTree_(){ const p=NUR.plots[_nurPlot]; const {errs, rec}=nurTreeCheck_(_nurEntry);
+  if(errs.length){ $("nErr").innerHTML='<div class="warn">'+errs.map(esc).join("<br>")+'</div>'; return; }
+  if(!NUR.species[rec.sp]) NUR.species[rec.sp]={type:nurType_(rec.sp)};
+  if(_nurEdit){ const t=p.trees.find(x=>x.id===_nurEdit); Object.assign(t, rec); toast("Tree saved"); }
+  else { p.trees.push(Object.assign({id:nurUid_("NT")}, rec)); toast(`Tree ${p.trees.length}: ${rec.sp} ${nurSize_(rec).label} ${rec.grade||rec.health}`); }
+  _nurEdit=null; _nurEntry=nurBlank_(rec.sp); nurBump_(p); nurDraw_();
+  const f=nurType_(rec.sp)==="C"?$("nHt"):$("nCal"); try{ f.focus({preventScroll:true}); }catch(e){} try{ $("nTreeCard").scrollIntoView({block:"start"}); }catch(e){} }
+function nurEditTree_(id){ const t=NUR.plots[_nurPlot].trees.find(x=>x.id===id); _nurEdit=id;
+  _nurEntry={sp:t.sp, cal:String(t.cal??""), ht:String(t.ht??""), grade:t.grade||"", health:t.health||"G", def:(t.def||[]).slice(), notes:t.notes||""}; nurDraw_(); try{ $("nTreeCard").scrollIntoView({block:"start"}); }catch(e){} }
+function nurEditCancel_(){ _nurEdit=null; _nurEntry=nurBlank_(_nurEntry.sp); nurDraw_(); }
+function nurTreeDel_(){ const p=NUR.plots[_nurPlot]; if(!confirm("Delete this tree?")) return; p.trees=p.trees.filter(t=>t.id!==_nurEdit); _nurEdit=null; _nurEntry=nurBlank_(_nurEntry.sp); nurBump_(p); nurDraw_(); }
+function nurPlotDel_(){ const p=NUR.plots[_nurPlot];
+  if(!confirm(`Delete nursery plot ${p.plotnum} and its ${p.trees.length} trees? It is taken out of the Sheet too. This cannot be undone.`)) return;
+  nurGpsStop_(true); if((p._sentRev||0)>0||p._posted) NUR.dels.push({id:p.id, tract:p.tract}); delete NUR.plots[p.id]; nurSave_(); nurGo_("home"); nurSync_(); }
+/* ---------- sending: post, then read back and compare; deletes confirmed the same way ---------- */
+function nurOut_(p){ return {id:p.id, tract:p.tract, stand:p.stand, grid:p.grid, point:p.point, plotnum:p.plotnum, radius:nurNum_(p.radius),
+  lat:p.gps?p.gps.lat:(p.pt?p.pt[0]:""), lon:p.gps?p.gps.lon:(p.pt?p.pt[1]:""), acc:p.gps?p.gps.acc:"", gtime:p.gps?p.gps.t:"", weeds:p.weeds, notes:p.notes, by:p.by, at:p.at,
+  trees:p.trees.map((t,i)=>({id:t.id, n:i+1, sp:t.sp, type:nurType_(t.sp), cal:t.cal, ht:t.ht, cls:nurSize_(t).label, grade:t.grade, health:t.health, def:(t.def||[]).join(" "), notes:t.notes})), sig:nurSigOf_(p)}; }
+function nurSetupOut_(tract){ const s=nurSetup_(tract), c=nurComps_(tract), areas={}; Object.keys(c).forEach(n=>{ if(isFinite(c[n].ha)) areas[n]=+(+c[n].ha).toFixed(4); });
+  return {tract:s.tract||tract, client:s.client, date:s.date, areas}; }
+const nurGet_=q=>new Promise(res=>{ try{ jsonp_(q, (r,why)=>res(r||{ok:false,error:why==="offline"?"no signal":why==="timeout"?"the Sheet took too long":"couldn't reach the Sheet"}), 45000); }catch(e){ res({ok:false,error:String(e&&e.message||e)}); } });
+async function nurSendOne_(p){ const rev=p._rev||0, snap=JSON.parse(JSON.stringify(p)), body=nurOut_(snap);
+  let j=null; try{ j=await sheetPost_({_action:"nurserysave", plot:body, setup:nurSetupOut_(snap.tract)}); }catch(e){ throw new Error(e&&e.fiWhy==="auth"?"please sign in":e&&e.fiWhy==="notavailable"?"not available to this account":"couldn't send it"); }
+  if(j&&j.ok===false) throw new Error(String(j.error||"the Sheet refused it"));
+  p._posted=rev;
+  const v=await nurGet_("action=nurseryget&id="+encodeURIComponent(snap.id));
+  if(!v||!v.ok) throw new Error("sent, but couldn't check it: "+((v&&v.error)||"no reply"));
+  if(!v.plot) throw new Error("sent, but the Sheet does not have it");
+  if(v.sig!==body.sig) throw new Error("the Sheet holds "+(v.plot.trees||[]).length+" trees, the phone "+snap.trees.length+" — sent again next time");
+  if((p._rev||0)===rev) p._err=""; p._sentRev=Math.max(p._sentRev||0, rev); }
+async function nurDelOne_(d){ let j=null; try{ j=await sheetPost_({_action:"nurserydel", ids:[d.id]}); }catch(e){ throw new Error("couldn't send the delete"); }
+  if(j&&j.ok===false) throw new Error(String(j.error||"the Sheet refused the delete"));
+  const v=await nurGet_("action=nurseryget&id="+encodeURIComponent(d.id));
+  if(!v||!v.ok) throw new Error("couldn't check the delete");
+  if(v.plot) throw new Error("the Sheet still has the plot"); }
+function nurSync_(manual){ if(!NUR) return Promise.resolve();
+  if(_nurBusy){ _nurAgain=true; return _nurBusy; }
+  _nurBusy=(async()=>{ try{ do{ _nurAgain=false; await nurSyncOnce_(manual); manual=false; }while(_nurAgain); } finally{ _nurBusy=null; try{ nurRefreshSync_(); }catch(e){} } })();
+  return _nurBusy; }
+async function nurSyncOnce_(manual){
+  const wait=Object.values(NUR.plots).filter(p=>(p._rev||0)>(p._sentRev||0)), dels=NUR.dels.slice();
+  if(!wait.length&&!dels.length){ if(manual) toast("Every nursery plot is in the Sheet"); return; }
+  if(!connected||isOffline()){ if(manual) toast("No signal — the nursery plots wait on this phone and go when there is",true); return; }
+  try{ nurRefreshSync_(); }catch(e){}
+  let bad=0;
+  for(const d of dels){ try{ await nurDelOne_(d); NUR.dels=NUR.dels.filter(x=>x.id!==d.id); }catch(e){ bad++; d.err=String(e&&e.message||e); } }
+  for(const p of wait){ if(!NUR.plots[p.id]) continue; try{ await nurSendOne_(p); }catch(e){ bad++; p._err=String(e&&e.message||e); } }
+  await nurSave_(); try{ nurRender_(); }catch(e){}
+  if(manual||bad) toast(bad?"⚠ Nursery plots: "+bad+" not in the Sheet yet — "+((wait.find(p=>p._err)||dels.find(d=>d.err)||{})._err||(dels.find(d=>d.err)||{}).err||""):"✓ Nursery plots checked in the Sheet", !!bad); }
+async function nurFromSheet_(){ if(!connected||isOffline()){ toast("Needs signal",true); return; }
+  toast("Asking the Sheet…"); const r=await nurGet_("action=nurseryget&tract="+encodeURIComponent(_nurTract));
+  if(!r||!r.ok||!Array.isArray(r.plots)){ toast("⚠ "+((r&&r.error)||"no reply"),true); return; }
+  let add=0, upd=0, kept=0;
+  r.plots.forEach(q=>{ const have=NUR.plots[q.id];
+    if(have&&(have._rev||0)>(have._sentRev||0)){ kept++; return; }      // the phone's unsent changes win
+    const p={id:q.id, tract:q.tract, stand:q.stand, grid:q.grid, point:q.point, plotnum:q.plotnum, radius:String(q.radius), weeds:q.weeds, notes:q.notes, by:q.by, at:q.at,
+      gps:(q.acc!==""&&q.lat!=="")?{lat:+q.lat, lon:+q.lon, acc:+q.acc, t:q.gtime}:null, pt:(q.acc===""&&q.lat!=="")?[+q.lat,+q.lon]:null,
+      trees:(q.trees||[]).map(t=>({id:t.id, sp:t.sp, cal:t.cal, ht:t.ht, grade:t.grade, health:t.health, def:String(t.def||"").split(/\s+/).filter(Boolean), notes:t.notes})), _rev:1, _sentRev:1};
+    (q.trees||[]).forEach(t=>{ if(t.sp&&!NUR.species[t.sp]) NUR.species[t.sp]={type:t.type==="C"?"C":"D"}; });
+    if(have) upd++; else add++; NUR.plots[q.id]=p; });
+  await nurSave_(); nurDraw_(); toast(`From the Sheet: ${add} new, ${upd} updated`+(kept?`, ${kept} kept (this phone has changes not sent yet)`:"")); }
+/* ---------- summary, key ---------- */
+const nurF_=(v,d)=>(v==null||!isFinite(v))?"–":(+v).toFixed(d==null?0:d);
+function nurSumV_(m){ const ps=nurPlotsOf_(_nurTract), comps=nurComps_(_nurTract), S=nurSummary_(ps, comps), s=nurSetup_(_nurTract);
+  const names=Object.keys(comps).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+  m.innerHTML=`<div class="card"><h2>Live trees per hectare, by compartment</h2><div class="scroll"><table class="t"><tr><th>Cpt</th><th>Plots</th><th>Live/ha</th><th>SE</th><th>CV%</th><th>±%95</th><th>n±15%</th><th>ha</th><th>Stems</th></tr>${
+    S.strata.map(r=>`<tr><td>${esc(r.stand)}</td><td>${r.plots}</td><td>${nurF_(r.perHa)}</td><td>${nurF_(r.se)}</td><td>${nurF_(r.cv,1)}</td><td>${nurF_(r.pm,1)}</td><td>${nurF_(r.need)}</td><td>${r.ha==null?"–":nurF_(r.ha,2)+(r.areaSrc==="typed"?"*":"")}</td><td>${r.stems==null?"–":r.stems.toLocaleString()}</td></tr>`).join("")
+  }</table></div><div class="note">Per ha = live trees ÷ plot area (π r²), averaged over the plots. ±% is the 95 % confidence half-width as a % of the mean (t at n−1); n ±15% is the plots needed for ±15 %. Stems = per ha × the compartment's area (* typed below).</div></div>
+  <div class="card"><h2>Species × size class × grade (live trees/ha)</h2><div class="scroll"><table class="t"><tr><th>Cpt</th><th class="l">Species</th><th class="l">Size class</th><th>A</th><th>B</th><th>C</th><th>Total</th><th>Stems</th></tr>${
+    S.classes.map(r=>`<tr><td>${esc(r.stand)}</td><td class="l">${esc(r.sp)}</td><td class="l">${esc(r.cls)}</td><td>${nurF_(r.A)}</td><td>${nurF_(r.B)}</td><td>${nurF_(r.C)}</td><td>${nurF_(r.tot)}</td><td>${r.stems==null?"–":r.stems.toLocaleString()}</td></tr>`).join("")
+  }</table></div><div class="note">Size classes are the lower bound of the price-list size (a 57 mm tree is in the 50 mm class).</div></div>
+  <div class="card"><h2>Compartment areas</h2><div class="note" style="margin-top:0">Measured from the compartment layer; type a figure to use another (empty = measured).</div>${
+    names.length?names.map(n=>`<div class="row" style="align-items:center;margin-top:6px"><div style="flex:0 0 38%">${esc(n)} <span class="note">${comps[n].src==="typed"?"":nurF_(comps[n].ha,2)+" ha"}</span></div><div><input data-cpt="${esc(n)}" type="number" inputmode="decimal" step="0.01" placeholder="${esc(nurF_(comps[n].src==="typed"?NaN:comps[n].ha,2))}" value="${esc(s.areas[n]==null?"":s.areas[n])}"></div></div>`).join(""):'<div class="note">This property has no compartments yet.</div>'}</div>`;
+  m.querySelectorAll("[data-cpt]").forEach(el=>el.onchange=()=>{ const n=el.dataset.cpt, v=nurNum_(el.value); if(v==null) delete s.areas[n]; else if(v>=0) s.areas[n]=v;
+    nurPlotsOf_(_nurTract).slice(0,1).forEach(p=>nurBump_(p)); nurSave_(); nurDraw_(); }); }
+function nurKeyV_(m){
+  const rows=[["Plot","A circle of the radius set for the property (5 m = 78.5 m²). Measure every tree whose stem is inside; record dead trees as health D."],
+    ["Caliper (mm)","Deciduous trees 30 mm+. Measure 15 cm above ground (30 cm if over 100 mm). Classes: 30, 40, 50, 60, 70, 80, 90, 100+"],
+    ["Height (cm)","Conifers: ground to top of leader. Classes: 60, 80, 100, 125, 150, 175, 200, 250, 300+"],
+    ["Height (cm)","Deciduous whips under 30 mm caliper: record height. Classes: 150, 175, 200, 250+"],
+    ["Grade A","Saleable now: single straight leader, good form and branching, marketable size"],
+    ["Grade B","Saleable after pruning/shaping, or needs another growing season to reach size"],
+    ["Grade C","Cull: poor form, damage, or overgrown/too large to dig"],
+    ["Health","G = good (full crown, normal growth) · F = fair (some dieback, thin crown) · P = poor (major decline) · D = dead"],
+    ["Species","4-letter genus + species (ACRU = red maple, PIGL = white spruce); add cultivar if tagged (ACFR-AB = Autumn Blaze)"]]
+    .concat(NUR_DEFECTS.map(([c,d])=>["Defect "+c, d]), [["Weeds","L / M / H = low / moderate / heavy competition"]]);
+  m.innerHTML='<div class="card"><h2>Key & codes</h2><table class="key">'+rows.map(([a,b])=>`<tr><td>${esc(a)}</td><td>${esc(b)}</td></tr>`).join("")+'</table><div class="note">Record the actual measurement; the app works out the size class. Codes starting '+NUR_CONPFX.join(", ")+' are taken as conifers until you change them.</div></div>'; }
+/* ---------- the map layer ---------- */
+function nurRender_(){ if(typeof fmap==="undefined"||!fmap||!window.L||!NUR) return;
+  if(!_nurLayer) _nurLayer=L.layerGroup().addTo(fmap); _nurLayer.clearLayers();
+  if(layerVis.nursery===false) return;
+  Object.values(NUR.plots).forEach(p=>{ const ll=p.gps?[p.gps.lat,p.gps.lon]:p.pt; if(!ll) return; const live=p.trees.filter(nurLive_).length;
+    L.circleMarker(ll,{radius:7,color:"#0c3d1c",weight:2,fillColor:"#7ee08f",fillOpacity:.95}).addTo(_nurLayer)
+      .bindPopup(`<div style="font-family:system-ui;font-size:12px;color:#16271a"><b>🌱 Nursery plot ${esc(p.plotnum)}</b>${p.stand?" — "+esc(p.stand):""}<br>${live} live tree${live===1?"":"s"} · r ${esc(p.radius)} m<br><a href="javascript:void(0)" onclick="nurOpen_('${p.id}')">Open ›</a></div>`); });
+  try{ renderLayerVis_(); }catch(e){} }
+function nurCount_(){ return NUR?Object.values(NUR.plots).filter(p=>p.gps||p.pt).length:0; }
+function nurBounds_(){ const b=[]; if(NUR) Object.values(NUR.plots).forEach(p=>{ const ll=p.gps?[p.gps.lat,p.gps.lon]:p.pt; if(ll) b.push(ll); }); return b; }
+/* ---------- the workbook (.xlsx, made on the phone, offline) ---------- */
+const NUR_CRC=(()=>{ const t=new Uint32Array(256); for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):c>>>1; t[n]=c>>>0; } return t; })();
+function nurCrc_(u8){ let c=0xFFFFFFFF; for(let i=0;i<u8.length;i++) c=NUR_CRC[(c^u8[i])&0xFF]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
+function nurZip_(files){ const enc=new TextEncoder(), parts=[], cen=[]; let off=0; const d=new Date(), dt=((d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1))&0xFFFF, dd=(((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate())&0xFFFF;
+  for(const f of files){ const nm=enc.encode(f.name), crc=nurCrc_(f.data), sz=f.data.length;
+    const h=new DataView(new ArrayBuffer(30)); h.setUint32(0,0x04034b50,true); h.setUint16(4,20,true); h.setUint16(6,0x0800,true); h.setUint16(8,0,true); h.setUint16(10,dt,true); h.setUint16(12,dd,true); h.setUint32(14,crc,true); h.setUint32(18,sz,true); h.setUint32(22,sz,true); h.setUint16(26,nm.length,true); h.setUint16(28,0,true);
+    parts.push(new Uint8Array(h.buffer), nm, f.data);
+    const c=new DataView(new ArrayBuffer(46)); c.setUint32(0,0x02014b50,true); c.setUint16(4,20,true); c.setUint16(6,20,true); c.setUint16(8,0x0800,true); c.setUint16(10,0,true); c.setUint16(12,dt,true); c.setUint16(14,dd,true); c.setUint32(16,crc,true); c.setUint32(20,sz,true); c.setUint32(24,sz,true); c.setUint16(28,nm.length,true);
+    c.setUint16(30,0,true); c.setUint16(32,0,true); c.setUint16(34,0,true); c.setUint16(36,0,true); c.setUint32(38,0,true); c.setUint32(42,off,true); cen.push(new Uint8Array(c.buffer), nm); off+=30+nm.length+sz; }
+  const cs=cen.reduce((a,b)=>a+b.length,0), e=new DataView(new ArrayBuffer(22)); e.setUint32(0,0x06054b50,true); e.setUint16(8,files.length,true); e.setUint16(10,files.length,true); e.setUint32(12,cs,true); e.setUint32(16,off,true);
+  return new Blob(parts.concat(cen,[new Uint8Array(e.buffer)]),{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}); }
+const nurX_=s=>String(s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+function nurCol_(i){ let s=""; i++; while(i>0){ const m=(i-1)%26; s=String.fromCharCode(65+m)+s; i=Math.floor((i-1)/26); } return s; }
+function nurSheetXml_(sh){ const rows=sh.rows.map((r,ri)=>`<row r="${ri+1}">`+r.map((v,ci)=>{ const ref=nurCol_(ci)+(ri+1); if(v==null||v===""||(typeof v==="number"&&!isFinite(v))) return "";
+    if(ri===0) return `<c r="${ref}" t="inlineStr" s="1"><is><t>${nurX_(v)}</t></is></c>`;
+    if(typeof v==="number") return `<c r="${ref}"><v>${v}</v></c>`;
+    return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${nurX_(v)}</t></is></c>`; }).join("")+"</row>").join("");
+  const cols=(sh.widths||[]).map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>${cols?"<cols>"+cols+"</cols>":""}<sheetData>${rows}</sheetData></worksheet>`; }
+function nurXlsxBlob_(sheets){ const enc=new TextEncoder(), X='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+  const files=[{name:"[Content_Types].xml", s:X+'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+sheets.map((s,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")+'</Types>'},
+    {name:"_rels/.rels", s:X+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
+    {name:"xl/workbook.xml", s:X+'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+sheets.map((s,i)=>`<sheet name="${nurX_(s.name)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join("")+'</sheets></workbook>'},
+    {name:"xl/_rels/workbook.xml.rels", s:X+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+sheets.map((s,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join("")+`<Relationship Id="rId${sheets.length+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`},
+    {name:"xl/styles.xml", s:X+'<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFD9D9D9"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'}]
+    .concat(sheets.map((s,i)=>({name:`xl/worksheets/sheet${i+1}.xml`, s:nurSheetXml_(s)})));
+  return nurZip_(files.map(f=>({name:f.name, data:enc.encode(f.s)}))); }
+const nurR_=(v,d)=>(v==null||!isFinite(v))?null:+(+v).toFixed(d);
+function nurSheets_(tract){ const ps=nurPlotsOf_(tract), comps=nurComps_(tract), S=nurSummary_(ps, comps), s=nurSetup_(tract), trees=[];
+  ps.forEach(p=>p.trees.forEach((t,i)=>trees.push([p.plotnum, p.stand, i+1, t.sp, nurType_(t.sp)==="C"?"Conifer":"Deciduous", nurNum_(t.cal), nurNum_(t.ht), nurSize_(t).label, t.grade, t.health, (t.def||[]).join(" "), t.notes, t.id])));
+  return [
+    {name:"Property", widths:[22,46], rows:[["Field","Value"],["Property",tract],["Client",s.client],["Valuation date",s.date],["Plots",ps.length],["Trees recorded",trees.length],["Exported",new Date().toLocaleString()],["App",APP_BUILD]]},
+    {name:"Plots", widths:[8,14,10,8,9,11,12,9,22,8,30,22,22], rows:[["Plot #","Compartment","Sample point","Radius (m)","Live trees","Dead trees","Latitude","Longitude","GPS ± m (blank: sample point)","Weeds","Notes","Recorded","Plot ID"]]
+      .concat(ps.map(p=>{ const o=nurOut_(p), live=p.trees.filter(nurLive_).length; return [p.plotnum, p.stand, p.point, nurNum_(p.radius), live, p.trees.length-live, o.lat===""?null:o.lat, o.lon===""?null:o.lon, o.acc===""?null:o.acc, p.weeds, p.notes, p.at, p.id]; }))},
+    {name:"Trees", widths:[8,14,7,10,10,10,10,16,7,7,12,30,20], rows:[["Plot #","Compartment","Tree #","Species","Type","Caliper (mm)","Height (cm)","Size class","Grade","Health","Defects","Notes","Tree ID"]].concat(trees)},
+    {name:"Compartments", widths:[14,7,9,11,9,9,9,9,10,11,9,12], rows:[["Compartment","Plots","Live trees","Live trees/ha","SE /ha","CV %","±% (95%)","Plots for ±15%","Dead trees/ha","Area (ha)","Area from","Stems (live)"]]
+      .concat(S.strata.map(r=>[r.stand, r.plots, r.live, nurR_(r.perHa,1), nurR_(r.se,1), nurR_(r.cv,1), nurR_(r.pm,1), nurR_(r.need,0), nurR_(r.deadHa,1), nurR_(r.ha,4), r.areaSrc, r.stems]))},
+    {name:"Size classes", widths:[14,10,10,16,10,10,10,10,11,12], rows:[["Compartment","Species","Type","Size class","Grade A /ha","Grade B /ha","Grade C /ha","No grade /ha","Total /ha","Stems"]]
+      .concat(S.classes.map(r=>[r.stand, r.sp, r.type==="C"?"Conifer":"Deciduous", r.cls, nurR_(r.A,1), nurR_(r.B,1), nurR_(r.C,1), nurR_(r.X,1), nurR_(r.tot,1), r.stems]))}]; }
+async function nurXlsx_(){ await nurSaveNow_(); const t=_nurTract; if(!t) return;
+  const blob=nurXlsxBlob_(nurSheets_(t)), name=("Nursery plots "+t+" "+(nurSetup_(t).date||new Date().toISOString().slice(0,10))).replace(/[\\/:*?"<>|]+/g,"-").replace(/\s+/g," ").trim().slice(0,90)+".xlsx";
+  try{ const f=new File([blob],name,{type:blob.type}); if(navigator.canShare&&navigator.canShare({files:[f]})){ await navigator.share({files:[f], title:name}); return; } }catch(e){ if(e&&e.name==="AbortError") return; }
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },4000); toast("Workbook saved to Downloads"); }
+/* start: load, draw on the map once it exists, send what is waiting now and then */
+(function nurBoot_(){ let tries=0; const go=()=>{ nurLoad_().then(()=>{ const t=setInterval(()=>{ if(++tries>300||(typeof fmap!=="undefined"&&fmap)){ clearInterval(t); try{ nurRender_(); }catch(e){} } },2000); }).catch(()=>{}); };
+  try{ setTimeout(go,1500); setInterval(()=>{ try{ if(NUR&&(NUR.dels.length||Object.values(NUR.plots).some(p=>(p._rev||0)>(p._sentRev||0)))) nurSync_(); }catch(e){} },120000);
+    window.addEventListener("online",()=>setTimeout(()=>{ try{ nurSync_(); }catch(e){} },3000)); }catch(e){} })();
+
 </script>
 </body>
 </html>
