@@ -301,6 +301,7 @@ try{ (function(){
   .rep.tree.just-edited::after{ content:attr(data-t); position:absolute; right:8px; top:-9px;
     background:#f2a83d; color:#1a1000; font:700 10px var(--mono); padding:1px 7px; border-radius:8px; }
   .rep.tree{ position:relative; }
+  #treeRows>.tree-bad{ outline:2px solid #c0392b; outline-offset:2px; border-radius:8px; }      /* v493 */
   select.t_s.needs-dbh, select.needs-entry{ border-color:#c0392b !important; background:#3a1c19 !important; color:#ffd7d0 !important; box-shadow:0 0 0 2px rgba(192,57,43,.35); }
   .live-legend .lr-old{ opacity:.7; } .live-legend .lr-old b{ font-weight:400; }
   .live-legend{ position:absolute; top:calc(env(safe-area-inset-top) + 92px); left:10px; z-index:5200; background:rgba(15,30,13,.92); border:1px solid #33623a; border-radius:8px; padding:7px 9px; font-family:var(--mono); font-size:11.5px; color:#eafae8; max-width:46vw; box-shadow:0 3px 12px rgba(0,0,0,.5); }
@@ -1441,7 +1442,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-23 · v492";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-24 · v493";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -6714,16 +6715,20 @@ function validatePlot(d){
      truthy, so a slot reading 0 used to count as filled: a species with DBH 0 sailed through silently,
      while an imported plot — whose empty slots are written as 0 rather than left blank — looked like 27
      half-finished rows and could not be submitted at all. A DBH counts only when it parses above zero. */
-  let incomplete=0, zeroDbh=0;
+  let incomplete=0, zeroDbh=0; const bad=[];      /* v493: which rows, and what each lacks */
   for(let i=1;i<=28;i++){
     const sp=String(d["T"+i+"SP"]==null?"":d["T"+i+"SP"]).trim();
     const raw=String(d["T"+i+"S"]==null?"":d["T"+i+"S"]).trim();
     const n=parseFloat(raw), has=isFinite(n)&&n>0, isZero=isFinite(n)&&n<=0;
     if(!sp && !has) continue;                       // empty slot — blank, or an imported 0
     if(sp && isZero) zeroDbh++;                     // a real species carrying a zero/negative diameter
-    else if((sp&&!has)||(!sp&&has)) incomplete++;   // one half of the row is missing
+    else if((sp&&!has)||(!sp&&has)){ incomplete++; bad.push({i, sp:!sp, add:treeRowAdd_(i)}); }   // one half of the row is missing
   }
-  if(incomplete) blocks.push({m:`${incomplete} tree row${incomplete>1?"s":""} missing species or DBH — complete or clear them.`,f:"treeRows"});
+  /* v493 (Kathleen, 2026-11-23: "everything is filled" — the app said a row was missing but not which): name the tree,
+     say what it lacks, and Fill it in goes to that row, marked in red. A species box left on "＋ Add species…" looks
+     filled but holds no species. */
+  if(incomplete){ const nm=bad.map(b=>"tree "+b.i+(b.sp?(b.add?" (species box reads “＋ Add species…”)":" (no species)"):" (no DBH)"));
+    blocks.push({m:`${incomplete} tree row${incomplete>1?"s":""} missing species or DBH — ${nm.length>4?nm.slice(0,4).join(", ")+" …":nm.join(", ")}. Complete or clear ${incomplete>1?"them":"it"}; marked in red.`,f:"treeRow:"+bad[0].i, bad}); }
   /* A tallied tree is worth a full BAF of basal area whatever its size, so a 0 here is not a small tree —
      it is a tree that will vanish from basal area, stems and volume without saying so. */
   if(zeroDbh) blocks.push({m:`${zeroDbh} tree${zeroDbh>1?"s have":" has"} a species but a diameter of 0 — enter the DBH, or clear the row if it was tallied by mistake.`,f:"treeRows"});
@@ -6752,8 +6757,16 @@ function validatePlot(d){
 }
 /* Take the crew straight to the field the message is about: open its section, scroll it into
    view, highlight it, and open the picker for a dropdown so it can be filled on the spot. */
+function treeRowAdd_(i){ try{ const r=treeRows.children[i-1], sp=r&&r.querySelector(".t_sp"); return !!(sp&&sp.value===ADD_SENTINEL); }catch(e){ return false; } }
+/* v493: the half-filled tree rows, in red, until fixed */
+function treeRowsMark_(bad){ try{ [...treeRows.children].forEach(r=>r.classList.remove("tree-bad"));
+  (bad||[]).forEach(b=>{ const r=treeRows.children[b.i-1]; if(!r) return; r.classList.add("tree-bad");
+    const el=r.querySelector(b.sp?".t_sp":".t_s"); if(el){ el.classList.add("needs-entry"); el.addEventListener("change",()=>{ if(el.value&&el.value!==ADD_SENTINEL){ el.classList.remove("needs-entry"); r.classList.remove("tree-bad"); } },{once:false}); } }); }catch(e){} }
 function gotoField_(id){
   if(!id) return false;
+  { const m=String(id).match(/^treeRow:(\d+)$/); if(m){ const r=treeRows&&treeRows.children[+m[1]-1]; if(!r) return gotoField_("treeRows");
+      const sec=r.closest("details.sec"); if(sec) sec.open=true; try{ closeMap(); }catch(e){}
+      setTimeout(()=>{ r.scrollIntoView({behavior:"smooth",block:"center"}); const el=r.querySelector(".needs-entry"); if(el){ try{ el.focus({preventScroll:true}); }catch(e){} } },120); return true; } }
   const el=$(id); if(!el) return false;
   const sec=el.closest("details.sec"); if(sec) sec.open=true;
   try{ closeMap(); }catch(e){}   // if the map is up, drop back to the card first
@@ -6775,6 +6788,7 @@ function showValidate(blocks,warns,onProceed){
     blocks.map(o=>`<div class="v-item block"><span class="ic">⛔</span><span>${esc(txt(o))}</span></div>`).join("") +
     warns.map(o=>`<div class="v-item warn"><span class="ic">⚠️</span><span>${esc(txt(o))}</span></div>`).join("");
   const first=[...blocks,...warns].map(fld).find(Boolean)||"";
+  blocks.forEach(o=>{ if(o&&o.bad) treeRowsMark_(o.bad); });      /* v493: only the form being submitted is marked */
   const acts=$("validateActions"); acts.innerHTML="";
   const back=document.createElement("button"); back.className="btn ghost"; back.type="button";
   back.textContent = first ? "Fill it in" : (blocks.length ? "OK" : "Go back");
