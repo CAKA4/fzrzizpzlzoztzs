@@ -301,6 +301,7 @@ try{ (function(){
   .rep.tree.just-edited::after{ content:attr(data-t); position:absolute; right:8px; top:-9px;
     background:#f2a83d; color:#1a1000; font:700 10px var(--mono); padding:1px 7px; border-radius:8px; }
   .rep.tree{ position:relative; }
+  @keyframes xpPulse{ 0%,100%{ opacity:.25 } 50%{ opacity:.65 } }      /* v496: the export panel's working bar */
   #treeRows>.tree-bad{ outline:2px solid #c0392b; outline-offset:2px; border-radius:8px; }      /* v493 */
   select.t_s.needs-dbh, select.needs-entry{ border-color:#c0392b !important; background:#3a1c19 !important; color:#ffd7d0 !important; box-shadow:0 0 0 2px rgba(192,57,43,.35); }
   .live-legend .lr-old{ opacity:.7; } .live-legend .lr-old b{ font-weight:400; }
@@ -1442,7 +1443,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-24 · v493";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-24 · v497";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -6649,19 +6650,55 @@ function fetchTractList_(preselect){
 function runReport(){ const t=$("reportTractSel").value, q=repOptsParams_(); if(q===null) return; closeReportModal(); emailReport(t,q); }
 function runReportPdf(){ const t=$("reportTractSel").value, q=repOptsParams_(); if(q===null) return; closeReportModal(); emailSummaryPdf(t,q); }
 // Email the workbook (data + all summary tabs) to the person's own address. A tract analyses that property alone.
+/* ---------- v496: the export's progress, with "Send as is" ----------
+   Chris (2026-11-24): pressing export gave no sign it was working or how far along it was, and no way to have the file
+   now without waiting for every compartment's notes. A panel follows the export (the Sheet reports each step; asked every
+   3 s): the step, "compartment notes 3 of 6", the time so far; ✉ Send as is stops the notes — the rest keep what they
+   have — skips writing a new property description, and the file goes. Hide keeps it running out of sight. */
+let _xp=null;
+function xpOpen_(job, tract){ xpClose_(true); let el=$("xpPanel");
+  if(!el){ el=document.createElement("div"); el.id="xpPanel"; document.body.appendChild(el); }
+  el.style.cssText="position:fixed;left:12px;right:12px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:99000;background:#10241a;border:1px solid #2f7a44;border-radius:14px;padding:12px 14px;color:#e8f0e6;font:14px system-ui;box-shadow:0 8px 30px rgba(0,0,0,.5)";
+  _xp={job, tract:tract||"", t0:Date.now(), stage:"Starting", done:null, total:null, stopping:false, finished:false, timer:null, hidden:false};
+  xpRender_(); _xp.timer=setInterval(xpPoll_, 3000); setTimeout(xpPoll_, 1200); }
+function xpFmt_(ms){ const s=Math.max(0,Math.round(ms/1000)); return s<60?s+" s":Math.floor(s/60)+" min "+String(s%60).padStart(2,"0")+" s"; }
+function xpRender_(){ const el=$("xpPanel"); if(!el||!_xp) return; if(_xp.hidden){ el.style.display="none"; return; } el.style.display="block";
+  const X=_xp, notes=X.stage==="Writing compartment notes"&&X.total, pct=notes?Math.round(100*(X.done||0)/X.total):null;
+  const title=X.finished?(X.ok?"✓ Workbook emailed":"✗ Export stopped"):"📗 Preparing "+(X.tract?"“"+esc(X.tract)+"”":"all properties")+"…";
+  const line=X.finished?esc(X.msg||""):esc(X.stage)+(notes?" — "+(X.done||0)+" of "+X.total:"")+(X.stopping&&!X.finished?" · sending as is…":"");
+  el.innerHTML=`<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><b>${title}</b><span style="color:#8fae95;font-size:12px">${xpFmt_((X.endAt||Date.now())-X.t0)}</span></div>`+
+    `<div style="margin-top:4px;color:#cfe6d3;font-size:13px">${line}</div>`+
+    (!X.finished?`<div style="height:6px;background:#203a28;border-radius:4px;margin-top:8px;overflow:hidden"><div style="height:100%;width:${pct==null?100:Math.max(4,pct)}%;background:#4cc274;${pct==null?"opacity:.45;animation:xpPulse 1.4s ease-in-out infinite":""}"></div></div>`:"")+
+    `<div style="display:flex;gap:8px;margin-top:10px">`+
+      (!X.finished?`<button type="button" class="btn ${X.stopping?"ghost":"submit"}" style="flex:2;padding:8px" ${X.stopping?"disabled":""} onclick="xpStop_()">${X.stopping?"Sending as is…":"✉ Send as is now"}</button>`:"")+
+      `<button type="button" class="btn ghost" style="flex:1;padding:8px" onclick="${X.finished?"xpClose_()":"xpHide_()"}">${X.finished?"Close":"Hide"}</button></div>`+
+    (!X.finished&&!X.stopping?`<div style="color:#8fae95;font-size:11px;margin-top:6px">Send as is stops writing the remaining compartment notes (they keep their last summary or a short digest) and uses the saved property description.</div>`:""); }
+function xpPoll_(){ if(!_xp||_xp.finished) return; const job=_xp.job;
+  jsonp_("action=exportprog&job="+encodeURIComponent(job), r=>{ if(!_xp||_xp.job!==job||_xp.finished) return; const p=r&&r.prog;
+    if(p){ _xp.stage=p.stage||_xp.stage; _xp.done=p.done; _xp.total=p.total; if(p.stopped) _xp.stopping=true; }
+    xpRender_(); }, 15000); }
+function xpStop_(){ if(!_xp||_xp.finished||_xp.stopping) return; const job=_xp.job; _xp.stopping=true; xpRender_();
+  jsonp_("action=exportstop&job="+encodeURIComponent(job), r=>{ if(!(r&&r.ok)&&_xp&&_xp.job===job){ _xp.stopping=false; xpRender_(); toast("Couldn't reach the Sheet to stop the notes — the export carries on",true); } }, 15000); }
+function xpHide_(){ if(!_xp) return; _xp.hidden=true; xpRender_(); toast("The export carries on — you'll get a message when it's emailed"); }
+function xpDone_(job, resp){ if(!_xp||_xp.job!==job) return; clearInterval(_xp.timer); _xp.finished=true; _xp.endAt=Date.now(); _xp.ok=!!(resp&&resp.ok);
+  const n=resp&&resp.notes; _xp.msg=_xp.ok?("Sent to "+(resp.to||"you")+(n&&n.total?" · compartment notes "+n.written+" of "+n.total+(n.stopped?" (sent as is — export again to finish them)":""):"")):((resp&&resp.error)||"Couldn't email the report");
+  if(_xp.hidden&&!_xp.ok) _xp.hidden=false; xpRender_(); if(_xp.ok) setTimeout(()=>{ if(_xp&&_xp.job===job) xpClose_(); }, 12000); }
+function xpClose_(quiet){ if(_xp){ clearInterval(_xp.timer); } _xp=null; const el=$("xpPanel"); if(el) el.style.display="none"; }
 function emailReport(tract, extra){
   if(!connected){ toast("Connect to a Sheet first",true); return; }
   if(mailNeedsEmail_()){ toast("Add your email in “Entered by” first — that's where the report goes",true); openCruiser(); return; }
   if(isOffline()){ toast("Need internet to email the report",true); return; }
   const t=String(tract||"").trim();
-  toast(`Analyzing ${t?`“${t}”`:"all plots"} and emailing to ${mailToWords_()} — this can take a moment…`);
+  toast(`Analyzing ${t?`“${t}”`:"all plots"} and emailing to ${mailToWords_()} — the panel below follows it`);      /* says where it goes (other accounts: the address on the login) */
+  const job="x"+Date.now().toString(36)+Math.random().toString(36).slice(2,8);      /* v496: so the phone can follow it and stop the notes */
+  xpOpen_(job, t);
   const cb="__mail"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?";
   const sc=document.createElement("script");
   const cleanup=()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(sc.parentNode) sc.parentNode.removeChild(sc); };
-  window[cb]=resp=>{ if(resp&&resp.ok) toast(`✓ Report emailed to ${resp.to}${resp.tract?` — ${resp.tract}`:""} — check your inbox`);
+  window[cb]=resp=>{ xpDone_(job, resp); if(resp&&resp.ok) toast(`✓ Report emailed to ${resp.to}${resp.tract?` — ${resp.tract}`:""} — check your inbox`);
                      else toast("Couldn't email the report"+((resp&&resp.error)?": "+resp.error:""),true); cleanup(); };
-  sc.onerror=()=>{ cleanup(); toast("Couldn't reach the Sheet — check your connection",true); };
-  sc.src=SCRIPT_URL+sep+tokQ_()+"action=emailreport&to="+encodeURIComponent(cruiserEmail)+(t?"&tract="+encodeURIComponent(t):"")+(extra||"")+"&callback="+cb;
+  sc.onerror=()=>{ cleanup(); xpDone_(job, {ok:false, error:"Couldn't reach the Sheet"}); toast("Couldn't reach the Sheet — check your connection",true); };
+  sc.src=SCRIPT_URL+sep+tokQ_()+"action=emailreport&to="+encodeURIComponent(cruiserEmail)+(t?"&tract="+encodeURIComponent(t):"")+(extra||"")+"&job="+job+"&callback="+cb;
   document.body.appendChild(sc);
 }
 
@@ -16603,7 +16640,7 @@ function cgCut_(pieces, line){
     cur.sort((a,b)=>cgPieceHa_(b)-cgPieceHa_(a));
     cur.forEach((rs,i)=>out.push(i===0 ? Object.assign({},pc,{rings:rs}) : {id:null, name:null, tract:pc.tract, rings:rs, from:pc.id}));
   });
-  if(!cut) return {err: why==="hole" ? "That cut runs into a hole in the property — cut either side of it" : "The cut line has to cross a piece from one edge to another"};
+  if(!cut) return {err: why==="hole" ? "That cut runs into a hole — an island compartment, or a hole in the property. To make a piece that touches an island, draw it with ＋ Add instead" : "The cut line has to cross a piece from one edge to another"};
   // snap the cut's ends to the real corners now in the pieces, then give neighbours those corners
   const corners={}; out.forEach(pc=>pc.rings.forEach(r=>r.forEach(p=>{ corners[cgKey_(p)]=p; })));
   const endPts=ends.map(e=>{ const q=P.xy(e); let best=null; Object.values(corners).forEach(c=>{ const v=P.xy(c), d=Math.hypot(v[0]-q[0],v[1]-q[1]); if(d<=CG_EDGE_M&&(!best||d<best.d)) best={d,c}; }); return best?best.c:e; });
@@ -16980,6 +17017,7 @@ function csBarRemove_(){ try{ document.body.classList.remove("bar-open"); }catch
 function csTmpClear_(){ try{ _csTmp.forEach(m=>fmap.removeLayer(m)); }catch(e){} _csTmp=[]; }
 function csMode_(m){ if(!_csEd) return; _csEd.mode=m; _csEd.line=[]; _csEd.pick=null; csTmpClear_(); csRender_(); csBar_();
   toast(m==="cut"?"Tap points across the piece, starting and ending outside it (or on its edge) — then Apply cut"
+       :m==="add"?"Tap the corners around the new piece, inside the compartment it comes out of. Let it overlap the pieces next to it a little — they keep their ground and the edges match — then ✓ Add piece"
        :m==="merge"?"Tap the two pieces to join"
        :m==="move"?"Drag a red corner — the compartments either side follow. Drag a small ○ on a line to add a corner; tap a corner to remove it. Grey corners are the outline's (⬚ Outline corners)"
        :m==="outline"?"Drag a blue corner of the property outline — the compartments follow and stay inside it. Drag a small ○ to add a corner; tap a corner to remove it"
@@ -17072,7 +17110,9 @@ function csBar_(){
   const chk=csCheck_(_csEd.tract); if(!chk.ok) h+=`<div style="color:#ffd24a;font-size:12px;margin-bottom:6px">${chk.over?"Some pieces overlap — two phones may have cut it at the same time. Join or undo until they fit, or start again from the outline.":"The pieces add up to "+chk.layHa.toFixed(2)+" ha but the outline is "+chk.propHa.toFixed(2)+" ha — the outline may have changed since. Start again from the outline to match it."}</div>`;
   if(m==="cut") h+=`<div style="margin-bottom:6px;color:#cfe3d2">${_csEd.line.length} point${_csEd.line.length===1?"":"s"} on the cut line${_csEd.line.length>=3?" · or close it into an island inside a piece":""}</div><div style="display:flex;gap:6px">`+
      B("csApplyCut_()","✂ Apply cut",true)+B("csApplyIsland_()","◌ Island",_csEd.line.length>=3)+B("csLineUndo_()","↶ Point")+B("csMode_('idle')","Cancel")+`</div>`;
-  else h+=`<div style="display:flex;gap:6px;margin-bottom:6px">`+(n?B("csMode_('cut')","✂ Cut",m==="cut")+B("csMode_('merge')","⊕ Merge",m==="merge")+B("csMode_('move')","✥ Corners",m==="move"):"")+B("csMode_('outline')","⬚ Outline",m==="outline")+`</div>`+      /* v466: two rows — six buttons did not fit a phone */
+  else if(m==="add") h+=`<div style="margin-bottom:6px;color:#cfe3d2">${_csEd.line.length} corner${_csEd.line.length===1?"":"s"} around the new piece · overlap the pieces next to it a little — the overlap is trimmed off</div><div style="display:flex;gap:6px">`+
+     B("csApplyAdd_()","✓ Add piece",_csEd.line.length>=3)+B("csLineUndo_()","↶ Point")+B("csMode_('idle')","Cancel")+`</div>`;      /* v497 */
+  else h+=`<div style="display:flex;gap:6px;margin-bottom:6px">`+(n?B("csMode_('cut')","✂ Cut",m==="cut")+B("csMode_('add')","＋ Add",m==="add")+B("csMode_('merge')","⊕ Merge",m==="merge")+B("csMode_('move')","✥ Corners",m==="move"):"")+B("csMode_('outline')","⬚ Outline",m==="outline")+`</div>`+      /* v466: two rows — six buttons did not fit a phone */
      `<div style="display:flex;gap:6px">`+B("csUndo_()","↶ Undo")+B("csDone_()",_pw&&_pw.step==="cut"?"✓ Next: names ▸":_pw&&_pw.step==="edit"?"✓ Done ▸":"✓ Done",!!(_pw&&(_pw.step==="cut"||_pw.step==="edit")))+`</div>`+
      (m==="idle"?`<div style="margin-top:6px;color:#a9c9b0;font-size:12px">Tap a piece to name it and set its class.</div>`:"")+
      ((m==="move"||m==="outline")?`<div style="margin-top:6px;color:#a9c9b0;font-size:12px;line-height:1.4">${m==="outline"?"<b style='color:#7cc4ff'>Outline corners</b> — drag a blue corner; the compartments follow. ○ adds a corner.":"<b style='color:#ff8a80'>Compartment corners</b> — drag a red corner; the compartments either side follow. ○ adds a corner."}</div>`+
@@ -17096,7 +17136,7 @@ function csPieceAt_(lat,lon){ return csPieceInner_(lat,lon,csOf_(_csEd?_csEd.tra
 function csTap_(ll){
   if(!_csEd) return false;
   const m=_csEd.mode;
-  if(m==="cut"){ const p=csSnap_(ll); _csEd.line.push(cgLL_(p));
+  if(m==="cut"||m==="add"){ const p=csSnap_(ll); _csEd.line.push(cgLL_(p));
     try{ csTmpClear_(); _csTmp.push(L.polyline(_csEd.line,{color:"#ff3b30",weight:3,dashArray:"8 6",interactive:false}).addTo(fmap));
       _csEd.line.forEach(q=>_csTmp.push(L.circleMarker(q,{radius:5,color:"#fff",weight:2,fillColor:"#ff3b30",fillOpacity:1,interactive:false}).addTo(fmap))); }catch(e){}
     csBar_(); return true; }
@@ -17110,6 +17150,50 @@ function csTap_(ll){
   if(m==="move") return false;
   if(pc){ csAttrOpen_(pc.id); return true; }
   return false;
+}
+/* v497 — a piece where there is none yet (Chris, 2026-11-24: an area north of C-2 on 1600 Bethesda SDRD was in no piece,
+   so ✂ Cut had nothing to cut and Apply cut only said so). ＋ Add: tap corners around it; whatever overlaps existing pieces
+   is trimmed off, so the new piece shares their edges exactly; it gets the next C-n name and can be named like any piece. */
+function cgAdd_(pieces, ring){
+  if(!ring||ring.length<3) return {err:"Tap at least three corners around the new piece"};
+  if(typeof polygonClipping==="undefined") return {err:"This phone can't do that yet — reload the app"};
+  const P=cgProj_(ring[0][0],ring[0][1]), R=ring.map(P.xy);
+  if(cgSelfCross_(ring,P) || Math.abs(cgArea_(R))<1) return {err:"The corners cross over or enclose no area — tap them in order around the piece"};
+  const close=a=>{ const b=a.slice(); const f=b[0], l=b[b.length-1]; if(f[0]!==l[0]||f[1]!==l[1]) b.push(f); return b; };
+  const polyOf=pc=>pc.rings.map(r=>close(r.map(cgLL_).map(P.xy))), Rp=[close(R)];
+  const area=rs=>Math.abs(cgArea_(rs[0].slice(0,-1)))-rs.slice(1).reduce((t,h)=>t+Math.abs(cgArea_(h.slice(0,-1))),0);
+  const mArea=mp=>(mp||[]).reduce((t,rs)=>t+area(rs),0), keep=mp=>(mp||[]).filter(rs=>rs&&rs[0]&&rs[0].length>=4&&area(rs)>=10);
+  pieces=pieces||[];
+  /* v497b — the piece it is drawn in gives up the ground (Chris: north of C-2 was C-1, with C-2 an island in it, so a cut
+     from C-2 into C-1 and back ran into C-1's hole). The host is the piece the new one overlaps most; every other piece
+     keeps its ground — the new piece is trimmed against them — and uncovered ground is taken as well. Drawn mostly over
+     uncovered ground, there is no host: every piece keeps its ground. */
+  let host=null, best=0;
+  try{ pieces.forEach(pc=>{ const a=mArea(polygonClipping.intersection(Rp, polyOf(pc))); if(a>best){ best=a; host=pc; } }); }catch(e){ return {err:"Couldn't fit that piece against its neighbours — try fewer corners"}; }
+  if(best<10 || best<0.5*Math.abs(cgArea_(R))) host=null;      /* mostly in no piece: new ground, neighbours keep theirs */
+  const others=pieces.filter(pc=>pc!==host);
+  let N;
+  try{ N=keep(others.length?polygonClipping.difference(Rp, ...others.map(polyOf)):[Rp]); }catch(e){ return {err:"Couldn't fit that piece against its neighbours — try fewer corners"}; }
+  if(!N.length) return {err:"That area is already in other pieces — draw it over the compartment it should come out of"};
+  const back=rs=>rs.map(r=>r.slice(0,-1).map(P.ll));
+  let out=others.slice(), hostName="";
+  if(host){ let H; try{ H=keep(polygonClipping.difference(polyOf(host), N)); }catch(e){ return {err:"Couldn't fit that piece against its neighbours — try fewer corners"}; }
+    if(!H.length) return {err:"That would take all of "+host.name+" — rename "+host.name+" instead, or draw a smaller piece"};
+    H.sort((a,b)=>area(b)-area(a)); hostName=host.name;
+    out.push(Object.assign({},host,{rings:back(H[0])}));
+    H.slice(1).forEach(rs=>out.push({id:null, name:null, rings:back(rs), from:host.id})); }
+  N.forEach(rs=>out.push({id:null, name:null, rings:back(rs)}));
+  return {pieces:out, nNew:N.length, ha:mArea(N)/10000, host:hostName};
+}
+function csApplyAdd_(){
+  if(!_csEd) return; const t=_csEd.tract, ring=cgDedupe_(_csEd.line.map(cgLL_));
+  const r=cgAdd_(csOf_(t), ring);
+  if(r.err){ toast(r.err,true); return; }
+  const before=csOf_(t).map(c=>c.id);
+  csCommit_(t, r.pieces.map(a=>Object.assign(a,{tract:t})), "add"+(r.host?" from "+r.host:""));
+  _csEd.line=[]; csTmpClear_(); _csEd.mode="idle"; csRender_(); csBar_();
+  const added=csOf_(t).filter(c=>before.indexOf(c.id)<0).map(c=>c.name);
+  toast("Added "+added.join(", ")+" ("+r.ha.toFixed(2)+" ha"+(r.host?", taken from "+r.host:"")+") — tap it to name it");
 }
 function csLineUndo_(){ if(!_csEd||!_csEd.line.length) return; _csEd.line.pop(); const l=_csEd.line.slice(); _csEd.line=[]; csTmpClear_(); l.forEach(p=>csTap_({lat:p[0],lng:p[1]})); csBar_(); }
 function csApplyCut_(){
