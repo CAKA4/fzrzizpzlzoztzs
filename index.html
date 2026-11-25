@@ -1194,6 +1194,7 @@ try{ (function(){
 
       <!-- v498: nursery valuation plots — kept apart from the forest plots (own records, own Sheet tabs) -->
       <details class="mgroup" id="mgNursery"><summary>🌱 Nursery plots</summary>
+        <button type="button" onclick="closeMore();nurModePick_()">🧭 What are you sampling?<span class="msub">Forest inventory plots or nursery stock — sets the map's plot button and the form it opens</span></button>
         <button type="button" onclick="closeMore();nurOpen_()">🌱 Nursery valuation plots<span class="msub">Trees by species, size and grade in fixed-radius plots; per-ha figures by compartment</span></button>
       </details>
 
@@ -1448,7 +1449,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-24 · v503";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-25 · v505";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -7733,8 +7734,10 @@ function initMap(){
     if(typeof refTapChoose_==="function" && refTapChoose_(ll)) return;      // v451: a reference polygon here — it, or the compartment, as chosen
     /* v419: a compartment of the property shown opens its sheet — name, class, property, cut, remove */
     try{ if(typeof csPieceAtAny_==="function" && mapDetail_()){ const pc=csPieceAtAny_(ll.lat,ll.lng); if(pc){ showBoundPopup(ll, csFeature_(pc)); return; } } }catch(e){}   // v420: the popup (Layer · Analysis · Species · Marking), with ✎ Edit in it; v421: a piece of any property
-    { const bf=boundaryFeatureAt(ll.lat,ll.lng); if(bf) showBoundPopup(ll,bf); }
+    { const bf=boundaryFeatureAt(ll.lat,ll.lng); if(bf){ showBoundPopup(ll,bf); return; } }
+    if(typeof lioTapPopup_==="function") lioTapPopup_(ll);      /* v504: nothing of yours here — what the provincial layers say */
   }catch(err){ toast("Couldn't open that: "+String(err&&err.message||err).slice(0,80),true); } };
+  fmap.on("preclick",()=>{ try{ if(fmap._popup&&fmap.hasLayer(fmap._popup)) _lioPopOpenAt=Date.now(); }catch(e){} });      // v504
   let _mapClickAt=0; fmap.on("click",e=>{ _mapClickAt=Date.now(); mapTapHandle_(e.latlng); });
   try{ const c=fmap.getContainer(); let t0=0, p0=null, moved=false;
     c.addEventListener("touchstart",e=>{ if(e.touches.length!==1){ p0=null; return; } t0=Date.now(); p0=[e.touches[0].clientX,e.touches[0].clientY]; moved=false; },{passive:true});
@@ -8890,7 +8893,7 @@ function renderBoundPopup_(){
   /* The species table is five columns and the marking table is four bands plus a removed/kept
      split — both need more room than the two-column Layer view. */
   const wide=(_bpView==="species"||_bpView==="marking");
-  const body=`<div style="max-height:${wide?"52vh":"38vh"};overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${table}${ageMsg}${note}${rpt}${edit}${(typeof refAltHtml_==="function")?refAltHtml_():""}</div>`;
+  const body=`<div style="max-height:${wide?"52vh":"38vh"};overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px">${table}${ageMsg}${note}${rpt}${edit}${(typeof refAltHtml_==="function")?refAltHtml_():""}${(typeof lioHereHtml_==="function")?lioHereHtml_(_bpLatLng,true):""}</div>`;
   _bpPopup=L.popup({maxWidth:wide?340:280,autoPan:true,className:"bpop"+(wide?" bpop-wide":"")}).setLatLng(_bpLatLng)
     .setContent(`<div style="font-family:'Courier New',monospace;color:#16271a;line-height:1.4">`+
       `<b style="font-size:13px">${esc(title)}</b>`+
@@ -10049,7 +10052,9 @@ function confirmPlace(){
   window.scrollTo({top:0,behavior:"smooth"});
   toast(stand?`Location set · Stand ID → ${stand}`:"Location set — choose Stand ID");
 }
-function resetDropBar(){ $("mapDrop").innerHTML='<button class="dropbtn" type="button" onclick="startCapture()">＋ Create inventory plot</button>'; }
+function resetDropBar(){ let nur=false; try{ nur=!!(NUR&&NUR.sampling==="nursery"); }catch(e){}      /* v505: the map's plot button follows what you are sampling (☰ Menu → 🌱 → What are you sampling?) */
+  $("mapDrop").innerHTML=nur?'<button class="dropbtn" type="button" onclick="nurMapAdd_(false)">🌱 ＋ Nursery plot</button><button class="dropbtn" type="button" onclick="nurMapAdd_(true)">📍 At my GPS</button><button class="dropbtn" type="button" onclick="nurOpen_()">🌱 Plots</button>'
+    :'<button class="dropbtn" type="button" onclick="startCapture()">＋ Create inventory plot</button>'; }
 // Zoom to fit everything currently loaded (plots, boundaries, imported points, track).
 function fitAllLayers_(quiet){
   if(!fmap) return; const b=[];
@@ -13746,8 +13751,10 @@ function twNearest_(fc, lat, lon){ let best=null; ((fc&&fc.features)||[]).forEac
 function lioToggle_(k){ lioVis[k]=!lioVis[k]; try{ STORE&&STORE.setItem("fi_liovis",JSON.stringify(lioVis)); }catch(e){} lioRender_(); }
 function lioTogglesHtml_(){
   return `<div class="layer-hd" style="margin-top:2px">Provincial layers</div>`+LIO_LAYERS.filter(L_=>L_.k!=="towns").map(L_=>{ const n=(lioCache&&lioCache.layers&&lioCache.layers[L_.k]&&lioCache.layers[L_.k].n)||0, on=!!lioVis[L_.k];
-    return `<div class="visrow"><span onclick="lioToggle_('${L_.k}')" style="flex:1;cursor:pointer">${esc(L_.label)} <small>(${n})</small></span>`+
-      `<span class="visdot ${on?"on":""}" onclick="lioToggle_('${L_.k}')" style="cursor:pointer">${on?"ON":"OFF"}</span></div>`; }).join("");
+    const lb=LIO_LBL_KEYS[L_.k]?`<span class="visdot ${lioLbl[L_.k]!==false&&on?"on":""}" title="${esc(LIO_LBL_KEYS[L_.k])} on the map" onclick="lioLblToggle_('${L_.k}')" style="cursor:pointer;margin-right:6px;${on?"":"opacity:.45"}">Aa ${lioLbl[L_.k]!==false?"ON":"OFF"}</span>`:"";
+    return `<div class="visrow"><span onclick="lioToggle_('${L_.k}')" style="flex:1;cursor:pointer">${esc(L_.label)} <small>(${n})</small></span>`+lb+
+      `<span class="visdot ${on?"on":""}" onclick="lioToggle_('${L_.k}')" style="cursor:pointer">${on?"ON":"OFF"}</span></div>`; }).join("")+
+    `<div class="ls-muted" style="font-size:11px;padding:2px 2px 6px">Aa = names on the map (rivers, lakes, wetlands, lots, contour heights). Tap the map for what's there.</div>`;
 }
 /* ============ v399 — what the map shows at each zoom ============
    Zoomed out (below MAP_DETAIL_ZOOM) the map is for finding your way: every property's outline and name, roads and
@@ -13927,10 +13934,70 @@ function lioRender_(){
 function lioLabels_(){
   if(!lioLabelLayer||!fmap) return; const _it=[];
   try{ lioLabels0_(_it); }finally{ lblSync_(lioLabelLayer,_it); } }      /* v444 */
+/* v504 (Chris, 2026-11-25): river, creek and lake names, wetland names (PSW = provincially significant) and contour
+   elevations from the provincial layers' own attributes, each switchable in ◫ Layers (Aa) — shown only when that layer is on. */
+const LIO_LBL_KEYS={lots:"Lot · concession", water:"River & creek names", waterbody:"Lake & pond names", wetland:"Wetland names", contour:"Contour elevations"};
+let lioLbl={lots:true, water:true, waterbody:true, wetland:true, contour:true};
+try{ const v=JSON.parse((STORE&&STORE.getItem("fi_liolbl"))||"null"); if(v&&typeof v==="object") Object.assign(lioLbl,v); }catch(e){}
+function lioLblToggle_(k){ lioLbl[k]=!(lioLbl[k]!==false); try{ STORE&&STORE.setItem("fi_liolbl",JSON.stringify(lioLbl)); }catch(e){} lioLabels_(); try{ renderLayerVis_(); }catch(e){} }
+function lioLines_(f){ const g=f&&f.geometry; if(!g) return []; const ls=g.type==="LineString"?[g.coordinates]:(g.type==="MultiLineString"?g.coordinates:[]); return ls.map(l=>(l||[]).map(c=>[c[1],c[0]])); }
+function lioInRing_(lat,lon,ring){ let ins=false; for(let i=0,j=ring.length-1;i<ring.length;j=i++){ const yi=ring[i][0], xi=ring[i][1], yj=ring[j][0], xj=ring[j][1];
+  if(((yi>lat)!==(yj>lat))&&(lon<(xj-xi)*(lat-yi)/(yj-yi)+xi)) ins=!ins; } return ins; }
+function lioInPoly_(lat,lon,pg){ if(!pg||!pg[0]||!lioInRing_(lat,lon,pg[0])) return false; for(let h=1;h<pg.length;h++) if(lioInRing_(lat,lon,pg[h])) return false; return true; }
+/* a point inside a polygon for its name: the middle of the widest inside stretch across its middle */
+function lioLabelPt_(pg){ const ring=pg[0]||[]; if(ring.length<3) return null; let s=1/0,n=-1/0,w=1/0,e=-1/0; ring.forEach(q=>{ if(q[0]<s)s=q[0]; if(q[0]>n)n=q[0]; if(q[1]<w)w=q[1]; if(q[1]>e)e=q[1]; });
+  let best=null; [0.5,0.4,0.6,0.3,0.7].forEach(fr=>{ if(best) return; const lat=s+(n-s)*fr, xs=[];
+    pg.forEach(rg=>{ for(let i=0,j=rg.length-1;i<rg.length;j=i++){ const a=rg[j], b2=rg[i]; if((a[0]>lat)!==(b2[0]>lat)) xs.push(a[1]+(lat-a[0])*(b2[1]-a[1])/(b2[0]-a[0])); } });
+    xs.sort((a,b)=>a-b); let wd=0; for(let i=0;i+1<xs.length;i+=2) if(xs[i+1]-xs[i]>wd){ wd=xs[i+1]-xs[i]; best=[lat,(xs[i]+xs[i+1])/2]; } });
+  return best; }
+/* a spot along a line inside the view, and the angle to set the text along it (kept upright) */
+function lioLineSpot_(lines, view){ let best=null;
+  lines.forEach(l0=>{ const l=[]; for(let i=0;i<l0.length;i++){ if(i){ const a=l0[i-1], b2=l0[i]; for(let k=1;k<4;k++) l.push([a[0]+(b2[0]-a[0])*k/4, a[1]+(b2[1]-a[1])*k/4]); } l.push(l0[i]); }      /* long straight runs: points along them too */
+    const inv=l.filter(q=>view.contains(q)); if(inv.length<2) return; const i=Math.floor(inv.length/2), a=inv[Math.max(0,i-1)], b2=inv[Math.min(inv.length-1,i+1)];
+    if(!best||inv.length>best.n){ const pa=fmap.latLngToContainerPoint(a), pb=fmap.latLngToContainerPoint(b2); let ang=Math.atan2(pb.y-pa.y,pb.x-pa.x)*180/Math.PI; if(ang>90) ang-=180; if(ang<-90) ang+=180;
+      best={ll:inv[i], ang, n:inv.length}; } }); return best; }
+function lioTxt_(c, txt, css, ang){ const h=`<span style="display:inline-block;transform:translate(-50%,-50%) rotate(${Math.round(ang||0)}deg);white-space:nowrap;${css}">${esc(txt)}</span>`;
+  return {k:c.join(",")+"|"+h, make:()=>L.marker(c,{interactive:false,keyboard:false,icon:L.divIcon({className:"lio-lbl",html:h,iconSize:[0,0]})})}; }
+/* v504: tap for details — what each provincial layer that is on has at the tap: the polygon it is in (lot, wetland, lake,
+   woodland, building), or a line within ~14 px (river, road, contour), with its attributes in plain words. */
+const LIO_FLD={OFFICIAL_NAME_LABEL:"Name", WATERCOURSE_TYPE:"Type", WATERBODY_TYPE:"Type", PERMANENCY:"Permanency", WETLAND_TYPE:"Type", WETLAND_SIGNIFICANCE:"Significance",
+  EVALUATED_WETLAND_NAME:"Name", LOT_IDENT:"Lot", CONCESSION_IDENT:"Concession", GEOGRAPHIC_TOWNSHIP_NAME:"Township", ROAD_ELEMENT_TYPE:"Road type", ELEVATION:"Elevation (m)",
+  BUILDING_TYPE:"Type", WOODED_AREA_TYPE:"Type"};
+function lioHits_(ll){ const out=[]; if(!lioCache||!fmap||propK_(lioCacheTract)!==propK_(propActiveTract_())) return out;
+  const tp=fmap.latLngToContainerPoint(ll), TOL=14;
+  const segD=(p,a,b)=>{ const dx=b.x-a.x, dy=b.y-a.y, L2=dx*dx+dy*dy; let t=L2?((p.x-a.x)*dx+(p.y-a.y)*dy)/L2:0; t=Math.max(0,Math.min(1,t)); const x=a.x+t*dx-p.x, y=a.y+t*dy-p.y; return Math.sqrt(x*x+y*y); };
+  LIO_LAYERS.forEach(L_=>{ const d=lioCache.layers[L_.k]; if(L_.k==="towns"||!lioVis[L_.k]||!d||!d.fc) return; let best=null;
+    d.fc.features.forEach(f=>{ const g=f.geometry||{};
+      if(/Polygon/.test(g.type||"")){ if(featPolys_(f).some(pg=>lioInPoly_(ll.lat,ll.lng,pg))&&!best) best={f, dist:0}; return; }
+      lioLines_(f).forEach(l=>{ for(let i=1;i<l.length;i++){ const dd=segD(tp,fmap.latLngToContainerPoint(l[i-1]),fmap.latLngToContainerPoint(l[i])); if(dd<=TOL&&(!best||dd<best.dist)) best={f,dist:dd}; } }); });
+    if(best){ const pr=best.f.properties||{}, rows=Object.keys(pr).filter(k=>k!=="OGF_ID"&&pr[k]!==null&&pr[k]!==""&&String(pr[k]).trim()!=="").map(k=>[LIO_FLD[k]||k, String(pr[k])]);
+      out.push({label:L_.label, rows}); } });
+  return out; }
+function lioHereHtml_(ll, folded){ const hits=lioHits_(ll); if(!hits.length) return "";
+  const body=hits.map(h=>`<div style="margin-top:6px"><b style="font-size:11px">${esc(h.label)}</b>`+(h.rows.length?`<table style="border-collapse:collapse;font-size:11px;width:100%">`+h.rows.map(([k,v])=>`<tr><td style="color:#5a7a62;padding:0 8px 0 0;vertical-align:top;white-space:nowrap">${esc(k)}</td><td style="vertical-align:top">${esc(v)}</td></tr>`).join("")+`</table>`:`<div style="font-size:11px;color:#5a7a62">no details</div>`)+`</div>`).join("");
+  return folded?`<details style="margin-top:10px;border-top:1px solid #cfe0d2;padding-top:4px"><summary style="cursor:pointer;font-size:11px;color:#5a7a62">Provincial layers here (${hits.length})</summary>${body}</details>`:body; }
+/* a tap that only closes the popup open at the time does not open the provincial one (lots cover all the land) */
+let _lioPopOpenAt=0;
+function lioTapPopup_(ll){ if(!mapDetail_()) return false;
+  if(Date.now()-_lioPopOpenAt<700) return false; try{ if(fmap._popup&&fmap.hasLayer(fmap._popup)){ fmap.closePopup(); return false; } }catch(e){}
+  const h=lioHereHtml_(ll,false); if(!h) return false;
+  L.popup({maxWidth:280,autoPan:true,className:"bpop"}).setLatLng(ll).setContent(`<div style="font-family:system-ui;color:#16271a;line-height:1.35"><b style="font-size:12px">Provincial layers here</b>${h}<div style="font-size:9px;color:#7a8a7e;margin-top:6px">${esc(LIO_ATTRIB)}</div></div>`).openOn(fmap); return true; }
 function lioLabels0_(_it){
-  if(!lioCache||!lioVis.lots||propK_(lioCacheTract)!==propK_(propActiveTract_())||fmap.getZoom()<15) return;
+  if(!lioCache||propK_(lioCacheTract)!==propK_(propActiveTract_())) return;
+  const z=fmap.getZoom(), view=fmap.getBounds(), halo="text-shadow:0 0 3px #fff,0 0 2px #fff,0 0 1px #fff;";
+  const on=k=>lioVis[k]&&lioLbl[k]!==false&&lioCache.layers[k]&&lioCache.layers[k].fc;
+  if(on("water")&&z>=14){ const by={}; lioCache.layers.water.fc.features.forEach(f=>{ const nm=String((f.properties||{}).OFFICIAL_NAME_LABEL||"").trim(); if(nm) (by[nm]=by[nm]||[]).push(...lioLines_(f)); });
+    Object.keys(by).slice(0,40).forEach(nm=>{ const sp=lioLineSpot_(by[nm],view); if(sp) _it.push(lioTxt_(sp.ll,nm,"font:italic 600 11px system-ui;color:#0b4f8a;"+halo,sp.ang)); }); }
+  if(on("waterbody")&&z>=14){ let n=0; lioCache.layers.waterbody.fc.features.forEach(f=>{ if(n>=40) return; const nm=String((f.properties||{}).OFFICIAL_NAME_LABEL||"").trim(); if(!nm) return;
+    featPolys_(f).forEach(pg=>{ const c=lioLabelPt_(pg); if(c&&view.contains(c)&&n<40){ n++; _it.push(lioTxt_(c,nm,"font:italic 600 12px system-ui;color:#0b4f8a;"+halo)); } }); }); }
+  if(on("wetland")&&z>=15){ let n=0; lioCache.layers.wetland.fc.features.forEach(f=>{ if(n>=40) return; const pr=f.properties||{}, nm=String(pr.EVALUATED_WETLAND_NAME||"").trim(), psw=/provinc/i.test(String(pr.WETLAND_SIGNIFICANCE||""));
+    const txt=nm?(nm+(psw?" (PSW)":"")):(psw?"PSW":""); if(!txt) return;
+    featPolys_(f).forEach(pg=>{ const c=lioLabelPt_(pg); if(c&&view.contains(c)&&n<40){ n++; _it.push(lioTxt_(c,txt,"font:italic 600 11px system-ui;color:#1d6b55;"+halo)); } }); }); }
+  if(on("contour")&&z>=16){ let n=0; lioCache.layers.contour.fc.features.forEach(f=>{ if(n>=40) return; const e=+(f.properties||{}).ELEVATION; if(!isFinite(e)) return;
+    const sp=lioLineSpot_(lioLines_(f),view); if(sp){ n++; _it.push(lioTxt_(sp.ll,Math.round(e)+" m","font:600 10px system-ui;color:#7a4b1c;"+halo,sp.ang)); } }); }
+  if(!lioVis.lots||lioLbl.lots===false||z<15) return;
   const d=lioCache.layers.lots; if(!d||!d.fc) return;
-  const view=fmap.getBounds(); let n=0;
+  let n=0;
   d.fc.features.forEach(f=>{ if(n>=60) return; const ps=featPolys_(f); if(!ps.length) return;
     let w=1/0,s=1/0,e=-1/0,nn=-1/0; ps.forEach(pg=>(pg[0]||[]).forEach(q=>{ if(q[1]<w)w=q[1]; if(q[1]>e)e=q[1]; if(q[0]<s)s=q[0]; if(q[0]>nn)nn=q[0]; }));
     const c=[(s+nn)/2,(w+e)/2]; if(!view.contains(c)) return;
@@ -18222,7 +18289,26 @@ async function nurLoad_(){ if(NUR) return NUR;
   let s=null; try{ s=await nurIdbGet_("state"); }catch(e){ s=null; }
   NUR=(s&&typeof s==="object")?s:{v:1, setups:{}, plots:{}, dels:[], species:{}};
   NUR.setups=NUR.setups||{}; NUR.plots=NUR.plots||{}; NUR.dels=NUR.dels||[]; NUR.species=NUR.species||{};
+  /* v505: plots placed at a sample point or the cross-hair before v505 had a GPS fix drawn (and sent) instead — put them back
+     where they were placed, and send the corrected position */
+  let fixed=0; Object.values(NUR.plots).forEach(p=>{ if(!p.src&&p.pt&&p.gps){ p.src=p.point?"point":"cross"; p._rev=(p._rev||0)+1; fixed++; } });
+  if(fixed){ setTimeout(()=>{ try{ nurSave_(); }catch(e){} },0); }
+  try{ if(NUR.sampling==="nursery") resetDropBar(); }catch(e){}
   return NUR; }
+/* v505: what is being sampled — forest inventory plots (the FRI form) or nursery stock (the nursery tree card). It decides the
+   map's plot button: nursery → 🌱 ＋ Nursery plot (cross-hair) · 📍 At my GPS · 🌱 Plots. */
+async function nurModePick_(){ await nurLoad_(); const cur=NUR.sampling==="nursery"?"nursery":"forest";
+  const B=(v,t,sub)=>`<button class="btn ${cur===v?"":"ghost"}" type="button" onclick="nurModeSet_('${v}')" style="text-align:left;padding:12px">${t}${cur===v?" ✓":""}<div style="font-size:11px;opacity:.8;margin-top:3px;font-weight:400">${sub}</div></button>`;
+  showInfoSheet_("What are you sampling?", `<div style="display:flex;flex-direction:column;gap:8px">`+
+    B("forest","🌲 Forest inventory plots","The FRI plot form. The map's button is ＋ Create inventory plot.")+
+    B("nursery","🌱 Nursery stock","The nursery tree card. The map's buttons place nursery plots at the cross-hair or your GPS position; sample points offer 🌱 Nursery plot here.")+`</div>`); }
+async function nurModeSet_(v){ await nurLoad_(); NUR.sampling=v==="nursery"?"nursery":""; await nurSave_(); try{ closeInfoSheet_(); }catch(e){} resetDropBar();
+  if(NUR.sampling){ if(!_nurTract) _nurTract=propActiveTract_()||""; toast("Sampling nursery stock"+(_nurTract?" on "+_nurTract:"")+" — the map's button now places 🌱 nursery plots"); }
+  else toast("Sampling forest plots — the map's button makes inventory plots again");
+  try{ const el=$("nurScreen"); if(el&&el.style.display==="block") nurDraw_(); }catch(e){} }
+let _nurFromMap=false;
+async function nurMapAdd_(gps){ await nurLoad_(); const t=propActiveTract_()||_nurTract; if(!t){ toast("Choose the property first (🏠 Property)",true); return; }
+  _nurTract=t; _nurFromMap=true; if(gps) nurNew_(); else nurCross_(); }
 const nurUid_=p=>p+Date.now().toString(36).toUpperCase()+Math.floor(Math.random()*46656).toString(36).toUpperCase().padStart(3,"0");
 const nurNum_=v=>{ if(v===""||v==null) return null; const n=Number(String(v).replace(",",".")); return isFinite(n)?n:null; };
 const nurLive_=t=>t.health!=="D";
@@ -18340,11 +18426,11 @@ function nurEl_(){ let el=$("nurScreen"); if(el) return el;
 #nurScreen label.btn{text-transform:none;letter-spacing:normal;display:flex;align-items:center;justify-content:center;gap:6px}
 #sppPicker,#addModal{z-index:99500 !important}`;
   document.head.appendChild(st); return el; }
-async function nurOpen_(id){ await nurLoad_(); const el=nurEl_(); el.style.display="block";
+async function nurOpen_(id){ await nurLoad_(); _nurFromMap=!!id; const el=nurEl_(); el.style.display="block";
   if(!_nurTract) _nurTract=propActiveTract_()||(NUR._last||"");
   if(id&&NUR.plots[id]){ _nurTract=NUR.plots[id].tract; nurGo_("plot",id); } else nurGo_("home");
   setTimeout(()=>{ try{ nurSync_(); }catch(e){} },300); }
-function nurClose_(){ nurGpsStop_(); const el=$("nurScreen"); if(el) el.style.display="none"; try{ nurRender_(); }catch(e){} }
+function nurClose_(){ nurGpsStop_(); _nurFromMap=false; const el=$("nurScreen"); if(el) el.style.display="none"; try{ nurRender_(); }catch(e){} }
 function nurGo_(v, arg){ if(v==="plot"){ _nurPlot=arg; _nurEdit=null; _nurEntry=nurBlank_(nurLastSp_()); } else nurGpsStop_();
   _nurView=v; nurDraw_(); const el=$("nurScreen"); if(el) el.scrollTop=0; }
 const nurBlank_=sp=>({sp:sp||"", cal:"", ht:"", grade:"", health:"G", def:[], notes:""});
@@ -18352,7 +18438,8 @@ function nurLastSp_(){ const p=NUR.plots[_nurPlot]; if(p&&p.trees.length) return
   const ps=nurPlotsOf_(_nurTract).sort((a,b)=>String(a.at).localeCompare(String(b.at))); for(let i=ps.length-1;i>=0;i--){ const t=ps[i].trees; if(t.length) return t[t.length-1].sp; } return ""; }
 function nurDraw_(){ const el=nurEl_(); const p=NUR.plots[_nurPlot];
   const titles={home:"🌱 Nursery plots", plot:p?"Plot "+(p.plotnum||"?"):"Plot", summary:"Summary", key:"Key & codes"};
-  el.innerHTML=`<div class="nhd"><button type="button" class="nb" onclick="${_nurView==="home"?"nurClose_()":"nurGo_('home')"}">‹ ${_nurView==="home"?"Map":"Back"}</button>`+
+  const toMap=_nurView==="home"||(_nurView==="plot"&&_nurFromMap);
+  el.innerHTML=`<div class="nhd"><button type="button" class="nb" onclick="${toMap?"nurClose_()":"nurGo_('home')"}">‹ ${toMap?"Map":"Back"}</button>`+
     `<h1>${esc(titles[_nurView]||"Nursery plots")}<div class="sub">${esc(_nurTract||"No property chosen")}</div></h1>`+
     `<button type="button" class="nb" style="background:#1d2c23;border-color:#2f4a39" title="Help" onclick="helpOne_('nursery')">?</button></div><main id="nurMain"></main>`;
   const m=$("nurMain"); ({home:nurHome_, plot:nurPlotV_, summary:nurSumV_, key:nurKeyV_}[_nurView]||nurHome_)(m); }
@@ -18372,7 +18459,7 @@ function nurListHtml_(){ const ps=nurPlotsOf_(_nurTract);
   return '<ul class="l">'+ps.map(p=>{ const live=p.trees.filter(nurLive_).length, dead=p.trees.length-live, sps=[...new Set(p.trees.map(t=>t.sp))].join(", ");
     const st=(p._rev||0)>(p._sentRev||0)?(p._err?"⚠":"⏳"):"✓";
     return `<li onclick="nurGo_('plot','${p.id}')"><div class="m"><div class="t">Plot ${esc(p.plotnum||"?")}${p.stand?" · "+esc(p.stand):""}</div>`+
-      `<div class="s">${live} live${dead?" · "+dead+" dead":""}${(p.photos||[]).length?" · 📷 "+p.photos.length:""} · r ${esc(p.radius)} m · ${esc(sps||"no trees yet")}${p.gps?" · GPS ±"+Math.round(p.gps.acc)+" m":(p.pt?" · at the sample point":" · no position")}</div></div><span title="${st==="✓"?"In the Sheet":"Not in the Sheet yet"}">${st}</span></li>`; }).join("")+'</ul>'; }
+      `<div class="s">${live} live${dead?" · "+dead+" dead":""}${(p.photos||[]).length?" · 📷 "+p.photos.length:""} · r ${esc(p.radius)} m · ${esc(sps||"no trees yet")}${nurLL_(p)?" · "+(NUR_SRC[nurSrc_(p)]||"placed")+(nurSrc_(p)==="gps"&&p.gps?" ±"+Math.round(p.gps.acc)+" m":""):" · no position"}</div></div><span title="${st==="✓"?"In the Sheet":"Not in the Sheet yet"}">${st}</span></li>`; }).join("")+'</ul>'; }
 function nurHome_(m){ const tr=propTracts_().slice().sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
   if(_nurTract&&!tr.some(t=>propK_(t)===propK_(_nurTract))) tr.unshift(_nurTract);
   if(!_nurTract){ m.innerHTML=`<div class="card"><h2>Property</h2><select id="nurTr"><option value="">Choose the property…</option>${tr.map(t=>`<option>${esc(t)}</option>`).join("")}</select>
@@ -18386,6 +18473,7 @@ function nurHome_(m){ const tr=propTracts_().slice().sort((a,b)=>a.localeCompare
     <div class="row"><div><label class="f">Client</label><input id="nurCli" value="${esc(s.client)}"></div><div><label class="f">Valuation date</label><input id="nurDate" type="date" value="${esc(s.date)}"></div></div>
     <div class="note">The radius goes on each new plot; a plot keeps the radius it was measured with.</div></div>
     <div class="g2" style="margin-top:8px"><button class="btn go" type="button" onclick="nurCross_()">⌖ New plot at the map's cross-hair</button><button class="btn go" type="button" onclick="nurNew_()">📍 New plot at my GPS position</button></div>
+    <div class="note" style="margin:8px 2px 0">${NUR.sampling==="nursery"?"🌱 Sampling nursery stock: the map's button places nursery plots.":"The map's button makes forest plots."} <a href="#" onclick="nurModeSet_('${NUR.sampling==="nursery"?"forest":"nursery"}');return false" style="color:#8fc3ff">${NUR.sampling==="nursery"?"Back to forest plots":"Sample nursery stock from the map"}</a></div>
     <div class="note" style="margin:6px 2px 0">Off the grid: place it with the cross-hair, or where you stand (GPS). On the grid: ⊞ Sample points makes it; tap a point → 🌱 Nursery plot here.</div>
     <div class="g2" style="margin:10px 0 12px"><button class="btn alt" type="button" onclick="nurGo_('summary')">Summary</button><button class="btn alt" type="button" onclick="nurGo_('key')">Key & codes</button>
       <button class="btn alt" type="button" onclick="nurXlsx_()">📗 Workbook (.xlsx)</button><button class="btn alt" type="button" onclick="nurFromSheet_()">⬇ Plots from the Sheet</button></div>
@@ -18399,24 +18487,41 @@ function nurMake_(o){ const s=nurSetup_(o.tract), now=new Date().toISOString();
     by:String(cruiserEmail||cruiser||""), at:now, trees:[], _rev:1, _sentRev:0}, o);
   NUR.plots[p.id]=p; NUR._last=p.tract; return p; }
 /* v500: off the grid, placed with the map's cross-hair (as Move plot does): the map moves under a fixed cross-hair, ✓ places it */
-let _nurCross=false;
-async function nurCross_(){ if(!_nurTract) return; const el=$("nurScreen"); if(el) el.style.display="none";
+/* v505 (Chris, 2026-11-25: "when I placed plots, they were not positioned where I placed them"): a plot's position is p.pt,
+   where it was placed (sample point, cross-hair, or GPS when that was chosen). Before, a GPS fix started by itself on a
+   sample-point plot and then drew, and went to the Sheet, wherever the phone was standing. src: point | cross | gps. */
+const nurLL_=p=>p.pt?p.pt:(p.gps?[p.gps.lat,p.gps.lon]:null);
+const NUR_SRC={point:"at its sample point", cross:"at the cross-hair", gps:"by GPS"};
+function nurSrc_(p){ return p.src||(p.pt?(p.point?"point":"cross"):(p.gps?"gps":"")); }
+let _nurCross=false, _nurMove=null;
+async function nurCross_(moveId){ _nurMove=moveId&&NUR.plots[moveId]?moveId:null; if(!_nurTract&&!_nurMove) return; const el=$("nurScreen"); if(el) el.style.display="none";
   try{ if($("mapView").style.display!=="block") await openMap(); }catch(e){}
   if(!fmap){ toast("Open the map first",true); if(el) el.style.display="block"; return; }
   _nurCross=true; moveMode_=true; const ch=$("mapCrosshair"); if(ch) ch.style.display=""; document.body.classList.add("moving");
-  $("mapDrop").innerHTML='<button class="dropbtn" type="button" onclick="nurCrossOk_()">✓ Nursery plot here</button><button class="dropbtn cancel" type="button" onclick="nurCrossEnd_(true)">✕ Cancel</button>';
+  if(_nurMove){ const mp=NUR.plots[_nurMove], ll=nurLL_(mp); if(ll) try{ fmap.setView(ll, Math.max(fmap.getZoom(),18), {animate:false}); }catch(e){} }
+  $("mapDrop").innerHTML=(_nurMove?`<button class="dropbtn" type="button" onclick="nurCrossOk_()">✓ Move plot ${esc(NUR.plots[_nurMove].plotnum)} here</button>`
+      :'<button class="dropbtn" type="button" onclick="nurCrossOk_()">✓ Nursery plot here</button><button class="dropbtn" type="button" onclick="nurCrossEnd_(false);nurNew_()">📍 At my GPS</button>')+
+    '<button class="dropbtn cancel" type="button" onclick="nurCrossEnd_(true)">✕ Cancel</button>';
   toast("Move the map so the cross-hair sits on the plot centre"); }
-function nurCrossEnd_(back){ _nurCross=false; moveMode_=false; const ch=$("mapCrosshair"); if(ch&&!(typeof captureMode!=="undefined"&&captureMode)) ch.style.display="none";
-  document.body.classList.remove("moving"); try{ resetDropBar(); }catch(e){} if(back){ nurEl_().style.display="block"; nurGo_("home"); } }
-function nurCrossOk_(){ const c=crosshairLatLng_(); nurCrossEnd_(false); if(!c) return;
+function nurCrossEnd_(back){ const mv=_nurMove; _nurCross=false; _nurMove=null; moveMode_=false; const ch=$("mapCrosshair"); if(ch&&!(typeof captureMode!=="undefined"&&captureMode)) ch.style.display="none";
+  document.body.classList.remove("moving"); try{ resetDropBar(); }catch(e){}
+  if(back){ if(mv){ nurEl_().style.display="block"; nurGo_("plot",mv); } else if(NUR.sampling&&nurOnMap_()){ /* sampling from the map: stay on it */ } else { nurEl_().style.display="block"; nurGo_("home"); } } }
+const nurOnMap_=()=>{ try{ return $("mapView").style.display==="block"; }catch(e){ return false; } };
+function nurCrossOk_(){ const c=crosshairLatLng_(), mv=_nurMove; nurCrossEnd_(false); if(!c) return;
+  if(mv){ nurMoveTo_(mv, [+c.lat.toFixed(7), +c.lng.toFixed(7)], "cross"); nurEl_().style.display="block"; nurGo_("plot",mv); return; }
   const ps=nurPlotsOf_(_nurTract), n=ps.reduce((a,p)=>Math.max(a, parseInt(p.plotnum,10)||0),0)+1;
-  const p=nurMake_({tract:_nurTract, plotnum:String(n), stand:standAt_(c.lat,c.lng)||"", pt:[+c.lat.toFixed(7), +c.lng.toFixed(7)]});
+  const p=nurMake_({tract:_nurTract, plotnum:String(n), stand:standAt_(c.lat,c.lng)||"", pt:[+c.lat.toFixed(7), +c.lng.toFixed(7)], src:"cross"});
   nurSave_(); nurEl_().style.display="block"; nurGo_("plot",p.id); toast("Plot "+n+" placed at the cross-hair"+(p.stand?" in "+p.stand:"")); }
-function nurNew_(){ const ps=nurPlotsOf_(_nurTract); const n=ps.reduce((a,p)=>Math.max(a, parseInt(p.plotnum,10)||0),0)+1;
+function nurNew_(){ if(!_nurTract) _nurTract=propActiveTract_()||""; if(!_nurTract){ toast("Choose the property first",true); return; }
+  const ps=nurPlotsOf_(_nurTract); const n=ps.reduce((a,p)=>Math.max(a, parseInt(p.plotnum,10)||0),0)+1;
   const last=ps.slice().sort((a,b)=>String(a.at).localeCompare(String(b.at))).pop();
-  const p=nurMake_({tract:_nurTract, plotnum:String(n), stand:last?last.stand:""}); nurSave_(); nurGo_("plot",p.id); nurGps_(); }
+  const p=nurMake_({tract:_nurTract, plotnum:String(n), stand:last?last.stand:"", src:"gps"}); nurSave_(); nurEl_().style.display="block"; nurGo_("plot",p.id); nurGps_(true); }
+/* move a plot: to the cross-hair, or to where the phone is (GPS); the compartment follows when it is clear */
+function nurMoveTo_(id, ll, src, gps){ const p=NUR.plots[id]; if(!p) return; p.pt=ll; p.src=src; if(src==="gps"&&gps) p.gps=gps;
+  const st=standAt_(ll[0],ll[1]); const was=p.stand; if(st&&st!==p.stand) p.stand=st; nurBump_(p); try{ nurRender_(); }catch(e){}
+  toast(`Plot ${p.plotnum} moved ${NUR_SRC[src]||""}`+(st&&st!==was?` — now in ${st}`:"")); }
 /* From a ⊞ sample point's popup. The point's number is the plot number; its grid's compartment the stratum. */
-async function nurFromPoint_(lat, lon, pn, gid){ await nurLoad_();
+async function nurFromPoint_(lat, lon, pn, gid){ await nurLoad_(); _nurFromMap=true;
   let G=null; try{ G=spGrids_().find(x=>x.gid===gid)||null; }catch(e){}
   const tract=(G&&G.tract)||propActiveTract_(); if(!tract){ toast("Choose the property first",true); return; }
   try{ fmap&&fmap.closePopup(); }catch(e){}
@@ -18425,24 +18530,27 @@ async function nurFromPoint_(lat, lon, pn, gid){ await nurLoad_();
   if(have){ nurGo_("plot",have.id); toast("Plot "+have.plotnum+" is already started — carry on"); return; }
   let stand=(G&&G.stand)||""; if(!stand){ try{ const h=standAt_(lat,lon); if(h) stand=h; }catch(e){} }
   const dup=nurPlotsOf_(tract).find(p=>String(p.plotnum)===String(pn));
-  const p=nurMake_({tract, stand, grid:String(gid||""), point:String(pn), plotnum:String(pn), pt:[+(+lat).toFixed(7), +(+lon).toFixed(7)]});
+  const p=nurMake_({tract, stand, grid:String(gid||""), point:String(pn), plotnum:String(pn), pt:[+(+lat).toFixed(7), +(+lon).toFixed(7)], src:"point"});
   if(dup) toast("There is already a plot "+pn+" on this property — change the plot # if it is a different point",true);
-  nurSave_(); nurGo_("plot",p.id); nurGps_(); }
+  nurSave_(); nurGo_("plot",p.id); }      /* v505: no GPS of its own — the plot is at its point */
 function standAt_(lat,lon){ let hit=""; try{ propCompsGeo_(_nurTract||propActiveTract_()).forEach(c=>{ if(hit) return; (c.polygons||[]).forEach(pg=>{ const ring=(pg&&pg[0])||[]; let ins=false;
   for(let i=0,j=ring.length-1;i<ring.length;j=i++){ const yi=ring[i][0], xi=ring[i][1], yj=ring[j][0], xj=ring[j][1]; if(((yi>lat)!==(yj>lat))&&(lon<(xj-xi)*(lat-yi)/(yj-yi)+xi)) ins=!ins; } if(ins) hit=c.name; }); }); }catch(e){} return hit; }
 /* GPS: the best fix from ~25 s of readings, stopping early at ±5 m. */
-function nurGps_(){ const p=NUR.plots[_nurPlot]; if(!p) return; if(!navigator.geolocation){ toast("This browser has no GPS",true); return; }
+function nurGps_(place){ const p=NUR.plots[_nurPlot]; if(!p) return; if(!navigator.geolocation){ toast("This browser has no GPS",true); return; }
   nurGpsStop_(); const pid=p.id; let best=null; const st=$("nurGpsS"); if(st) st.textContent="Finding position…";
   _nurGps=navigator.geolocation.watchPosition(pos=>{ const c=pos.coords; if(best&&c.accuracy>=best.acc) return;
     best={lat:+c.latitude.toFixed(7), lon:+c.longitude.toFixed(7), acc:+c.accuracy.toFixed(1), t:new Date(pos.timestamp||Date.now()).toISOString()};
-    const pp=NUR.plots[pid]; if(pp){ pp.gps=best; pp._rev=(pp._rev||0)+1; nurSave_(); }
+    const pp=NUR.plots[pid]; if(pp){ pp.gps=best; if(place){ pp.pt=[best.lat,best.lon]; pp.src="gps"; const st=standAt_(best.lat,best.lon); if(st) pp.stand=st; } pp._rev=(pp._rev||0)+1; nurSave_(); try{ nurRender_(); }catch(e){} }
     if(_nurView==="plot"&&_nurPlot===pid) nurGpsDraw_(); if(c.accuracy<=5) nurGpsStop_(); },
     err=>{ const s=$("nurGpsS"); if(s) s.textContent="GPS: "+(err.code===1?"permission denied — allow location for this site":err.message); nurGpsStop_(true); },
     {enableHighAccuracy:true, maximumAge:0, timeout:30000});
   _nurGpsT=setTimeout(()=>nurGpsStop_(),25000); }
 function nurGpsStop_(keep){ if(_nurGps!=null&&navigator.geolocation) navigator.geolocation.clearWatch(_nurGps); _nurGps=null; clearTimeout(_nurGpsT); if(!keep) nurGpsDraw_(); }
 function nurGpsDraw_(){ const p=NUR.plots[_nurPlot], s=$("nurGpsS"); if(!p||!s) return;
-  s.textContent=p.gps?`${p.gps.lat.toFixed(6)}, ${p.gps.lon.toFixed(6)}  ±${Math.round(p.gps.acc)} m${_nurGps!=null?" · improving…":""}`:(_nurGps!=null?"Finding position…":(p.pt?"No GPS fix — the sample point's position is used":"No position yet")); }
+  const ll=nurLL_(p), src=nurSrc_(p);
+  s.textContent=_nurGps!=null&&!ll?"Finding position…":ll?`Placed ${NUR_SRC[src]||""}: ${(+ll[0]).toFixed(6)}, ${(+ll[1]).toFixed(6)}${src==="gps"&&p.gps?"  ±"+Math.round(p.gps.acc)+" m":""}${_nurGps!=null?" · GPS improving…":""}`:"No position yet — move it to the cross-hair or your GPS"; }
+function nurGpsMove_(){ const p=NUR.plots[_nurPlot]; if(!p) return; if(p.pt&&nurSrc_(p)!=="gps"&&!confirm(`Move plot ${p.plotnum} to where you are standing (GPS)? It is now ${NUR_SRC[nurSrc_(p)]||"placed"}.`)) return;
+  p.pt=null; p.src="gps"; nurGps_(true); nurGpsDraw_(); }
 function nurBump_(p){ p._rev=(p._rev||0)+1; p._err=""; nurSave_(); clearTimeout(nurBump_._t); nurBump_._t=setTimeout(()=>{ try{ nurSync_(); }catch(e){} },20000); }
 function nurPlotV_(m){ const p=NUR.plots[_nurPlot]; if(!p){ nurGo_("home"); return; }
   const comps=Object.keys(nurComps_(p.tract)).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})); if(p.stand&&comps.indexOf(p.stand)<0) comps.unshift(p.stand);
@@ -18454,7 +18562,8 @@ function nurPlotV_(m){ const p=NUR.plots[_nurPlot]; if(!p){ nurGo_("home"); retu
       <div><label class="f">Radius (m)</label><input id="nRad" type="number" inputmode="decimal" step="0.01" value="${esc(p.radius)}"></div></div>
     <div class="note">${p.point?"Sample point "+esc(p.point)+(p.grid?" (grid "+esc(p.grid)+")":""):"Off the grid"} · plot area ${(nurArea_(p)*10000).toFixed(1)} m²</div>
     <label class="f">Weeds</label><div class="seg" id="nWeeds">${["L","M","H"].map(w=>`<button type="button" class="${p.weeds===w?"on hF":""}" onclick="nurWeeds_('${w}')">${w}</button>`).join("")}</div>
-    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;font:14px ui-monospace,Menlo,monospace"><span id="nurGpsS" style="flex:1"></span><button class="btn sm alt" type="button" onclick="nurGps_()">⌖ GPS</button></div>
+    <div style="margin-top:12px;font:13px ui-monospace,Menlo,monospace" id="nurGpsS"></div>
+    <div class="g2" style="margin-top:6px"><button class="btn sm alt" type="button" onclick="nurCross_('${p.id}')">⌖ Move to the cross-hair</button><button class="btn sm alt" type="button" onclick="nurGpsMove_()">📍 Move to my GPS position</button></div>
     <label class="f">Plot notes</label><textarea id="nNotes" style="min-height:52px">${esc(p.notes)}</textarea></div>
   <div class="card" id="nPhotoCard"><h2>Photos (${(p.photos||[]).length})</h2>
     <div class="g2"><label class="btn alt" style="margin:0">📷 Take a photo<input type="file" accept="image/*" capture="environment" class="hide" style="display:none" onchange="nurPhoto_(this)"></label>
@@ -18507,7 +18616,7 @@ async function nurPhoto_(input){ const files=[...(input.files||[])]; input.value
     const who=((cruiser||"na").replace(/[^A-Za-z0-9]/g,"").slice(0,12))||"na";
     const fn=`nur_${p.id}_${String(p.plotnum||"x").replace(/[^A-Za-z0-9]/g,"")}_p${String(num).padStart(3,"0")}_${who}_${ts}_${Math.random().toString(36).slice(2,6)}.jpg`.replace(/[^A-Za-z0-9_.\-]/g,"-");
     let data=""; try{ data=await downscaleImage(file,1280,0.6); }catch(e){ toast("That picture could not be read on this phone",true); continue; }
-    const ll=p.gps?[p.gps.lat,p.gps.lon]:(p.pt||null);
+    const ll=nurLL_(p);
     const rec={filename:fn, num, stand:p.stand||"", plot:p.plotnum||"", tract:p.tract, nursery:p.id, time:dt.toISOString(), data, uploaded:false};
     if(ll){ rec.lat=ll[0]; rec.lon=ll[1]; }
     let kept=true; if(HAS_IDB){ try{ await idbPut(rec); const back=await nurPhotoGet_(fn); if(!back||back.data!==data) throw new Error("read-back"); }catch(e){ kept=false; pendingMem.push(rec); } } else { kept=false; pendingMem.push(rec); }
@@ -18569,7 +18678,7 @@ function nurPlotDel_(){ const p=NUR.plots[_nurPlot];
   nurGpsStop_(true); if((p._sentRev||0)>0||p._posted) NUR.dels.push({id:p.id, tract:p.tract}); delete NUR.plots[p.id]; nurSave_(); nurGo_("home"); nurSync_(); }
 /* ---------- sending: post, then read back and compare; deletes confirmed the same way ---------- */
 function nurOut_(p){ return {id:p.id, tract:p.tract, stand:p.stand, grid:p.grid, point:p.point, plotnum:p.plotnum, radius:nurNum_(p.radius),
-  lat:p.gps?p.gps.lat:(p.pt?p.pt[0]:""), lon:p.gps?p.gps.lon:(p.pt?p.pt[1]:""), acc:p.gps?p.gps.acc:"", gtime:p.gps?p.gps.t:"", weeds:p.weeds, notes:p.notes, by:p.by, at:p.at, photos:(p.photos||[]).map(x=>x.f),
+  lat:nurLL_(p)?nurLL_(p)[0]:"", lon:nurLL_(p)?nurLL_(p)[1]:"", acc:(nurSrc_(p)==="gps"&&p.gps)?p.gps.acc:"", gtime:(nurSrc_(p)==="gps"&&p.gps)?p.gps.t:"", weeds:p.weeds, notes:p.notes, by:p.by, at:p.at, photos:(p.photos||[]).map(x=>x.f),
   trees:p.trees.map((t,i)=>({id:t.id, n:i+1, sp:t.sp, type:nurType_(t.sp), cal:t.cal, ht:t.ht, cls:nurSize_(t).label, grade:t.grade, health:t.health, def:(t.def||[]).join(" "), notes:t.notes})), sig:nurSigOf_(p)}; }
 function nurSetupOut_(tract){ const s=nurSetup_(tract), c=nurComps_(tract), areas={}; Object.keys(c).forEach(n=>{ if(isFinite(c[n].ha)) areas[n]=+(+c[n].ha).toFixed(4); });
   return {tract:s.tract||tract, client:s.client, date:s.date, areas}; }
@@ -18616,7 +18725,7 @@ async function nurPull_(tract,quiet){ if(!connected||isOffline()){ if(!quiet) to
   r.plots.forEach(q=>{ const have=NUR.plots[q.id];
     if(have&&(have._rev||0)>(have._sentRev||0)){ kept++; return; }      // the phone's unsent changes win
     const p={id:q.id, tract:q.tract, stand:q.stand, grid:q.grid, point:q.point, plotnum:q.plotnum, radius:String(q.radius), weeds:q.weeds, notes:q.notes, by:q.by, at:q.at,
-      gps:(q.acc!==""&&q.lat!=="")?{lat:+q.lat, lon:+q.lon, acc:+q.acc, t:q.gtime}:null, pt:(q.acc===""&&q.lat!=="")?[+q.lat,+q.lon]:null,
+      gps:(q.acc!==""&&q.lat!=="")?{lat:+q.lat, lon:+q.lon, acc:+q.acc, t:q.gtime}:null, pt:q.lat!==""?[+q.lat,+q.lon]:null, src:q.acc!==""?"gps":(q.point?"point":"cross"),
       trees:(q.trees||[]).map(t=>({id:t.id, sp:t.sp, cal:t.cal, ht:t.ht, grade:t.grade, health:t.health, def:String(t.def||"").split(/\s+/).filter(Boolean), notes:t.notes})), _rev:1, _sentRev:1};
     (q.trees||[]).forEach(t=>{ if(t.sp&&!NUR.species[t.sp]) NUR.species[t.sp]={type:t.type==="C"?"C":"D"}; });
     /* v502: the photos taken on this phone stay with the plot; v503: the Sheet's list (other phones' photos) joins them */
@@ -18654,12 +18763,12 @@ function nurKeyV_(m){
 function nurRender_(){ if(typeof fmap==="undefined"||!fmap||!window.L||!NUR) return;
   if(!_nurLayer) _nurLayer=L.layerGroup().addTo(fmap); _nurLayer.clearLayers();
   if(layerVis.nursery===false) return;
-  Object.values(NUR.plots).forEach(p=>{ const ll=p.gps?[p.gps.lat,p.gps.lon]:p.pt; if(!ll) return; const live=p.trees.filter(nurLive_).length;
+  Object.values(NUR.plots).forEach(p=>{ const ll=nurLL_(p); if(!ll) return; const live=p.trees.filter(nurLive_).length;
     L.circleMarker(ll,{radius:7,color:"#0c3d1c",weight:2,fillColor:"#7ee08f",fillOpacity:.95,bubblingMouseEvents:false}).on("click",e=>{ if(ftBusy_()){ try{ fmap.fire("click",{latlng:e.latlng}); }catch(x){} setTimeout(()=>{ try{ fmap.closePopup(); }catch(x){} },0); return; } window._ptTapAt=Date.now(); }).addTo(_nurLayer)
       .bindPopup(`<div style="font-family:system-ui;font-size:12px;color:#16271a"><b>🌱 Nursery plot ${esc(p.plotnum)}</b>${p.stand?" — "+esc(p.stand):""}<br>${live} live tree${live===1?"":"s"} · r ${esc(p.radius)} m${(p.photos||[]).length?" · 📷 "+p.photos.length:""}<br><a href="javascript:void(0)" onclick="nurOpen_('${p.id}')">Open ›</a></div>`); });
   try{ renderLayerVis_(); }catch(e){} }
-function nurCount_(){ return NUR?Object.values(NUR.plots).filter(p=>p.gps||p.pt).length:0; }
-function nurBounds_(){ const b=[]; if(NUR) Object.values(NUR.plots).forEach(p=>{ const ll=p.gps?[p.gps.lat,p.gps.lon]:p.pt; if(ll) b.push(ll); }); return b; }
+function nurCount_(){ return NUR?Object.values(NUR.plots).filter(p=>nurLL_(p)).length:0; }
+function nurBounds_(){ const b=[]; if(NUR) Object.values(NUR.plots).forEach(p=>{ const ll=nurLL_(p); if(ll) b.push(ll); }); return b; }
 /* ---------- the workbook (.xlsx, made on the phone, offline) ---------- */
 const NUR_CRC=(()=>{ const t=new Uint32Array(256); for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):c>>>1; t[n]=c>>>0; } return t; })();
 function nurCrc_(u8){ let c=0xFFFFFFFF; for(let i=0;i<u8.length;i++) c=NUR_CRC[(c^u8[i])&0xFF]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
@@ -18692,7 +18801,7 @@ function nurSheets_(tract){ const ps=nurPlotsOf_(tract), comps=nurComps_(tract),
   ps.forEach(p=>p.trees.forEach((t,i)=>trees.push([p.plotnum, p.stand, i+1, t.sp, nurType_(t.sp)==="C"?"Conifer":"Deciduous", nurNum_(t.cal), nurNum_(t.ht), nurSize_(t).label, t.grade, t.health, (t.def||[]).join(" "), t.notes, t.id])));
   return [
     {name:"Property", widths:[22,46], rows:[["Field","Value"],["Property",tract],["Client",s.client],["Valuation date",s.date],["Plots",ps.length],["Trees recorded",trees.length],["Exported",new Date().toLocaleString()],["App",APP_BUILD]]},
-    {name:"Plots", widths:[8,14,10,8,9,11,12,9,22,8,30,22,22,60], rows:[["Plot #","Compartment","Sample point","Radius (m)","Live trees","Dead trees","Latitude","Longitude","GPS ± m (blank: sample point)","Weeds","Notes","Recorded","Plot ID","Photos (Drive Photos folder)"]]
+    {name:"Plots", widths:[8,14,10,8,9,11,12,9,22,8,30,22,22,60], rows:[["Plot #","Compartment","Sample point","Radius (m)","Live trees","Dead trees","Latitude","Longitude","GPS ± m (blank: placed on the map)","Weeds","Notes","Recorded","Plot ID","Photos (Drive Photos folder)"]]
       .concat(ps.map(p=>{ const o=nurOut_(p), live=p.trees.filter(nurLive_).length; return [p.plotnum, p.stand, p.point, nurNum_(p.radius), live, p.trees.length-live, o.lat===""?null:o.lat, o.lon===""?null:o.lon, o.acc===""?null:o.acc, p.weeds, p.notes, p.at, p.id, (p.photos||[]).map(x=>x.f).join(", ")]; }))},
     {name:"Trees", widths:[8,14,7,10,10,10,10,16,7,7,12,30,20], rows:[["Plot #","Compartment","Tree #","Species","Type","Caliper (mm)","Height (cm)","Size class","Grade","Health","Defects","Notes","Tree ID"]].concat(trees)},
     {name:"Compartments", widths:[14,7,9,11,9,9,9,9,10,11,9,12], rows:[["Compartment","Plots","Live trees","Live trees/ha","SE /ha","CV %","±% (95%)","Plots for ±15%","Dead trees/ha","Area (ha)","Area from","Stems (live)"]]
