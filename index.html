@@ -1452,7 +1452,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-27 · v516";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-27 · v518";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -1723,7 +1723,7 @@ function apiPost_(o, ms){
    Until a readable answer has been seen, saves go the old way (no-cors), so nothing here can make a
    phone that syncs today stop syncing. */
 const POST_REFUSED={};
-const POST_LABEL={compfields:"Saving compartment fields", compfollow:"Moving plots to their compartments", linesave:"Saving map lines", linedel:"Deleting map lines", actsave:"Saving planned activities", actdel:"Deleting planned activities", featsave:"Saving map points", featdel:"Deleting map points", shapesave:"Saving the compartment layer", shapedel:"Deleting compartment pieces",notesave:"Saving map notes", notedel:"Deleting map notes", mapverput:"Saving a map version", photo:"Photo upload", mapfile:"Saving files to Drive", layerput:"Adding a shared layer", propsave:"Saving property details", compsave:"Saving compartment details", compmove:"Moving compartments to another tract", propdel:"Deleting a property", lioput:"Keeping provincial layers in Drive", liolog:"Reporting a provincial-layer problem"};
+const POST_LABEL={proprename:"Renaming a property", compfields:"Saving compartment fields", compfollow:"Moving plots to their compartments", linesave:"Saving map lines", linedel:"Deleting map lines", actsave:"Saving planned activities", actdel:"Deleting planned activities", featsave:"Saving map points", featdel:"Deleting map points", shapesave:"Saving the compartment layer", shapedel:"Deleting compartment pieces",notesave:"Saving map notes", notedel:"Deleting map notes", mapverput:"Saving a map version", photo:"Photo upload", mapfile:"Saving files to Drive", layerput:"Adding a shared layer", propsave:"Saving property details", compsave:"Saving compartment details", compmove:"Moving compartments to another tract", propdel:"Deleting a property", lioput:"Keeping provincial layers in Drive", liolog:"Reporting a provincial-layer problem"};
 let authLimited=false;       // an account other than the administrator's: summaries, emails, exports and AI are not open to it yet
 function isLimited_(){ return !!((authToken&&authLimited) || (!authToken&&limitedPhone_())); }
 /* v379: on an account other than the office's, mail from the app goes to the address on the user's
@@ -13124,6 +13124,9 @@ function propSync_(then, opts){
   const fin=(ok,why)=>{ _propSyncing=false; _propSyncWhy=ok?"":(why||"answer"); if(then) try{ then(ok,_propSyncWhy); }catch(e){} const nx=_propSyncNext.splice(0); nx.forEach(f=>{ try{ f(); }catch(e){} }); };
   if(_propSyncing){ _propSyncNext.push(()=>propSync_(then,opts)); return; }
   if(!connected||isOffline()){ if(then) then(false,"offline"); return; }
+  /* v518: a rename this phone has not yet got onto the Sheet goes first — fetched before it, the Sheet would not know the new name */
+  if((propDirty.propRen||[]).length&&!opts._afterRen){ if(propBackendOk) propPush_().then(()=>{ if((propDirty.propRen||[]).length){ if(then) then(false,"rename"); return; } propSync_(then,Object.assign({},opts,{_afterRen:1})); });
+    else propSync_(then,Object.assign({},opts,{_afterRen:1})); return; }
   _propSyncing=true;
   const tract=opts.all?"":(opts.tract||propActiveTract_()||"");
   const getAt=Date.now(); _propGetAt=getAt;
@@ -13132,6 +13135,8 @@ function propSync_(then, opts){
     const scope=propK_(r.scope||""); if(!scope) _propSyncedAll=true;         // what the reply covers: one property, or everything
     const other=rec=>scope && propK_(rec&&rec.tract)!==scope;                  // a record of another property: kept as the phone has it
     propBackendOk=true;
+    try{ if(Array.isArray(r.renames)) propRenamesApply_(r.renames); }catch(e){}      // v518
+    if((propDirty.propRen||[]).length){ fin(false,"rename"); propPush_().then(()=>{ if(!(propDirty.propRen||[]).length) propSync_(); }); return; }      // v518: the rename first, then fetch
     /* v385: a backend older than v385 sends no notes, and would not understand a note being saved (an
        unknown POST there is taken as a plot). Until it says it knows about notes, the phone's notes stay
        as they are and wait. */
@@ -13252,6 +13257,13 @@ function propPush1_(){
   /* authBackendOk: the backend has answered properly, so the reply to a POST can be read. Without it
      sheetPost_ sends blind, and nothing could be marked as done. */
   if(!propBackendOk||!authBackendOk||!connected||isOffline()) return Promise.resolve(false);
+  /* v518: a rename goes first, alone — what follows is sent under the new name */
+  const ren=propDirty.propRen||[]; if(ren.length){ const r0=ren[0];
+    return sheetPost_({_action:"proprename", id:r0.id, from:r0.from, to:r0.to, email:String(cruiserEmail||"")}).then(j=>{
+      if(j&&(j.ok||j.error)){ propDirty.propRen=(propDirty.propRen||[]).filter(x=>x.id!==r0.id); propPersist_();
+        if(j.ok){ const c=j.counts||{}; toast("The Sheet renamed "+r0.from+" → "+r0.to+(c.plots!=null?" ("+c.plots+" plot row"+(c.plots===1?"":"s")+", "+(c.rows||0)+" other row"+(c.rows===1?"":"s")+")":"")); return propPush1_(); }
+        toast("⚠ The Sheet did not rename "+r0.from+": "+j.error+" — this phone has the new name; rename it again or tell the office",true); return propPush1_(); }
+      return false; }).catch(()=>false); }
   const jobs=[];
   Object.keys(propDirty.props).forEach(k=>{ const p=PROPS.props[k], d=propDirty.props[k]; if(!p||!d){ delete propDirty.props[k]; return; }
     const body=Object.assign({tract:p.tract}, propPick__(p, d.f));
@@ -13478,7 +13490,8 @@ function propRender_(keep){
      `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="closeDataSheet_();openMap();setTimeout(function(){ propZoomTo_(_ppTract); },80)">🔍 Show this property on the map</button>`+
      `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="mvOpen_()">💾 Saved map versions</button>`+
      `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="exOpen_()">⤓ Export all layers (one zip, shapefiles + GeoJSON)</button>`;
-  h+=`<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px;border-color:#7a3a3a;color:#e9c9c9" onclick="propDelete_(_ppTract)">🗑 Delete this property…</button>`+
+  h+=`<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px" onclick="propRename_(_ppTract)">✎ Rename this property…</button>`+      /* v518 */
+  `<button type="button" class="btn ghost" style="width:100%;margin-bottom:6px;border-color:#7a3a3a;color:#e9c9c9" onclick="propDelete_(_ppTract)">🗑 Delete this property…</button>`+
   `<div style="display:flex;gap:8px;margin:12px 0 6px"><button type="button" class="btn submit" style="flex:1" onclick="propSaveForm_()">Save</button>`+
      `<button type="button" class="btn ghost" style="flex:1" onclick="propSaveForm_(true)">Area summary</button></div>`;
   const waiting=!!propDirty.props[propK_(t)]||!!propDirty.comps[propK_(t)];
@@ -13556,6 +13569,64 @@ function propUseDrawn_(i){ if(i==="") return; const pg=(polys||[])[+i]; if(!pg||
    activities — on this phone now, and on the Sheet (`propdel`, queued until it is sent). Plots are not touched: they
    are the crew's data and keep their TRACT. A loaded boundary file is left on the phone (its compartments for the
    tract are ignored once the records are gone only if the file is removed too — the toast says so). */
+/* v518 — rename a property (Chris, 2026-11-27: "When a property is created, can the name of the property be changed at a later date?"
+   … "This should cover compartments, property boundary, and the assigned property name to the plots … and any other features that
+   are assigned to that original property should be renamed"). Everything under the old name follows: the property record and
+   outline, compartment records, pieces, fields and activities, map points, lines and notes, provincial layers, the plots (the
+   phone's and the Sheet's), nursery plots, map setups, saved map versions, the property list. The phone renames its own copies
+   at once; the Sheet is renamed by one "proprename" sent before anything else (propPush1_), and logged on a Property Renames
+   tab, from which other phones rename theirs at their next sync (propRenamesApply_), and with which the Sheet files anything a
+   phone still sends under the old name under the new one. */
+function propRenameHas_(t){ const k=propK_(t); if(!k) return false;
+  return !!((PROPS.props||{})[k]||(PROPS.comps||{})[k]||(tracts||[]).some(x=>propK_(x)===k)||(saved||[]).some(p=>propK_(p.TRACT)===k)||
+    ["shapes","feats","lines","notes","acts"].some(m=>Object.values(PROPS[m]||{}).some(f=>f&&propK_(f.tract)===k))||(NUR&&Object.values(NUR.plots||{}).some(p=>propK_(p.tract)===k))); }
+function propRenameCount_(t){ const k=propK_(t), of=m=>Object.values(PROPS[m]||{}).filter(f=>f&&propK_(f.tract)===k).length;
+  return {comps:Object.keys((PROPS.comps||{})[k]||{}).length, shapes:of("shapes"), feats:of("feats"), lines:of("lines"), notes:of("notes"), acts:of("acts"),
+    plots:(saved||[]).filter(p=>propK_(p.TRACT)===k).length, nur:NUR?Object.values(NUR.plots||{}).filter(p=>propK_(p.tract)===k).length:0,
+    sets:(MS_LIST||[]).filter(m=>m&&propK_(m.tract)===k).length, bnd:!!(((PROPS.props||{})[k]||{}).boundary||[]).length}; }
+async function propRename_(tract){ const from=String(tract||_ppTract||propActiveTract_()||"").trim(); if(!from){ toast("Choose a property first",true); return; }
+  try{ await nurLoad_(); }catch(e){}
+  let to=prompt("Rename the property "+from+" to:", from); if(to==null) return; to=String(to).replace(/\s+/g," ").trim().slice(0,100);
+  if(!to||to===from) return;
+  if(to===ADD_TRACT){ toast("Choose another name",true); return; }
+  if(propK_(to)!==propK_(from)&&propRenameHas_(to)){ alert("There is already a property called "+to+" (or plots under that name).\n\nChoose another name — two properties are not joined by a rename."); return; }
+  const n=propRenameCount_(from), pl=(x,w)=>x+" "+w+(x===1?"":"s");
+  const list=[n.bnd?"its outline":"", pl(n.comps,"compartment"), pl(n.shapes,"compartment piece"), pl(n.plots,"plot"), n.nur?pl(n.nur,"nursery plot"):"", pl(n.feats,"map point"), pl(n.lines,"line"), pl(n.notes,"note"), n.acts?pl(n.acts,"planned activity").replace("activitys","activities"):"", n.sets?pl(n.sets,"map setup"):""].filter(Boolean).join(", ");
+  if(!confirm("Rename "+from+" to "+to+"?\n\nEverything under the old name moves to the new one — on this phone: "+list+"; on the Sheet: the same, with every plot row, saved map versions and provincial layers. Other phones rename theirs at their next sync.")) return;
+  const id="ren_"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  propRenameLocal_(from,to);
+  (propDirty.propRen=propDirty.propRen||[]).push({id,from,to,at:new Date().toISOString()});
+  propRenDone_(id); propPersist_();
+  try{ closeDataSheet_(); }catch(e){}
+  try{ if(propBackendOk) propPush_().then(()=>{ try{ propSync_(); }catch(e){} }); else propSync_(); }catch(e){}
+  toast("Renamed "+from+" → "+to+(connected&&!isOffline()?" — renaming on the Sheet…":" — the Sheet is renamed when this phone is back online"),true); }
+function propRenDone_(id){ try{ const m=JSON.parse((STORE&&STORE.getItem("fi_renamed"))||"{}")||{}; m[id]=1; STORE&&STORE.setItem("fi_renamed",JSON.stringify(m)); }catch(e){} }
+function propRenIsDone_(id){ try{ return !!(JSON.parse((STORE&&STORE.getItem("fi_renamed"))||"{}")||{})[id]; }catch(e){ return false; } }
+/* every copy on this phone under `from` → `to` (nothing is marked to be sent: the Sheet renames its own rows) */
+function propRenameLocal_(from,to){ const k=propK_(from), k2=propK_(to), same=k===k2;
+  const mv=(o,fix)=>{ if(!o||!o[k]) return; const v=o[k]; if(!same) delete o[k]; o[k2]=v; if(fix) fix(v); };
+  mv(PROPS.props,v=>{ v.tract=to; }); mv(PROPS.comps,v=>Object.values(v||{}).forEach(c=>{ if(c) c.tract=to; })); mv(PROPS.lio); mv(PROPS.cfields,v=>Object.values(v||{}).forEach(c=>{ if(c) c.tract=to; }));
+  ["shapes","feats","lines","notes","acts"].forEach(m=>Object.values(PROPS[m]||{}).forEach(f=>{ if(f&&propK_(f.tract)===k) f.tract=to; }));
+  mv(propDirty.props); mv(propDirty.comps,v=>Object.values(v||{}).forEach(c=>{ if(c&&c.tract!=null) c.tract=to; })); mv(propDirty.cfields);
+  ["shapes","feats","lines","notes","acts"].forEach(m=>Object.values(propDirty[m]||{}).forEach(f=>{ if(f&&typeof f==="object"&&f.tract!=null&&propK_(f.tract)===k) f.tract=to; }));
+  try{ (propDirty.propDel||[]).forEach((t,i)=>{ if(propK_(t)===k) propDirty.propDel[i]=to; }); }catch(e){}
+  let np=0; (saved||[]).forEach(p=>{ if(p&&propK_(p.TRACT)===k){ p.TRACT=to; np++; } }); if(np) try{ persist(); }catch(e){}
+  try{ let had=false; tracts=(tracts||[]).filter(x=>{ if(propK_(x)===k||propK_(x)===k2){ had=true; return false; } return true; }); if(had||np){ tracts.push(to); tracts.sort((a,b)=>a.localeCompare(b)); } persistTracts(); tractSelect(); const el=$("TRACT"); if(el&&propK_(el.value)===k) setSel(el,to); }catch(e){}
+  try{ if(NUR){ let nn=0; Object.values(NUR.plots||{}).forEach(p=>{ if(p&&propK_(p.tract)===k){ p.tract=to; p._rev=(p._rev||0)+1; nn++; } }); mv(NUR.setups,v=>{ if(v&&v.tract!=null) v.tract=to; }); if(propK_(NUR._last)===k) NUR._last=to; if(propK_(_nurTract)===k) _nurTract=to; if(nn) nurSave_(); } }catch(e){}
+  try{ let ch=false; (MS_LIST||[]).forEach(m=>{ if(m&&propK_(m.tract)===k){ m.tract=to; ch=true; } }); if(ch) msPersist_(); }catch(e){}
+  try{ _csUndo=(_csUndo||[]).map(u=>{ if(u&&propK_(u.tract)===k) u.tract=to; return u; }); }catch(e){}
+  try{ (boundFiles||[]).forEach(bf=>(bf.features||[]).forEach(f=>{ if(tractField&&f&&f.properties&&propK_(f.properties[tractField])===k) f.properties[tractField]=to; })); if(propK_(manualTract)===k) manualTract=to; cacheBoundaries(); }catch(e){}
+  try{ ldbGet(lioKey_(from)).then(v=>{ if(v!=null&&!same){ ldbPut(lioKey_(to),v); ldbDelete_(lioKey_(from)); } }).catch(()=>{}); }catch(e){}
+  try{ if(propK_(propActiveTract_())===k) STORE&&STORE.setItem("fi_proptract",to); }catch(e){}
+  try{ if(typeof mapOnly!=="undefined"&&propK_(mapOnly)===k) mapOnly=to; }catch(e){}
+  if(propK_(_ppTract)===k) _ppTract=to;
+  propPersist_();
+  try{ rebuildBound(); renderBoundaries(); lioRender_(); renderSaved(); findPropFill_(); propRender_(true); }catch(e){} }
+/* another phone's renames, from the Sheet's Property Renames tab (sent with propget) */
+function propRenamesApply_(list){ (list||[]).slice().sort((a,b)=>String(a.at).localeCompare(String(b.at))).forEach(r=>{ if(!r||!r.id||!r.from||!r.to||propRenIsDone_(r.id)) return;
+    if((propDirty.propRen||[]).some(x=>x.id===r.id)) return;
+    propRenDone_(r.id); if(!propRenameHas_(r.from)) return;
+    try{ propRenameLocal_(r.from, r.to); toast(r.from+" was renamed "+r.to+(r.by?" by "+r.by:"")+" — this phone's copies renamed too"); }catch(e){} }); }
 function propDelete_(tract){ const t=String(tract||_ppTract||propActiveTract_()||"").trim(); if(!t) return; const k=propK_(t);
   const n={comps:Object.keys((PROPS.comps||{})[k]||{}).length, shapes:csOf_(t).length, feats:Object.values(PROPS.feats||{}).filter(f=>f&&propK_(f.tract)===k).length, lines:Object.values(PROPS.lines||{}).filter(f=>f&&propK_(f.tract)===k).length, notes:Object.values(PROPS.notes||{}).filter(f=>f&&propK_(f.tract)===k).length, acts:Object.values(PROPS.acts||{}).filter(f=>f&&propK_(f.tract)===k).length};
   const plots=(saved||[]).filter(p=>propK_(p.TRACT)===k).length;
@@ -14278,6 +14349,7 @@ function propBarFill_(){ const sel=$("propBarSel"), box=$("propBarBtns"); if(!se
     B("propBarClose_();mmMenuShow_()","🖨 Make a map…",!has)+      /* v458: one plain way in — the Make a map block lists Custom, Map 6, Map 4, Map 7 */
     B("propBarClose_();_ppTract=propActiveTract_();pkOpen_()","📦 Map package",!has)+
     B("propBarClose_();_ppTract=propActiveTract_();pwOpen_(propActiveTract_())","✂ Compartments (＋ Set up)",!has)+      /* v470: one home — Set up */
+    B("propBarClose_();_ppTract=propActiveTract_();propRename_(propActiveTract_())","✎ Rename property…",!has)+      /* v518 */
     B("propBarClose_();_ppTract=propActiveTract_();propDelete_(propActiveTract_())","🗑 Delete property…",!has)+
     ((typeof mapOnly!=="undefined"&&mapOnly)?B("mapOnlyClear_();propBarFill_()","👁 Show all properties"):B("propBarClose_();if($('layersMenu').style.display==='none') toggleLayersMenu(); layersTab_('prop');","☰ Provincial layers & more"));
 }
@@ -14583,14 +14655,14 @@ function mmOpts_(kind){ const d=MM_DEF[kind], saved=(function(){ try{ return JSO
     /* v513: labels — where compartment labels go, turning them with long narrow compartments, leader lines, water and wetland names */
     lblPlace:saved.lblPlace==="out"?"out":"fit", lblTilt:saved.lblTilt!==false, lblOut2:saved.lblOut2==="ring"?"ring":"near", insetPos:(["tr","tl","br","bl"].indexOf(saved.insetPos)>=0)?saved.insetPos:"auto", lblLeaderAll:saved.lblLeaderAll===true, waterNames:saved.waterNames!==false,
     /* v514: one size for every compartment label, or the largest that fits each; the key map's layers */
-    lblSize:saved.lblSize==="vary"?"vary":"same", lblArea:(["ac","ha","both","none"].indexOf(saved.lblArea)>=0)?saved.lblArea:"prop", insetLayers:Object.assign({roads:1,waterbody:1,towns:1,water:0,wetland:0,woodland:0,lots:0,extent:1}, saved.insetLayers||{}),      /* v416: an arrow to the nearest town */      /* v404: compartment label size, % of automatic */      /* v401: how solid the fills print (woodland, water, hatching, Map 7 colours) */      /* v396: Map 7's plan window (blank = this year and the nine after) */
+    lblSize:saved.lblSize==="vary"?"vary":"same", lblArea:(["ac","ha","both","none"].indexOf(saved.lblArea)>=0)?saved.lblArea:"prop", lblPt:([7,8,9,10,11,12,14].indexOf(+saved.lblPt)>=0)?+saved.lblPt:0, insetLayers:Object.assign({roads:1,waterbody:1,towns:1,water:0,wetland:0,woodland:0,lots:0,extent:1}, saved.insetLayers||{}),      /* v416: an arrow to the nearest town */      /* v404: compartment label size, % of automatic */      /* v401: how solid the fills print (woodland, water, hatching, Map 7 colours) */      /* v396: Map 7's plan window (blank = this year and the nine after) */
     photoYear:mmPhotoYear_(saved),
     firm:(function(){ try{ return (STORE&&STORE.getItem("fi_mmfirm"))||""; }catch(e){ return ""; } })()}; }
 /* v394: the photo year to print — what was typed for this source on this phone, else the year in the source's name ("York Region 2025"), else blank. */
 function mmPhotoYear_(saved){ let src=null; try{ src=imgSource_(); }catch(e){} const id=src?src.id:"", typed=(saved&&saved.photoYears&&saved.photoYears[id])||""; if(typed) return String(typed);
   const m=String(src?src.name:"").match(/\b(19|20)\d\d\b/); return m?m[0]:""; }
 function mmSaveOpts_(o){ try{ const old=JSON.parse((STORE&&STORE.getItem("fi_mmopts"+o.kind))||"null")||{}, py=Object.assign({},old.photoYears||{}); try{ py[imgSource_().id]=String(o.photoYear||""); }catch(e){}
-  STORE&&STORE.setItem("fi_mmopts"+o.kind,JSON.stringify({title:(o.title&&o.title!==o.titleDef)?o.title:"",tbLoc:o.tbLoc!==false,tbOwner:o.tbOwner!==false,tbTotal:o.tbTotal!==false,tbProg:o.tbProg!==false,aerial:o.aerial,plotSize:o.plotSize,plotNums:o.plotNums,plotColor:o.plotColor,plotComps:o.plotComps,layers:o.layers,hatch:o.hatch,plots:o.plots,feats:o.feats,lines:o.lines,names:o.names,inset:o.inset,standLabels:o.standLabels,proj:o.proj,actFrom:o.actFrom,actTo:o.actTo,fillAlpha:o.fillAlpha,labelScale:o.labelScale,insetNames:o.insetNames,townArrow:o.townArrow,lblPlace:o.lblPlace,lblTilt:o.lblTilt,lblOut2:o.lblOut2,insetPos:o.insetPos,lblArea:o.lblArea,lblLeaderAll:o.lblLeaderAll,waterNames:o.waterNames,lblSize:o.lblSize,insetLayers:o.insetLayers,photoYears:py,scale:o.scale,page:o.page,extent:o.extent})); STORE&&STORE.setItem("fi_mmfirm",o.firm||""); }catch(e){} }
+  STORE&&STORE.setItem("fi_mmopts"+o.kind,JSON.stringify({title:(o.title&&o.title!==o.titleDef)?o.title:"",tbLoc:o.tbLoc!==false,tbOwner:o.tbOwner!==false,tbTotal:o.tbTotal!==false,tbProg:o.tbProg!==false,aerial:o.aerial,plotSize:o.plotSize,plotNums:o.plotNums,plotColor:o.plotColor,plotComps:o.plotComps,layers:o.layers,hatch:o.hatch,plots:o.plots,feats:o.feats,lines:o.lines,names:o.names,inset:o.inset,standLabels:o.standLabels,proj:o.proj,actFrom:o.actFrom,actTo:o.actTo,fillAlpha:o.fillAlpha,labelScale:o.labelScale,insetNames:o.insetNames,townArrow:o.townArrow,lblPlace:o.lblPlace,lblTilt:o.lblTilt,lblOut2:o.lblOut2,insetPos:o.insetPos,lblArea:o.lblArea,lblPt:o.lblPt||0,lblLeaderAll:o.lblLeaderAll,waterNames:o.waterNames,lblSize:o.lblSize,insetLayers:o.insetLayers,photoYears:py,scale:o.scale,page:o.page,extent:o.extent})); STORE&&STORE.setItem("fi_mmfirm",o.firm||""); }catch(e){} }
 /* ---- projection ---- */
 /* v396: UTM, zone from the longitude (17 for most of southern Ontario, 18 east of 78°W), forward and inverse.
    The GPS positions are WGS 84; NAD83 (CSRS) differs by under a metre here, so the map is labelled NAD83 / UTM. */
@@ -15092,7 +15164,12 @@ async function mmRender_(tract, o, onPct, frozen){
   /* v514 (Chris, 2026-11-26: "The label point sizes vary, is that a good thing?" — no: one kind of feature, one size). The
      smallest a compartment label may print is 17 px at 200 dpi (6 pt, the usual floor for print) — less only when the label
      size is set below 100 %. */
-  const minFs=o.lblSize==="vary"?14:Math.max(14,Math.round(17*Math.min(1,Math.max(.5,Math.min(1.6,(o.labelScale||100)/100)))));      /* "largest that fits each": v421's 14 px floor, as before */ sizes=sizes.map(v=>Math.max(minFs,v)).filter((v,i,a)=>a.indexOf(v)===i); smallFs=Math.max(minFs,smallFs);
+  /* v517 (Chris, 2026-11-27: "the labels are quite small for the compartments. Can we have an option to increase the point size"):
+     the floor follows "Size of all map labels" up as well as down (it only went down, so Larger did nothing on a busy map), and
+     "Compartment label size" can fix the size in points — every compartment label that size, the ones that do not fit going outside */
+  const usc=Math.max(.5,Math.min(1.6,(o.labelScale||100)/100)), lblPx=+o.lblPt>0?Math.round(+o.lblPt*200/72):0;
+  const minFs=o.lblSize==="vary"?14:Math.max(14,Math.round(17*usc));      /* "largest that fits each": v421's 14 px floor, as before */ sizes=sizes.map(v=>Math.max(minFs,v)).filter((v,i,a)=>a.indexOf(v)===i); smallFs=Math.max(minFs,smallFs);
+  if(lblPx){ if(o.lblSize==="vary"){ sizes=[lblPx,Math.round(lblPx*0.82),Math.round(lblPx*0.66)].map(v=>Math.max(14,v)).filter((v,i,a)=>a.indexOf(v)===i); smallFs=sizes[sizes.length-1]; } else { sizes=[lblPx]; smallFs=lblPx; } }
   /* v516: a leader is tested every 6 px (it was 14, so one could slip between the marks of another leader and cross it) */
   const segFree=(x0,y0,x1,y1)=>{ const n=Math.max(2,Math.ceil(Math.hypot(x1-x0,y1-y0)/6)); for(let i=0;i<=n;i++){ const x=x0+(x1-x0)*i/n, y=y0+(y1-y0)*i/n; if(boxes.some(a=>x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h)) return false; } return true; };
   const segBoxes=(x0,y0,x1,y1)=>{ const n=Math.max(1,Math.ceil(Math.hypot(x1-x0,y1-y0)/8)); for(let i=0;i<=n;i++){ const x=x0+(x1-x0)*i/n, y=y0+(y1-y0)*i/n; boxes.push({x:x-5,y:y-5,w:10,h:10}); } };
@@ -15144,7 +15221,7 @@ async function mmRender_(tract, o, onPct, frozen){
       if(ob) boxes.push(ob); }); };
     /* v514: one size for every compartment label (unless "Label sizes" says otherwise) — the largest at which most of them
        (three in five) fit inside their compartments; the others go outside at that same size */
-    if(o.lblSize!=="vary"&&items.length>1){ const keep=boxes.slice(), need=Math.ceil(items.length*0.6), tries=sizes.concat(sizes.indexOf(minFs)<0?[minFs]:[]); let pick=null, most=null;
+    if(o.lblSize!=="vary"&&!lblPx&&items.length>1){ const keep=boxes.slice(), need=Math.ceil(items.length*0.6), tries=sizes.concat(sizes.indexOf(minFs)<0?[minFs]:[]); let pick=null, most=null;
       for(const fs of tries){ pass1([fs]); const n=items.filter(it=>it.b).length; items.forEach(it=>{ it.b=null; }); boxes.length=0; keep.forEach(q=>boxes.push(q));
         if(n>=need){ pick=fs; break; } if(!most||n>most.n||(n===most.n&&fs<most.fs)) most={fs,n}; }      /* none reaches three in five: the size that fits the most inside — the smaller on a tie (they go outside, and smaller ones ring the property tidier) */
       pick=pick||most.fs; sizes=[pick]; smallFs=pick; }
@@ -15223,7 +15300,11 @@ async function mmRender_(tract, o, onPct, frozen){
     g.polys.forEach(r=>{ const at=mmInside_(r.map(ring=>ring.map(q=>V.toPx(q[0],q[1]))), MM_FRAME); if(!at) return;
       ctx.font="28px Arial, Helvetica, sans-serif"; const w=Math.max(ctx.measureText(t1).width,ctx.measureText(t2).width)+12, rp=r.map(ring=>ring.map(q=>V.toPx(q[0],q[1])));
       /* v515: when the lot's middle is taken (a building's dot, a name), a spot a little way off it */
-      let b=null; for(const d of [[0,0],[0,90],[0,-90],[w*0.8,0],[-w*0.8,0],[w*0.8,90],[-w*0.8,-90],[0,180],[0,-180]]){ const x=at.x+d[0], y=at.y+d[1], t={x:x-w/2,y:y-36,w,h:72}; if(mmPtIn_(rp,x,y)&&free(t)){ b=t; at.x=x; at.y=y; break; } }
+      /* v517: and off the compartments (Chris's LOT 6 / CON 3 sat on P-15 and P-16) — the nearest spot in the lot clear of them */
+      const onComp=t=>compPx0.some(rg=>[[t.x,t.y],[t.x+t.w,t.y],[t.x,t.y+t.h],[t.x+t.w,t.y+t.h],[t.x+t.w/2,t.y+t.h/2]].some(p=>mmPtIn_([rg],p[0],p[1])));
+      const offs=[[0,0]]; for(let k=1;k<=6;k++) for(const a of [90,270,0,180,45,135,225,315]) offs.push([Math.cos(a*Math.PI/180)*k*Math.max(90,w*0.6),Math.sin(a*Math.PI/180)*k*90]);
+      let b=null; for(const d of offs){ const x=at.x+d[0], y=at.y+d[1], t={x:x-w/2,y:y-36,w,h:72}; if(x<MM_FRAME.x+w/2||x>MM_FRAME.x+MM_FRAME.w-w/2||y<MM_FRAME.y+40||y>MM_FRAME.y+MM_FRAME.h-40) continue; if(mmPtIn_(rp,x,y)&&free(t)&&!onComp(t)){ b=t; at.x=x; at.y=y; break; } }
+      if(!b) for(const d of offs.slice(0,9)){ const x=at.x+d[0], y=at.y+d[1], t={x:x-w/2,y:y-36,w,h:72}; if(mmPtIn_(rp,x,y)&&free(t)){ b=t; at.x=x; at.y=y; break; } }      /* no clear ground in the lot: as v515 */
       if(!b) return; boxes.push(b); const fg=o.aerial?"#fff":"#222", bg=o.aerial?"#000":"#fff"; mmHaloText_(ctx,t1,at.x,at.y-16,fg,bg); mmHaloText_(ctx,t2,at.x,at.y+18,fg,bg); }); });
   // v394: elevations on the index contours, where there is room (last of the automatic labels)
   if(ctIdx.length){ try{ mmContourLabels_(ctx, V, ctIdx, boxes, o.aerial); }catch(e){ notes.push("Contour labels: "+String(e.message||e)); } }
@@ -15885,7 +15966,9 @@ function mmOpen_(kind){
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Scale</div>`+sel("mmScale",[["auto","Fit the property (automatic)"]].concat(MM_SCALES.map(s=>[String(s),"1:"+s.toLocaleString("en-CA")])),o.scale)+
     (kind===7?`<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Plan window (years shown)</div><div style="display:flex;gap:8px"><input id="mmActFrom" type="number" inputmode="numeric" placeholder="${new Date().getFullYear()}" value="${esc(o.actFrom||"")}" style="flex:1;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"><input id="mmActTo" type="number" inputmode="numeric" placeholder="${new Date().getFullYear()+9}" value="${esc(o.actTo||"")}" style="flex:1;font-size:16px;padding:8px;border-radius:8px;border:1px solid #33623a;background:#16271a;color:#e8f0e6"></div><div style="font-size:11px;color:#8fae95;margin:3px 0 6px">${acOf_(t).length} activit${acOf_(t).length===1?"y":"ies"} on record — edit them under Planned activities on the property sheet.</div>`:"")+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Projection</div>`+sel("mmProj",[["utm","UTM (NAD83) — zone from the property; the plan's usual grid"],["merc","Web Mercator — as the phone's map and older saved versions"]],o.proj||"utm")+
-    `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Compartment label size (automatic: 0.17 in, smaller where the compartment is tight)</div>`+sel("mmLabel",[["60","Much smaller (60%)"],["80","Smaller (80%)"],["100","Automatic"],["120","Larger (120%)"],["140","Much larger (140%)"]],String(o.labelScale||100))+
+    `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Compartment label size</div>`+sel("mmLblPt",[["0","Automatic — the largest that fits most compartments (at least 6 pt)"],["7","7 pt"],["8","8 pt"],["9","9 pt"],["10","10 pt"],["11","11 pt"],["12","12 pt"],["14","14 pt"]],String(o.lblPt||0))+
+    `<div style="font-size:11px;color:#8fae95;margin:2px 0 0;line-height:1.4">A set size prints every compartment label that size; those that do not fit inside go beside their compartment with a leader line.</div>`+
+    `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Size of all map labels (names of roads, water and lots; compartments when automatic)</div>`+sel("mmLabel",[["60","Much smaller (60%)"],["80","Smaller (80%)"],["100","Automatic"],["120","Larger (120%)"],["140","Much larger (140%)"]],String(o.labelScale||100))+
     /* v514: one size for one kind of label */
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Area on compartment labels</div>`+sel("mmLblArea",[["prop","As set for the property"],["ac","Acres"],["ha","Hectares"],["both","Acres and hectares"],["none","No area — the name only"]],o.lblArea||"prop")+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Label sizes</div>`+sel("mmLblSize",[["same","One size for every compartment label (recommended — never below 6 pt)"],["vary","The largest that fits each compartment"]],o.lblSize||"same")+
@@ -15948,6 +16031,7 @@ function mmRead_(kind){
   /* v513: labels */
   const lp=v("mmLblPlace"); if(lp) o.lblPlace=lp.value==="out"?"out":"fit"; const lt=v("mmLblTilt"); if(lt) o.lblTilt=!!lt.checked; const lo2=v("mmLblOut"); if(lo2) o.lblOut2=lo2.value==="ring"?"ring":"near";
   const la=v("mmLblLeaderAll"); if(la) o.lblLeaderAll=!!la.checked; const wn=v("mmWaterNames"); if(wn) o.waterNames=!!wn.checked;
+  /* v517 */ const lp2=v("mmLblPt"); if(lp2) o.lblPt=[7,8,9,10,11,12,14].indexOf(+lp2.value)>=0?+lp2.value:0;
   /* v516 */ const la2=v("mmLblArea"); if(la2) o.lblArea=["ac","ha","both","none"].indexOf(la2.value)>=0?la2.value:"prop";
   /* v514 */ const ls2=v("mmLblSize"); if(ls2) o.lblSize=ls2.value==="vary"?"vary":"same";
   if(v("mmIL_roads")){ const L={}; ["roads","waterbody","water","wetland","woodland","lots","towns","extent"].forEach(k=>{ const c=v("mmIL_"+k); L[k]=c&&c.checked?1:0; }); o.insetLayers=L; }
@@ -18715,7 +18799,7 @@ function shpMulti_(feats, st){ st=st||5;
    Sheet ("Map Setups"), so every phone and the desk have them; a copy stays on this phone for use without signal. */
 let MS_LIST=(function(){ try{ return JSON.parse((STORE&&STORE.getItem("fi_mapsets"))||"[]")||[]; }catch(e){ return []; } })(), _msFetchedAt=0;
 function msPersist_(){ try{ STORE&&STORE.setItem("fi_mapsets",JSON.stringify(MS_LIST.slice(0,200))); }catch(e){} }
-function msOfOpts_(o){ const k=["title","tbLoc","tbOwner","tbTotal","tbProg","aerial","plotSize","plotNums","plotColor","plotComps","layers","hatch","plots","feats","lines","names","inset","standLabels","proj","actFrom","actTo","fillAlpha","labelScale","insetNames","townArrow","lblPlace","lblTilt","lblOut2","insetPos","lblArea","lblLeaderAll","waterNames","lblSize","insetLayers","scale","page","extent","firm"];
+function msOfOpts_(o){ const k=["title","tbLoc","tbOwner","tbTotal","tbProg","aerial","plotSize","plotNums","plotColor","plotComps","layers","hatch","plots","feats","lines","names","inset","standLabels","proj","actFrom","actTo","fillAlpha","labelScale","insetNames","townArrow","lblPlace","lblTilt","lblOut2","insetPos","lblArea","lblPt","lblLeaderAll","waterNames","lblSize","insetLayers","scale","page","extent","firm"];
   const out={}; k.forEach(x=>{ if(o[x]!==undefined) out[x]=(x==="title"&&o.title===o.titleDef)?"":o[x]; }); return out; }
 function msFor_(t){ const k=propK_(t); return MS_LIST.filter(s=>!s.tract||propK_(s.tract)===k).sort((a,b)=>String(a.name).localeCompare(String(b.name),undefined,{numeric:true})); }
 function msMenuHtml_(t){ const vers=t?`<button type="button" onclick="try{ closeLayersMenu(); }catch(e){} _ppTract=propActiveTract_(); mvOpen_()" style="display:block;width:100%;text-align:left;padding:8px 10px;margin:6px 0 2px;border-radius:9px;border:1px solid #2a4a30;background:transparent;color:#cfe6d4;font:13px system-ui">🗂 Saved map versions — maps kept exactly as they were made</button>`:"";
