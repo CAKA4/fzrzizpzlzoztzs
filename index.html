@@ -1452,7 +1452,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-26 · v514";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-26 · v515";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -14568,7 +14568,7 @@ function mmOpts_(kind){ const d=MM_DEF[kind], saved=(function(){ try{ return JSO
     insetNames:(["auto","more","fewer","none"].indexOf(saved.insetNames)>=0)?saved.insetNames:"auto",      /* v415: key-map road names */
     townArrow:saved.townArrow!=null?!!saved.townArrow:(kind===4||kind===6),
     /* v513: labels — where compartment labels go, turning them with long narrow compartments, leader lines, water and wetland names */
-    lblPlace:saved.lblPlace==="out"?"out":"fit", lblTilt:saved.lblTilt!==false, lblOut:saved.lblOut==="near"?"near":"ring", lblLeaderAll:saved.lblLeaderAll===true, waterNames:saved.waterNames!==false,
+    lblPlace:saved.lblPlace==="out"?"out":"fit", lblTilt:saved.lblTilt!==false, lblOut2:saved.lblOut2==="ring"?"ring":"near", insetPos:(["tr","tl","br","bl"].indexOf(saved.insetPos)>=0)?saved.insetPos:"auto", lblLeaderAll:saved.lblLeaderAll===true, waterNames:saved.waterNames!==false,
     /* v514: one size for every compartment label, or the largest that fits each; the key map's layers */
     lblSize:saved.lblSize==="vary"?"vary":"same", insetLayers:Object.assign({roads:1,waterbody:1,towns:1,water:0,wetland:0,woodland:0,lots:0,extent:1}, saved.insetLayers||{}),      /* v416: an arrow to the nearest town */      /* v404: compartment label size, % of automatic */      /* v401: how solid the fills print (woodland, water, hatching, Map 7 colours) */      /* v396: Map 7's plan window (blank = this year and the nine after) */
     photoYear:mmPhotoYear_(saved),
@@ -14577,7 +14577,7 @@ function mmOpts_(kind){ const d=MM_DEF[kind], saved=(function(){ try{ return JSO
 function mmPhotoYear_(saved){ let src=null; try{ src=imgSource_(); }catch(e){} const id=src?src.id:"", typed=(saved&&saved.photoYears&&saved.photoYears[id])||""; if(typed) return String(typed);
   const m=String(src?src.name:"").match(/\b(19|20)\d\d\b/); return m?m[0]:""; }
 function mmSaveOpts_(o){ try{ const old=JSON.parse((STORE&&STORE.getItem("fi_mmopts"+o.kind))||"null")||{}, py=Object.assign({},old.photoYears||{}); try{ py[imgSource_().id]=String(o.photoYear||""); }catch(e){}
-  STORE&&STORE.setItem("fi_mmopts"+o.kind,JSON.stringify({title:(o.title&&o.title!==o.titleDef)?o.title:"",tbLoc:o.tbLoc!==false,tbOwner:o.tbOwner!==false,tbTotal:o.tbTotal!==false,tbProg:o.tbProg!==false,aerial:o.aerial,plotSize:o.plotSize,plotNums:o.plotNums,plotColor:o.plotColor,plotComps:o.plotComps,layers:o.layers,hatch:o.hatch,plots:o.plots,feats:o.feats,lines:o.lines,names:o.names,inset:o.inset,standLabels:o.standLabels,proj:o.proj,actFrom:o.actFrom,actTo:o.actTo,fillAlpha:o.fillAlpha,labelScale:o.labelScale,insetNames:o.insetNames,townArrow:o.townArrow,lblPlace:o.lblPlace,lblTilt:o.lblTilt,lblOut:o.lblOut,lblLeaderAll:o.lblLeaderAll,waterNames:o.waterNames,lblSize:o.lblSize,insetLayers:o.insetLayers,photoYears:py,scale:o.scale,page:o.page,extent:o.extent})); STORE&&STORE.setItem("fi_mmfirm",o.firm||""); }catch(e){} }
+  STORE&&STORE.setItem("fi_mmopts"+o.kind,JSON.stringify({title:(o.title&&o.title!==o.titleDef)?o.title:"",tbLoc:o.tbLoc!==false,tbOwner:o.tbOwner!==false,tbTotal:o.tbTotal!==false,tbProg:o.tbProg!==false,aerial:o.aerial,plotSize:o.plotSize,plotNums:o.plotNums,plotColor:o.plotColor,plotComps:o.plotComps,layers:o.layers,hatch:o.hatch,plots:o.plots,feats:o.feats,lines:o.lines,names:o.names,inset:o.inset,standLabels:o.standLabels,proj:o.proj,actFrom:o.actFrom,actTo:o.actTo,fillAlpha:o.fillAlpha,labelScale:o.labelScale,insetNames:o.insetNames,townArrow:o.townArrow,lblPlace:o.lblPlace,lblTilt:o.lblTilt,lblOut2:o.lblOut2,insetPos:o.insetPos,lblLeaderAll:o.lblLeaderAll,waterNames:o.waterNames,lblSize:o.lblSize,insetLayers:o.insetLayers,photoYears:py,scale:o.scale,page:o.page,extent:o.extent})); STORE&&STORE.setItem("fi_mmfirm",o.firm||""); }catch(e){} }
 /* ---- projection ---- */
 /* v396: UTM, zone from the longitude (17 for most of southern Ontario, 18 east of 78°W), forward and inverse.
    The GPS positions are WGS 84; NAD83 (CSRS) differs by under a metre here, so the map is labelled NAD83 / UTM. */
@@ -14806,15 +14806,31 @@ async function mmInsetGather_(tract, ext, notes, o){
   if(IL.roads&&(!o||o.insetNames!=="none")){ try{ const r=await rnRoads_(tract,bbox,[]); out.names=r.map(x=>({name:x.name,lines:x.lines})); }catch(e){} }
   return out;
 }
-/* The corner the property is not in (top-right first). */
-function mmInsetPlace_(V, ext){
-  const w=MM_INSET.px, h=MM_INSET.px, m=MM_INSET.pad, F_=MM_FRAME;
-  const corners=[{x:F_.x+F_.w-m-w,y:F_.y+m},{x:F_.x+m,y:F_.y+m},{x:F_.x+F_.w-m-w,y:F_.y+F_.h-m-h},{x:F_.x+m,y:F_.y+F_.h-m-h}].map(c=>Object.assign(c,{w,h}));
-  if(!ext) return corners[0];
-  const a=V.toPx(ext[3],ext[0]), b=V.toPx(ext[1],ext[2]), P={x:a[0],y:a[1],w:b[0]-a[0],h:b[1]-a[1]};
-  const ov=c=>Math.max(0,Math.min(c.x+c.w,P.x+P.w)-Math.max(c.x,P.x))*Math.max(0,Math.min(c.y+c.h,P.y+P.h)-Math.max(c.y,P.y));
-  return corners.slice().sort((p,q)=>ov(p)-ov(q))[0];
-}
+/* The corner the property is not in (top-right first).
+   v515 (Chris, 2026-11-26: "The inset map covers the boundary of the property on the main map"): v394 judged a corner by the
+   property's bounding box, so a long diagonal boundary could be judged clear when it was not, or a clear corner passed over. With
+   the property's shapes (`sh.rings`: the outline and every compartment, in page px) each corner is judged by what it really covers —
+   the property's ground, and above all its boundary and compartment lines; when every corner covers some, the key map steps down
+   (85 %, then 70 % of its size) before settling for the corner that covers least. `sh.pos` = a corner chosen on the options page. */
+function mmInsetPlace_(V, ext, sh){
+  const m=MM_INSET.pad, F_=MM_FRAME, order=["tr","tl","br","bl"];
+  const mk=(k,s)=>{ const w=Math.round(MM_INSET.px*s), h=w, x=(k==="tl"||k==="bl")?F_.x+m:F_.x+F_.w-m-w, y=(k==="tl"||k==="tr")?F_.y+m:F_.y+F_.h-m-h; return {x,y,w,h,pos:k}; };
+  if(!sh){ const w=MM_INSET.px, h=MM_INSET.px;
+    const corners=order.map(k=>mk(k,1));
+    if(!ext) return corners[0];
+    const a=V.toPx(ext[3],ext[0]), b=V.toPx(ext[1],ext[2]), P={x:a[0],y:a[1],w:b[0]-a[0],h:b[1]-a[1]};
+    const ov=c=>Math.max(0,Math.min(c.x+c.w,P.x+P.w)-Math.max(c.x,P.x))*Math.max(0,Math.min(c.y+c.h,P.y+P.h)-Math.max(c.y,P.y));
+    return corners.slice().sort((p,q)=>ov(p)-ov(q))[0]; }
+  const rings=(sh.rings||[]).filter(r=>r&&r.length>=3), outline=sh.outline&&sh.outline.length?sh.outline:null;
+  /* edge points every 6 px, and the property's ground on a 14 px grid */
+  const edge=[]; rings.forEach(r=>{ for(let i=0;i<r.length;i++){ const a=r[i], b=r[(i+1)%r.length], n=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])/6)); for(let k=0;k<n;k++) edge.push([a[0]+(b[0]-a[0])*k/n, a[1]+(b[1]-a[1])*k/n]); } });
+  const cover=b=>{ const M=14; let e=0, g=0; edge.forEach(p=>{ if(p[0]>b.x-M&&p[0]<b.x+b.w+M&&p[1]>b.y-M&&p[1]<b.y+b.h+M) e++; });
+    if(outline) for(let x=b.x+7;x<b.x+b.w;x+=14) for(let y=b.y+7;y<b.y+b.h;y+=14) if(mmPtIn_(outline,x,y)) g++;
+    return e*4+g; };
+  if(sh.pos&&order.indexOf(sh.pos)>=0){ const b=mk(sh.pos,1); b.cover=cover(b); return b; }
+  let least=null;
+  for(const s of [1,0.85,0.7]) for(const k of order){ const b=mk(k,s); b.cover=cover(b); if(!b.cover) return b; if(s===1&&(!least||b.cover<least.cover)) least=b; }
+  return least; }
 /* v415 — key-map road names: short forms ("Smith Blvd"), the roads nearest the property first, as many as fit without
    touching each other or the property; the text steps down a size when a name will not fit its road. The map
    options page can ask for more (smaller) or fewer (larger) names, or none. (Chris, 2026-10-13: a key map with one
@@ -14905,7 +14921,8 @@ function mmInsetDraw_(ctx, I, B, V, aerial, o){
           if(!free(b)) continue; boxes.push(b); ctx.save(); ctx.translate(at.p[0],at.p[1]); ctx.rotate(at.ang); mmHaloText_(ctx,r.name,0,0,"#111","#fff",4); ctx.restore(); n++; done=true; break; } } });
   }
   /* scale line and the box */
-  const km=2000/(MM_INSET.scale*inchM); ctx.fillStyle="#111"; ctx.fillRect(B.x+10,B.y+B.h-16,km,5); ctx.font="14px "+F; ctx.textAlign="left"; ctx.textBaseline="alphabetic"; ctx.fillText("0",B.x+8,B.y+B.h-20); ctx.fillText("2 km",B.x+10+km+4,B.y+B.h-20);
+  const km=2000/(MM_INSET.scale*inchM); ctx.fillStyle="rgba(255,255,255,.88)"; ctx.fillRect(B.x+3,B.y+B.h-40,km+58,37); ctx.font="14px "+F; { const tw=ctx.measureText("1:"+MM_INSET.scale.toLocaleString("en-CA")).width; ctx.fillRect(B.x+B.w-tw-14,B.y+B.h-26,tw+11,23); }      /* v515: the scale reads clear of the roads under it */
+  ctx.fillStyle="#111"; ctx.fillRect(B.x+10,B.y+B.h-16,km,5); ctx.font="14px "+F; ctx.textAlign="left"; ctx.textBaseline="alphabetic"; ctx.fillText("0",B.x+8,B.y+B.h-20); ctx.fillText("2 km",B.x+10+km+4,B.y+B.h-20);
   ctx.textAlign="right"; ctx.fillText("1:"+MM_INSET.scale.toLocaleString("en-CA"),B.x+B.w-8,B.y+B.h-8);
   ctx.restore(); ctx.strokeStyle="#111"; ctx.lineWidth=2.5; ctx.strokeRect(B.x,B.y,B.w,B.h);
 }
@@ -15004,8 +15021,8 @@ async function mmRender_(tract, o, onPct, frozen){
   try{ lnDrawOn_(ctx, V, D.lines||[], halo, present, "areas"); }catch(e){ notes.push("Areas: "+String(e.message||e)); }
   if(o.layers.lots) eachF("lots",g=>g.polys.forEach(r=>{ mmPath_(ctx,V,r); ctx.strokeStyle=halo?"rgba(255,255,255,.85)":MM_COL.lot; ctx.lineWidth=2; mmDash_(ctx,[3,6]); ctx.stroke(); mmDash_(ctx,[]); present.lots=1; }));
   if(o.layers.roads) eachF("roads",g=>g.lines.forEach(l=>{ mmLine_(ctx,V,l); if(halo){ ctx.strokeStyle="rgba(255,255,255,.8)"; ctx.lineWidth=9; ctx.stroke(); } ctx.strokeStyle=MM_COL.road; ctx.lineWidth=5; ctx.stroke(); present.roads=1; }));
-  if(o.layers.building) eachF("building",g=>{ const pts=g.pts.slice(); g.polys.forEach(r=>{ const o0=r[0]; if(!o0||!o0.length) return; let a=0,b=0; o0.forEach(q=>{ a+=q[0]; b+=q[1]; }); pts.push([a/o0.length,b/o0.length]); });
-    pts.forEach(q=>{ const p=V.toPx(q[0],q[1]); ctx.beginPath(); ctx.arc(p[0],p[1],9,0,Math.PI*2); ctx.fillStyle=MM_COL.building; ctx.fill(); if(halo){ ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.stroke(); } present.building=1; }); });
+  const bldPts=[]; if(o.layers.building) eachF("building",g=>{ const pts=g.pts.slice(); g.polys.forEach(r=>{ const o0=r[0]; if(!o0||!o0.length) return; let a=0,b=0; o0.forEach(q=>{ a+=q[0]; b+=q[1]; }); pts.push([a/o0.length,b/o0.length]); });
+    pts.forEach(q=>{ const p=V.toPx(q[0],q[1]); bldPts.push(p); ctx.beginPath(); ctx.arc(p[0],p[1],9,0,Math.PI*2); ctx.fillStyle=MM_COL.building; ctx.fill(); if(halo){ ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.stroke(); } present.building=1; }); });
   /* v416: towns and places as a ringed dot; the names are placed with the other names below */
   const townPts=[]; if(o.layers.towns) eachF("towns",(g,pr)=>{ g.pts.forEach(q=>{ const p=V.toPx(q[0],q[1]); ctx.beginPath(); ctx.arc(p[0],p[1],10,0,Math.PI*2); ctx.fillStyle="#fff"; ctx.fill(); ctx.lineWidth=3.5; ctx.strokeStyle="#111"; ctx.stroke(); ctx.beginPath(); ctx.arc(p[0],p[1],4,0,Math.PI*2); ctx.fillStyle="#111"; ctx.fill(); present.towns=1; townPts.push({p, name:String(pr.NAME||""), kind:pr.KIND}); }); });
   // v389: the cruiser's lines — trails, roads, skid trails, streams — under the outline, over the provincial layers
@@ -15031,7 +15048,11 @@ async function mmRender_(tract, o, onPct, frozen){
   /* v393: a note or arrow was placed by hand, so everything automatic must keep off it. Its boxes go in
      first; the note itself is still drawn last, on top. */
   try{ mnBoxes_(ctx, V, D.notes||[]).forEach(b=>boxes.push(b)); }catch(e){}
-  const insetBox=(o.inset&&D.inset&&D.inset.bbox)?mmInsetPlace_(V, D.ext):null; if(insetBox) boxes.push(insetBox);      // v394: the locator's corner is kept clear
+  /* v515: the key map's corner, judged by the property's real shapes (not its bounding box) */
+  const outPx0=(D.outline&&D.outline.length?D.outline:[]).map(r=>r.map(q=>V.toPx(q[0],q[1]))), compPx0=D.comps.map(c=>c.polygons.map(pg=>pg[0]).filter(Boolean)).flat().map(r=>r.map(q=>V.toPx(q[0],q[1])));
+  const insetBox=(o.inset&&D.inset&&D.inset.bbox)?mmInsetPlace_(V, D.ext, {rings:outPx0.concat(compPx0), outline:outPx0.length?outPx0:compPx0, pos:o.insetPos}):null; if(insetBox) boxes.push(insetBox);
+  if(insetBox&&insetBox.cover) notes.push("The key map covers part of the property in every corner"+(o.insetPos&&o.insetPos!=="auto"?" (or the corner chosen)":"")+" — choose another corner under 'Key map position', or a smaller scale");
+  bldPts.forEach(p=>boxes.push({x:p[0]-12,y:p[1]-12,w:24,h:24}));      // v515: a building's dot keeps its room (a lot label sat on one)      // v394: the locator's corner is kept clear
   /* v416: the arrow to the nearest town takes its room now (it is drawn near the end, over the map, under the notes) */
   townPts.forEach(t=>boxes.push({x:t.p[0]-12,y:t.p[1]-12,w:24,h:24}));      // v416: the town dots keep their room
   let townArrow=null; try{ if(o.townArrow && o.layers.towns!==false && L.towns){ townArrow=mmTownArrow_(ctx, V, D, L.towns, boxes); if(townArrow) boxes.push(townArrow.box); } }catch(e){ notes.push("Town arrow: "+String(e.message||e)); }
@@ -15109,17 +15130,29 @@ async function mmRender_(tract, o, onPct, frozen){
         if(n>=need){ pick=fs; break; } if(!most||n>most.n||(n===most.n&&fs<most.fs)) most={fs,n}; }      /* none reaches three in five: the size that fits the most inside — the smaller on a tie (they go outside, and smaller ones ring the property tidier) */
       pick=pick||most.fs; sizes=[pick]; smallFs=pick; }
     pass1(sizes); }
+  /* v515 (Chris, 2026-11-26: "the stream and wetland labels are now not appearing"): river, creek, lake and wetland names are
+     placed before the labels that must go outside — a name belongs on its feature and cannot move far, a leader label can —
+     so the outside labels no longer take the creek's room */
+  let waterNm=null; if(o.waterNames!==false){ try{ waterNm=mmWaterNames_(ctx, V, o, eachF, boxes, free); }catch(e){ notes.push("Water names: "+String(e.message||e)); } }
+  if(waterNm&&waterNm.missed&&waterNm.missed.length) notes.push("No room on the map for the name of "+waterNm.missed.join(", "));
+  /* v515 (Chris: "The leader lines sometimes are unnecessarily long"): a leader ends at the point of its compartment nearest the
+     label, just inside the edge — not at the compartment's middle, which on a long strip can be far down it */
+  const tipOf=(big,cx,cy)=>{ let best=null; big.forEach(r=>{ for(let i=0,j=r.length-1;i<r.length;j=i++){ const a=r[j], q=r[i], dx=q[0]-a[0], dy=q[1]-a[1], L2=dx*dx+dy*dy; let u=L2?((cx-a[0])*dx+(cy-a[1])*dy)/L2:0; u=Math.max(0,Math.min(1,u)); const x=a[0]+u*dx, y=a[1]+u*dy, d=Math.hypot(x-cx,y-cy); if(!best||d<best.d) best={x,y,d}; } });
+    if(!best) return null; const vx=best.x-cx, vy=best.y-cy, L=Math.hypot(vx,vy)||1; for(const k of [8,6,4,2]){ const x=best.x+vx/L*k, y=best.y+vy/L*k; if(mmPtIn_(big,x,y)) return {x,y}; } return {x:best.x,y:best.y}; };
   /* pass 2: the rest go outside, those nearest the outline first (the shortest leaders take the nearest spots) */
   const distOut=it=>{ let d=1/0; outPx.forEach(r=>{ for(let i=0;i<r.length;i++){ const a=r[i], b=r[(i+1)%r.length], dx=b[0]-a[0], dy=b[1]-a[1], L2=dx*dx+dy*dy; let u=L2?((it.at.x-a[0])*dx+(it.at.y-a[1])*dy)/L2:0; u=Math.max(0,Math.min(1,u)); d=Math.min(d,Math.hypot(a[0]+u*dx-it.at.x,a[1]+u*dy-it.at.y)); } }); return d; };
   items.filter(it=>!it.b).map(it=>({it,d:distOut(it)})).sort((p,q)=>p.d-q.d).forEach(({it})=>{ const box=boxFor(it), {big,at}=it; let b=null, lead=null;
     const small=box(smallFs,at.x,at.y);
-    /* v513: "Next to their compartment" — spots just off the compartment's own edge, clear of every other compartment, first */
-    if(o.lblOut==="near"){ const allC=D.comps.map(c=>c.polygons.map(r=>r.map(ring=>ring.map(q=>V.toPx(q[0],q[1]))))).flat(); const r0=big[0]||[], n=r0.length;
-      const inAny=(x,y)=>allC.some(pg=>mmPtIn_(pg,x,y)), sp=[];
+    /* v515: "Next to their own compartment" (now the default) — spots in two rows round the compartment's own edge, on open ground or
+       outside the property, scored by the leader they need: its length, plus a heavy cost for every other compartment's edge it
+       crosses and for a label sitting over another compartment. The nearest good spot wins, so most leaders are short. */
+    if(o.lblOut2!=="ring"){ const r0=big[0]||[], n=r0.length, sp=[];
       for(let i=0;i<n;i++){ const a=r0[i], q=r0[(i+1)%n], L=Math.hypot(q[0]-a[0],q[1]-a[1]); if(L<1) continue; let nx=-(q[1]-a[1])/L, ny=(q[0]-a[0])/L; const mx=(a[0]+q[0])/2, my=(a[1]+q[1])/2; if(mmPtIn_(big,mx+nx*4,my+ny*4)){ nx=-nx; ny=-ny; }
-        const ext=(Math.abs(nx)*small.w+Math.abs(ny)*small.h)/2+6, k=Math.max(1,Math.round(L/Math.max(24,small.w*0.5))); for(let j=0;j<=k;j++){ const t=j/k; sp.push([a[0]+(q[0]-a[0])*t+nx*ext, a[1]+(q[1]-a[1])*t+ny*ext]); } }
-      sp.sort((p,q)=>Math.hypot(p[0]-at.x,p[1]-at.y)-Math.hypot(q[0]-at.x,q[1]-at.y));
-      for(const c of sp){ const t=box(smallFs,c[0],c[1]); if(!free(t)||!mmBoxOut_(big,t)||mmRBoxPts_(t,0).some(p=>inAny(p[0],p[1]))) continue; b=t; lead=leadOf(t,at); break; } }
+        const ext=(Math.abs(nx)*small.w+Math.abs(ny)*small.h)/2+6, k=Math.max(1,Math.round(L/Math.max(20,small.w*0.4)));
+        for(let j=0;j<=k;j++){ const t=j/k, x=a[0]+(q[0]-a[0])*t, y=a[1]+(q[1]-a[1])*t; [0,1,2.2,3.6].forEach(row=>sp.push([x+nx*(ext+row*small.h*1.1), y+ny*(ext+row*small.h*1.1), row])); } }
+      let best=null; for(const c of sp){ const t=box(smallFs,c[0],c[1]); if(!free(t)||!mmBoxOut_(big,t)) continue; const tp=tipOf(big,c[0],c[1]); if(!tp) continue; const s0=leadOf(t,tp); if(!segFree(s0[0],s0[1],tp.x,tp.y)) continue;
+        const ov=overOther(t,tp), x=crossings(s0[0],s0[1],tp.x,tp.y,big), sc=(ov?900:0)+x*400+Math.hypot(s0[0]-tp.x,s0[1]-tp.y)+c[2]*4; if(!best||sc<best.sc) best={t,s0,tp,sc}; }
+      if(best&&best.sc<400){ b=best.t; lead=best.s0; it.tip=best.tp; } else if(best) it._alt=best; }
     if(!b&&outPx.length){ const near=callouts(small.w,small.h).map(c=>({c,d:Math.hypot(c[0]-at.x,c[1]-at.y)})).sort((p,q)=>p.d-q.d).slice(0,160);
       /* v514: of the clear spots, the one whose leader crosses the fewest other compartment edges, then the shortest */
       let best=null, d0=null; for(const {c,d} of near){ if(d0!=null&&d>d0+small.h*3) break; const t=box(smallFs,c[0],c[1]); if(!free(t)||!mmBoxOut_(big,t)||!mmBoxOut_(outPx,t)) continue; const s0=leadOf(t,at); if(!segFree(s0[0],s0[1],at.x,at.y)) continue;
@@ -15130,12 +15163,16 @@ async function mmRender_(tract, o, onPct, frozen){
       outer: for(const strict of (outPx.length?[2,1,0]:[1,0])) for(let k=1;k<=7;k++) for(const ang of [0,180,90,270,45,135,225,315]){ const r=at.room+k*step, x=at.x+Math.cos(ang*Math.PI/180)*r, y=at.y+Math.sin(ang*Math.PI/180)*r;
         const t=box(smallFs,x,y); if(!free(t)||!mmBoxOut_(big,t)||(strict===2&&!mmBoxOut_(outPx,t))||(strict===1&&overOther(t,at))) continue; const s0=leadOf(t,at); if(!segFree(s0[0],s0[1],at.x,at.y)) continue; b=t; lead=s0; break outer; }
       if(!b){ outer3: for(let k=1;k<=5;k++) for(const ang of [0,180,90,270,45,135,225,315]){ const r=at.room+k*step, x=at.x+Math.cos(ang*Math.PI/180)*r, y=at.y+Math.sin(ang*Math.PI/180)*r; const t=box(smallFs,x,y); if(free(t)&&mmBoxOut_(big,t)){ b=t; lead=leadOf(t,at); break outer3; } } } }
+    if(!b&&it._alt){ b=it._alt.t; lead=it._alt.s0; it.tip=it._alt.tp; }      // v515: over a neighbour, but next to its own compartment
     if(!b){ b=box(smallFs,at.x,at.y); lead=null; }                   // nowhere clear: the small label where it is
+    if(lead&&!it.tip){ const cx=b.x+b.w/2, cy=b.y+b.h/2, tp=tipOf(big,cx,cy); if(tp){ const s1=leadOf(b,tp); if(segFree(s1[0],s1[1],tp.x,tp.y)&&crossings(s1[0],s1[1],tp.x,tp.y,big)<=crossings(lead[0],lead[1],at.x,at.y,big)){ lead=s1; it.tip=tp; } } }      // v515
+    const tip=it.tip||at;
     /* v513: a label that touches its own compartment (within 1.5 mm) needs no leader line, unless "Always draw leader lines" is ticked */
-    if(lead&&!o.lblLeaderAll&&mmBoxGap_(big,b)<=12&&!overOther(b,at)) lead=null;      /* v514: …and only on open ground — a label over a neighbour keeps its leader */
-    it.b=b; it.lead=lead; boxes.push(b); if(lead) segBoxes(lead[0],lead[1],at.x,at.y); });
+    if(lead&&!o.lblLeaderAll&&mmBoxGap_(big,b)<=12&&!overOther(b,tip)) lead=null;      /* v514: …and only on open ground — a label over a neighbour keeps its leader */
+    if(it.tip&&it.tip!==at){ const own=boxes.findIndex(q=>q._anc&&Math.abs(q.ax-at.x)<0.01&&Math.abs(q.ay-at.y)<0.01); if(own>=0) boxes.splice(own,1); }      // v515: its middle's dot is not needed
+    it.b=b; it.lead=lead; boxes.push(b); if(lead) segBoxes(lead[0],lead[1],tip.x,tip.y); });
   /* draw: leaders first, then every label over them */
-  items.forEach(it=>{ if(!it.lead) return; const {at}=it; ctx.beginPath(); ctx.moveTo(it.lead[0],it.lead[1]); ctx.lineTo(at.x,at.y); ctx.strokeStyle=bg; ctx.lineWidth=6; ctx.stroke(); ctx.strokeStyle=fg; ctx.lineWidth=2.5; ctx.stroke();
+  items.forEach(it=>{ if(!it.lead) return; const at=it.tip||it.at; ctx.beginPath(); ctx.moveTo(it.lead[0],it.lead[1]); ctx.lineTo(at.x,at.y); ctx.strokeStyle=bg; ctx.lineWidth=6; ctx.stroke(); ctx.strokeStyle=fg; ctx.lineWidth=2.5; ctx.stroke();
     ctx.beginPath(); ctx.arc(at.x,at.y,5,0,Math.PI*2); ctx.fillStyle=fg; ctx.fill(); });
   items.forEach(it=>{ const b=it.b; if(!b) return; const {l3,l4}=it, one=b.one, l1=one?it.l1+"  "+it.l2:it.l1, l2=one?"":it.l2;
     /* v513: drawn in the label's own frame — turned with the compartment when it was placed that way */
@@ -15155,11 +15192,12 @@ async function mmRender_(tract, o, onPct, frozen){
   if(o.layers.roadnames && D.roads){ try{ if(rnDraw_(ctx,V,tract,D.roads,boxes,o.aerial,D.ext)) present.roadnames=1; }catch(e){ notes.push("Road names: "+String(e.message||e)); } }
   /* v513: river, creek and lake names, and wetland names (PSW), on the printed maps too (Chris: "the watercourse and waterbody
      features lose their labels") — in blue/green italic as maps letter water; after the road names, before the lots */
-  if(o.waterNames!==false){ try{ mmWaterNames_(ctx, V, o, eachF, boxes, free); }catch(e){ notes.push("Water names: "+String(e.message||e)); } }
   if(o.layers.lots) eachF("lots",(g,pr)=>{ const t1=String(pr.LOT_IDENT||"").trim(), t2=String(pr.CONCESSION_IDENT||"").trim(); if(!t1&&!t2) return;
     g.polys.forEach(r=>{ const at=mmInside_(r.map(ring=>ring.map(q=>V.toPx(q[0],q[1]))), MM_FRAME); if(!at) return;
-      ctx.font="28px Arial, Helvetica, sans-serif"; const w=Math.max(ctx.measureText(t1).width,ctx.measureText(t2).width)+12, b={x:at.x-w/2,y:at.y-36,w,h:72};
-      if(!free(b)) return; boxes.push(b); const fg=o.aerial?"#fff":"#222", bg=o.aerial?"#000":"#fff"; mmHaloText_(ctx,t1,at.x,at.y-16,fg,bg); mmHaloText_(ctx,t2,at.x,at.y+18,fg,bg); }); });
+      ctx.font="28px Arial, Helvetica, sans-serif"; const w=Math.max(ctx.measureText(t1).width,ctx.measureText(t2).width)+12, rp=r.map(ring=>ring.map(q=>V.toPx(q[0],q[1])));
+      /* v515: when the lot's middle is taken (a building's dot, a name), a spot a little way off it */
+      let b=null; for(const d of [[0,0],[0,90],[0,-90],[w*0.8,0],[-w*0.8,0],[w*0.8,90],[-w*0.8,-90],[0,180],[0,-180]]){ const x=at.x+d[0], y=at.y+d[1], t={x:x-w/2,y:y-36,w,h:72}; if(mmPtIn_(rp,x,y)&&free(t)){ b=t; at.x=x; at.y=y; break; } }
+      if(!b) return; boxes.push(b); const fg=o.aerial?"#fff":"#222", bg=o.aerial?"#000":"#fff"; mmHaloText_(ctx,t1,at.x,at.y-16,fg,bg); mmHaloText_(ctx,t2,at.x,at.y+18,fg,bg); }); });
   // v394: elevations on the index contours, where there is room (last of the automatic labels)
   if(ctIdx.length){ try{ mmContourLabels_(ctx, V, ctIdx, boxes, o.aerial); }catch(e){ notes.push("Contour labels: "+String(e.message||e)); } }
   // v394: the locator inset, over the map but under the notes
@@ -15219,7 +15257,7 @@ function mmWaterNames_(ctx, V, o, eachF, boxes, free){
   const blue=aer?["#ffffff","#0d4f9e"]:["#0b4f8a","#ffffff"], green=aer?["#ffffff","#1f5a1a"]:["#1f6b2a","#ffffff"];
   const halo=(t,x,y,c)=>{ ctx.lineWidth=c[0]==="#ffffff"?6:7; ctx.lineJoin="round"; ctx.strokeStyle=c[1]; ctx.strokeText(t,x,y); ctx.fillStyle=c[0]; ctx.fillText(t,x,y); };
   const inFr=(x,y,m)=>x>MM_FRAME.x+m&&y>MM_FRAME.y+m&&x<MM_FRAME.x+MM_FRAME.w-m&&y<MM_FRAME.y+MM_FRAME.h-m;
-  const placed=[];
+  const placed=[], missed=[];
   /* --- streams and rivers --- */
   if(o.layers.water){ const by={}; eachF("water",(g,pr)=>{ const nm=String(pr.OFFICIAL_NAME_LABEL||"").trim(); if(!nm) return; g.lines.forEach(l=>{ (by[nm]=by[nm]||[]).push(l.map(q=>V.toPx(q[0],q[1]))); }); });
     Object.keys(by).forEach(nm=>{ /* join the pieces end to end, then keep the runs inside the frame */
@@ -15232,33 +15270,40 @@ function mmWaterNames_(ctx, V, o, eachF, boxes, free){
         for(let i=0;i<l.length;i++){ const p=l[i]; if(i){ const q=l[i-1], n=Math.max(1,Math.ceil(Math.hypot(p[0]-q[0],p[1]-q[1])/8)); for(let k=1;k<n;k++) push([q[0]+(p[0]-q[0])*k/n, q[1]+(p[1]-q[1])*k/n]); } push(p); }
         if(cur.length>1) runs.push(cur); });
       runs.sort((a,b)=>b.length-a.length); const chars=[...nm];
-      sizes: for(const fs of [Math.round(26*lsc),Math.round(22*lsc)]){ ctx.font="italic bold "+fs+"px "+F; const cw=chars.map(ch=>ctx.measureText(ch).width), W=cw.reduce((a,b)=>a+b,0), need=W+24;
+      const fsz=[26,22,19].map(v=>Math.max(18,Math.round(v*lsc))).filter((v,i,a)=>a.indexOf(v)===i);
+      sizes: for(const fs of fsz) for(const side of [1,-1]){ ctx.font="italic bold "+fs+"px "+F; const cw=chars.map(ch=>ctx.measureText(ch).width), W=cw.reduce((a,b)=>a+b,0), need=W+24;
         for(const run of runs){ const cum=[0]; for(let i=1;i<run.length;i++) cum.push(cum[i-1]+Math.hypot(run[i][0]-run[i-1][0],run[i][1]-run[i-1][1])); const tot=cum[cum.length-1]; if(tot<need) continue;
-          const at=d=>{ let i=1; while(i<cum.length-1&&cum[i]<d) i++; const t=(d-cum[i-1])/Math.max(1e-6,cum[i]-cum[i-1]), a=run[i-1], b=run[i]; return {x:a[0]+(b[0]-a[0])*t, y:a[1]+(b[1]-a[1])*t, ang:Math.atan2(b[1]-a[1],b[0]-a[0])}; };
+          const at0=d=>{ d=Math.max(0,Math.min(tot,d)); let i=1; while(i<cum.length-1&&cum[i]<d) i++; const t=(d-cum[i-1])/Math.max(1e-6,cum[i]-cum[i-1]), a=run[i-1], b=run[i]; return {x:a[0]+(b[0]-a[0])*t, y:a[1]+(b[1]-a[1])*t, ang:Math.atan2(b[1]-a[1],b[0]-a[0])}; };
+          /* v515: the letters follow the stream's general line (its direction over a letter and a half each way), not every wiggle */
+          const at=d=>{ const P=at0(d), A=at0(d-fs*0.75), B=at0(d+fs*0.75); return {x:P.x, y:P.y, ang:Math.atan2(B.y-A.y,B.x-A.x)}; };
           const mid=(tot-need)/2, step=Math.max(20,need/3), starts=[mid]; for(let k=1;k<60;k++){ if(mid-k*step>=0) starts.push(mid-k*step); if(mid+k*step<=tot-need) starts.push(mid+k*step); }
           let best=null;
           for(const s0 of starts){ const A=at(s0+12), B=at(s0+12+W), flip=B.x<A.x, pl=[]; let d=0, ok=true, prev=null, turn=0;
             for(let k=0;k<chars.length;k++){ const dd=flip?(s0+12+W-(d+cw[k]/2)):(s0+12+d+cw[k]/2), P=at(dd); let ang=P.ang+(flip?Math.PI:0); while(ang>Math.PI) ang-=2*Math.PI; while(ang<-Math.PI) ang+=2*Math.PI;
               if(prev!=null){ let da=ang-prev; while(da>Math.PI) da-=2*Math.PI; while(da<-Math.PI) da+=2*Math.PI; if(Math.abs(da)>0.45){ ok=false; break; } turn+=Math.abs(da); } prev=ang;
-              const off=fs*0.62, x=P.x+Math.sin(ang)*off, y=P.y-Math.cos(ang)*off;      /* just beside the stream, on its upper side */
+              const off=fs*0.62*side, x=P.x+Math.sin(ang)*off, y=P.y-Math.cos(ang)*off;      /* just beside the stream, on its upper side (v515: else the lower) */
               const bx=mmRBox_(x,y,cw[k]+3,fs*1.05,ang); if(!inFr(bx.x,bx.y,6)||!inFr(bx.x+bx.w,bx.y+bx.h,6)||!free(bx)){ ok=false; break; } pl.push({ch:chars[k],x,y,ang,bx}); d+=cw[k]; }
-            if(ok&&turn<1.1&&(!best||turn<best.turn)){ best={pl,turn}; if(turn<0.15) break; } }
+            if(ok&&turn<1.2&&(!best||turn<best.turn)){ best={pl,turn}; if(turn<0.15) break; } }
           if(best){ ctx.textAlign="center"; ctx.textBaseline="middle";
             [0,1].forEach(pass=>best.pl.forEach(c=>{ ctx.save(); ctx.translate(c.x,c.y); ctx.rotate(c.ang); if(pass===0){ ctx.lineWidth=blue[0]==="#ffffff"?6:7; ctx.lineJoin="round"; ctx.strokeStyle=blue[1]; ctx.strokeText(c.ch,0,0); } else { ctx.fillStyle=blue[0]; ctx.fillText(c.ch,0,0); } ctx.restore(); }));
-            best.pl.forEach(c=>boxes.push(c.bx)); placed.push(nm); break sizes; } } } }); }
+            best.pl.forEach(c=>boxes.push(c.bx)); placed.push(nm); break sizes; } } }
+      if(placed.indexOf(nm)<0&&runs.length&&runs[0].length>60) missed.push(nm); }); }
   /* --- lakes, ponds and wetlands: inside, on as few lines as fit --- */
   const polyName=(k,nameOf,col,sizes,maxLines)=>{ const by={}; eachF(k,(g,pr)=>{ const nm=nameOf(pr); if(!nm) return; g.polys.forEach(pg=>{ const px=pg.map(r=>r.map(q=>V.toPx(q[0],q[1]))), r0=px[0]||[]; let a=0; for(let i=0,j=r0.length-1;i<r0.length;j=i++) a+=(r0[j][0]+r0[i][0])*(r0[j][1]-r0[i][1]); (by[nm]=by[nm]||[]).push({px,a:Math.abs(a/2)}); }); });
     Object.keys(by).forEach(nm=>{ const pcs=by[nm].sort((p,q)=>q.a-p.a), words=nm.split(/\s+/), layouts=[];
       /* balanced lines: of every way to break the name into n lines, the one whose longest line is shortest */
       for(let n=1;n<=Math.min(maxLines,words.length);n++){ let best=null; const rec=(i,left,acc)=>{ if(left===1){ const ls=acc.concat([words.slice(i).join(" ")]), mx=Math.max(...ls.map(l=>l.length)); if(!best||mx<best.mx) best={ls,mx}; return; }
           for(let j=i+1;j<=words.length-left+1;j++) rec(j,left-1,acc.concat([words.slice(i,j).join(" ")])); }; rec(0,n,[]); if(best) layouts.push(best.ls); }
-      outer: for(const pc of pcs.slice(0,3)){ const cands=mmCands_(pc.px, MM_FRAME, 30); if(!cands.length) continue;
+      let done=false; outer: for(const pc of pcs.slice(0,5)){ const cands=mmCands_(pc.px, MM_FRAME, 40); if(!cands.length) continue;
         for(const fs of sizes) for(const ls of layouts){ ctx.font="italic bold "+fs+"px "+F; const w=Math.max(...ls.map(l=>ctx.measureText(l).width))+10, h=Math.round(fs*1.18*ls.length)+6;
           for(const c of cands){ const b={x:c.x-w/2,y:c.y-h/2,w,h}; if(!mmBoxIn_(pc.px,b,4)||!free(b)) continue;
-            boxes.push(b); ctx.textAlign="center"; ctx.textBaseline="middle"; ls.forEach((l,i)=>halo(l,c.x,c.y+(i-(ls.length-1)/2)*fs*1.18,col)); placed.push(nm); break outer; } } } }); };
-  if(o.layers.waterbody) polyName("waterbody", pr=>String(pr.OFFICIAL_NAME_LABEL||"").trim(), blue, [30,26,22].map(v=>Math.round(v*lsc)), 2);
-  if(o.layers.wetland) polyName("wetland", pr=>{ const nm=String(pr.EVALUATED_WETLAND_NAME||"").trim(), psw=/provinc/i.test(String(pr.WETLAND_SIGNIFICANCE||"")); return nm?(nm+(psw?" (PSW)":"")):""; }, green, [24,21,18].map(v=>Math.round(v*lsc)), 3);
-  return placed; }
+            boxes.push(b); ctx.textAlign="center"; ctx.textBaseline="middle"; ls.forEach((l,i)=>halo(l,c.x,c.y+(i-(ls.length-1)/2)*fs*1.18,col)); placed.push(nm); done=true; break outer; } } }
+      if(!done&&pcs.some(pc=>pc.a>4000)) missed.push(nm); }); };
+  const ps=a=>a.map(v=>Math.max(16,Math.round(v*lsc))).filter((v,i,q)=>q.indexOf(v)===i);
+  if(o.layers.waterbody) polyName("waterbody", pr=>String(pr.OFFICIAL_NAME_LABEL||"").trim(), blue, ps([30,26,22,18]), 3);
+  /* v515: an unnamed provincially significant wetland is marked PSW, as on the phone's map */
+  if(o.layers.wetland) polyName("wetland", pr=>{ const nm=String(pr.EVALUATED_WETLAND_NAME||"").trim(), psw=/provinc/i.test(String(pr.WETLAND_SIGNIFICANCE||"")); return nm?(nm+(psw?" (PSW)":"")):(psw?"PSW":""); }, green, ps([24,21,18,16]), 4);
+  return {placed, missed}; }
 function mmHaloText_(ctx,t,x,y,fg,bg,lw){ ctx.lineWidth=lw||(fg==="#fff"?5:7); ctx.lineJoin="round"; ctx.strokeStyle=bg; if(ctx.strokeText) ctx.strokeText(t,x,y); ctx.fillStyle=fg; ctx.fillText(t,x,y); }
 function mmNice_(m){ const s=[10,20,25,50,100,200,250,500,1000,2000,2500,5000]; return s.reduce((b,v)=>v<=m?v:b, s[0]); }
 function mmTitleBlock_(ctx, d, o, V, present, hc, photo){
@@ -15815,11 +15860,11 @@ function mmOpen_(kind){
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Projection</div>`+sel("mmProj",[["utm","UTM (NAD83) — zone from the property; the plan's usual grid"],["merc","Web Mercator — as the phone's map and older saved versions"]],o.proj||"utm")+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Compartment label size (automatic: 0.17 in, smaller where the compartment is tight)</div>`+sel("mmLabel",[["60","Much smaller (60%)"],["80","Smaller (80%)"],["100","Automatic"],["120","Larger (120%)"],["140","Much larger (140%)"]],String(o.labelScale||100))+
     /* v514: one size for one kind of label */
-    `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Label sizes</div>`+sel("mmLblSize",[["same","One size for every compartment label (recommended — never below 7 pt)"],["vary","The largest that fits each compartment"]],o.lblSize||"same")+
+    `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Label sizes</div>`+sel("mmLblSize",[["same","One size for every compartment label (recommended — never below 6 pt)"],["vary","The largest that fits each compartment"]],o.lblSize||"same")+
     /* v513: labels (Chris, 2026-11-26) */
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Compartment labels</div>`+sel("mmLblPlace",[["fit","Inside their compartment where they fit — a leader line only when one must go outside"],["out","Always outside, with leader lines"]],o.lblPlace)+
     `<label style="display:flex;align-items:center;gap:8px;padding:6px 0 2px;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmLblTilt" ${o.lblTilt!==false?"checked":""} style="width:20px;height:20px"> Turn labels to follow long, narrow compartments</label>`+
-    `<div style="font-size:12px;color:#a9c9b0;margin:8px 0 3px">Labels that must go outside</div>`+sel("mmLblOut",[["ring","Just outside the property boundary (a tidy ring)"],["near","Next to their own compartment (shorter leader lines)"]],o.lblOut)+
+    `<div style="font-size:12px;color:#a9c9b0;margin:8px 0 3px">Labels that must go outside</div>`+sel("mmLblOut",[["near","Next to their own compartment — the shortest leader lines (recommended)"],["ring","Just outside the property boundary (a tidy ring)"]],o.lblOut2||"near")+
     `<label style="display:flex;align-items:center;gap:8px;padding:6px 0 2px;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmLblLeaderAll" ${o.lblLeaderAll?"checked":""} style="width:20px;height:20px"> Leader line even when the label touches its compartment</label>`+
     `<label style="display:flex;align-items:center;gap:8px;padding:6px 0 2px;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmWaterNames" ${o.waterNames!==false?"checked":""} style="width:20px;height:20px"> River, creek, lake and wetland names (when those layers are on)</label>`+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Fill transparency (woodland, water, hatching${kind===7?", activity colours":""})</div>`+sel("mmAlpha",[["100","Solid"],["80","Slightly see-through (80%)"],["60","See-through (60%)"],["40","Faint (40%)"],["25","Light (25%)"],["15","Very light (15%)"],["10","Barely there (10%)"]],String(o.fillAlpha||100))+
@@ -15840,6 +15885,8 @@ function mmOpen_(kind){
     ((kind===6||kind===8)?`<label style="display:flex;align-items:center;gap:8px;padding:9px 0 5px;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmStand" ${o.standLabels?"checked":""} style="width:20px;height:20px"> Stand description under each compartment label (composition, age, BA, QMD — from the Sheet's compartment analysis; needs signal once)</label>`:"")+
     ((kind===4||kind===8)?`<label style="display:flex;align-items:center;gap:8px;padding:9px 0 5px;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmInset" ${o.inset?"checked":""} style="width:20px;height:20px"> Locator inset (1:150,000 in the corner — the property as a dot, roads and water for 8 km around)</label>`+
      /* v514: the key map's layers (Chris, 2026-11-26: "an option to select layers to show in the key map") */
+     /* v515: where the key map sits (Chris: "The inset map covers the boundary of the property") */
+     `<div style="font-size:12px;color:#a9c9b0;margin:6px 0 3px">Key map position</div>`+sel("mmInsetPos",[["auto","Automatic — the corner clear of the property"],["tr","Top right"],["tl","Top left"],["br","Bottom right"],["bl","Bottom left"]],o.insetPos||"auto")+
      `<div style="font-size:12px;color:#a9c9b0;margin:6px 0 3px">Key map shows</div>`+[["roads","Roads"],["waterbody","Lakes & ponds"],["water","Rivers & creeks"],["wetland","Wetlands"],["woodland","Woodland"],["lots","Lots & concessions"],["towns","Towns & places"],["extent","The main map's area (dashed box)"]]
        .map(x=>`<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:14px;color:#e8f0e6"><input type="checkbox" id="mmIL_${x[0]}" ${(o.insetLayers||{})[x[0]]?"checked":""} style="width:20px;height:20px"> ${x[1]}</label>`).join("")+
      `<div style="font-size:12px;color:#a9c9b0;margin:6px 0 3px">Key map road names</div>`+sel("mmInsetNames",[["auto","Automatic — the roads nearest the property, as many as fit"],["more","More names, smaller text"],["fewer","Fewer names, larger text"],["none","No road names"]],o.insetNames||"auto"):"")+
@@ -15871,11 +15918,11 @@ function mmRead_(kind){
   const ft=v("mmFeats"); if(ft) o.feats=!!ft.checked; const ln=v("mmLines"); if(ln) o.lines=!!ln.checked; const nm=v("mmNames"); if(nm) o.names=!!nm.checked; const se=v("mmSens"); o.sensitive=se?(se.value==="exact"?true:(se.value==="general"?"general":false)):false;
   const f=v("mmFirm"); if(f) o.firm=String(f.value||"").trim().slice(0,60);
   /* v513: labels */
-  const lp=v("mmLblPlace"); if(lp) o.lblPlace=lp.value==="out"?"out":"fit"; const lt=v("mmLblTilt"); if(lt) o.lblTilt=!!lt.checked; const lo2=v("mmLblOut"); if(lo2) o.lblOut=lo2.value==="near"?"near":"ring";
+  const lp=v("mmLblPlace"); if(lp) o.lblPlace=lp.value==="out"?"out":"fit"; const lt=v("mmLblTilt"); if(lt) o.lblTilt=!!lt.checked; const lo2=v("mmLblOut"); if(lo2) o.lblOut2=lo2.value==="ring"?"ring":"near";
   const la=v("mmLblLeaderAll"); if(la) o.lblLeaderAll=!!la.checked; const wn=v("mmWaterNames"); if(wn) o.waterNames=!!wn.checked;
   /* v514 */ const ls2=v("mmLblSize"); if(ls2) o.lblSize=ls2.value==="vary"?"vary":"same";
   if(v("mmIL_roads")){ const L={}; ["roads","waterbody","water","wetland","woodland","lots","towns","extent"].forEach(k=>{ const c=v("mmIL_"+k); L[k]=c&&c.checked?1:0; }); o.insetLayers=L; }
-  const py=v("mmPhotoYear"); if(py) o.photoYear=String(py.value||"").trim().slice(0,20); const ins=v("mmInset"); if(ins) o.inset=!!ins.checked; const inn=v("mmInsetNames"); if(inn) o.insetNames=inn.value||"auto"; const ta=v("mmTownArrow"); if(ta) o.townArrow=!!ta.checked; const st=v("mmStand"); if(st) o.standLabels=!!st.checked; const pj=v("mmProj"); if(pj) o.proj=pj.value==="merc"?"merc":"utm"; const al=v("mmAlpha"); if(al) o.fillAlpha=+al.value||100; const ls=v("mmLabel"); if(ls) o.labelScale=+ls.value||100; const af=v("mmActFrom"), at=v("mmActTo"); if(af) o.actFrom=String(af.value||"").trim(); if(at) o.actTo=String(at.value||"").trim();
+  const py=v("mmPhotoYear"); if(py) o.photoYear=String(py.value||"").trim().slice(0,20); const ins=v("mmInset"); if(ins) o.inset=!!ins.checked; const inn=v("mmInsetNames"); if(inn) o.insetNames=inn.value||"auto"; const ip=v("mmInsetPos"); if(ip) o.insetPos=["tr","tl","br","bl"].indexOf(ip.value)>=0?ip.value:"auto"; const ta=v("mmTownArrow"); if(ta) o.townArrow=!!ta.checked; const st=v("mmStand"); if(st) o.standLabels=!!st.checked; const pj=v("mmProj"); if(pj) o.proj=pj.value==="merc"?"merc":"utm"; const al=v("mmAlpha"); if(al) o.fillAlpha=+al.value||100; const ls=v("mmLabel"); if(ls) o.labelScale=+ls.value||100; const af=v("mmActFrom"), at=v("mmActTo"); if(af) o.actFrom=String(af.value||"").trim(); if(at) o.actTo=String(at.value||"").trim();
   return o;
 }
 /* ============ v384 — road names on Map 4 and Map 6 ============
@@ -18639,7 +18686,7 @@ function shpMulti_(feats, st){ st=st||5;
    Sheet ("Map Setups"), so every phone and the desk have them; a copy stays on this phone for use without signal. */
 let MS_LIST=(function(){ try{ return JSON.parse((STORE&&STORE.getItem("fi_mapsets"))||"[]")||[]; }catch(e){ return []; } })(), _msFetchedAt=0;
 function msPersist_(){ try{ STORE&&STORE.setItem("fi_mapsets",JSON.stringify(MS_LIST.slice(0,200))); }catch(e){} }
-function msOfOpts_(o){ const k=["title","tbLoc","tbOwner","tbTotal","tbProg","aerial","plotSize","plotNums","plotColor","plotComps","layers","hatch","plots","feats","lines","names","inset","standLabels","proj","actFrom","actTo","fillAlpha","labelScale","insetNames","townArrow","lblPlace","lblTilt","lblOut","lblLeaderAll","waterNames","lblSize","insetLayers","scale","page","extent","firm"];
+function msOfOpts_(o){ const k=["title","tbLoc","tbOwner","tbTotal","tbProg","aerial","plotSize","plotNums","plotColor","plotComps","layers","hatch","plots","feats","lines","names","inset","standLabels","proj","actFrom","actTo","fillAlpha","labelScale","insetNames","townArrow","lblPlace","lblTilt","lblOut2","insetPos","lblLeaderAll","waterNames","lblSize","insetLayers","scale","page","extent","firm"];
   const out={}; k.forEach(x=>{ if(o[x]!==undefined) out[x]=(x==="title"&&o.title===o.titleDef)?"":o[x]; }); return out; }
 function msFor_(t){ const k=propK_(t); return MS_LIST.filter(s=>!s.tract||propK_(s.tract)===k).sort((a,b)=>String(a.name).localeCompare(String(b.name),undefined,{numeric:true})); }
 function msMenuHtml_(t){ const vers=t?`<button type="button" onclick="try{ closeLayersMenu(); }catch(e){} _ppTract=propActiveTract_(); mvOpen_()" style="display:block;width:100%;text-align:left;padding:8px 10px;margin:6px 0 2px;border-radius:9px;border:1px solid #2a4a30;background:transparent;color:#cfe6d4;font:13px system-ui">🗂 Saved map versions — maps kept exactly as they were made</button>`:"";
