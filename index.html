@@ -1452,7 +1452,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-26 · v515";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-27 · v516";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -13088,6 +13088,18 @@ function propSummary_(tract, comps){
    Stored as labelArea "adj" / "acres" / "calc"+labelUnit "ha". Before v386 "calc"+"ac" was the default and
    "manual" the typed areas — both now read as adjusted acres. */
 function propLabelShow_(p){ p=p||{}; return p.labelArea==="acres" ? "ac" : (p.labelArea==="calc"&&p.labelUnit==="ha") ? "ha" : "adj"; }
+/* v516 (Chris, 2026-11-27: "I want the option to show either acres or Hectares or both"): the label's figure is the adjusted or the
+   measured area (basis "adj"/"meas"), shown in acres, hectares, both, or not at all (units "ac"/"ha"/"both"/"none").
+   Stored in the same two fields so older phones still read something sensible: measured + hectares = "calc"+"ha" as before;
+   otherwise labelArea "adj"/"acres" and labelUnit the units. */
+function propLabelCfg_(p){ p=p||{}; const u=["ac","ha","both","none"].indexOf(p.labelUnit)>=0?p.labelUnit:"ac";
+  if(p.labelArea==="calc") return u==="ha"?{basis:"meas",units:"ha"}:{basis:"adj",units:"ac"};
+  return {basis:p.labelArea==="acres"?"meas":"adj", units:u}; }
+function propLabelStore_(basis,units){ units=["ac","ha","both","none"].indexOf(units)>=0?units:"ac";
+  return basis==="meas"?(units==="ha"?{labelArea:"calc",labelUnit:"ha"}:{labelArea:"acres",labelUnit:units}):{labelArea:"adj",labelUnit:units}; }
+/* the area text on a label: acres (the basis's) in the units asked for */
+function areaLblTxt_(ac, units){ if(units==="none"||!isFinite(ac)||ac<=0) return ""; const f=v=>v>=100?v.toFixed(1):v.toFixed(2), ha=ac/HA_AC;
+  return units==="ha"?f(ha)+" ha":units==="both"?f(ac)+" ac / "+f(ha)+" ha":f(ac)+" ac"; }
 /* ---- the roll number: 19 digits, shown as the notice prints them ---- */
 function propRollFmt_(v){ const d=String(v==null?"":v).replace(/[^0-9]/g,""); if(d.length!==19) return null;
   return d.slice(0,4)+" "+d.slice(4,7)+" "+d.slice(7,10)+" "+d.slice(10,15)+" "+d.slice(15); }
@@ -13369,7 +13381,7 @@ function propRender_(keep){
   const box=$("ppBody"); if(!box) return;
   let held=null, heldShown=null;
   if(keep && _ppTouched){ held={}; heldShown=_ppShown;
-    ["ppOwner","ppRoll","ppAddress","ppLotcon","ppTownship","ppMunicipality","ppMpac","ppLabelShow"].forEach(id=>{ const el=$(id); if(el) held[id]=el.value; });
+    ["ppOwner","ppRoll","ppAddress","ppLotcon","ppTownship","ppMunicipality","ppMpac","ppLabelShow","ppLabelUnit"].forEach(id=>{ const el=$(id); if(el) held[id]=el.value; });
     for(let i=0;i<(_ppComps||[]).length;i++) ["ppCls","ppMan","ppUnit"].forEach(x=>{ const el=$(x+i); if(el) held[x+i+"|"+propK_(_ppComps[i].name)]=el.value; }); }
   const list=propTracts_(), t=_ppTract;
   const inp=(id,label,val,extra)=>`<label style="display:block;margin:0 0 8px"><span style="display:block;font-size:12px;color:#a9c9b0;margin-bottom:2px">${label}</span>`+
@@ -13391,7 +13403,8 @@ function propRender_(keep){
      inp("ppMpac","MPAC assessment acres",p.mpac,`inputmode="decimal"`)+
      `<div style="font-size:11px;color:#8fae95;margin:-4px 0 8px;line-height:1.45">The compartments' adjusted acres are made to add up to this: any you type below (or that the layer's adjusted-acres field gives) are kept, and the rest are shared out in proportion to their size.</div>`;
   h+=`<div style="margin:4px 0 10px;font-size:12px;color:#a9c9b0">Compartment labels on the maps show `+
-     sel("ppLabelShow",[["adj","adjusted acres"],["ac","acres"],["ha","hectares"]],propLabelShow_(p))+`</div>`;
+     sel("ppLabelShow",[["adj","the adjusted area (MPAC)"],["meas","the measured area"]],propLabelCfg_(p).basis)+` in `+
+     sel("ppLabelUnit",[["ac","acres"],["ha","hectares"],["both","acres and hectares"],["none","no area — the name only"]],propLabelCfg_(p).units)+`</div>`;
   // the outline
   const b=Array.isArray(p.boundary)?p.boundary:[];
   const bha=b.length?propOutlineHa_(b):0;
@@ -13491,7 +13504,7 @@ function propReadForm_(){
   if(roll===null){ toast("The roll number needs 19 digits — it has "+rollRaw.replace(/[^0-9]/g,"").length,true); return null; }
   const mp=v("ppMpac").replace(/,/g,""); if(mp!==""&&!(isFinite(Number(mp))&&Number(mp)>=0)){ toast("MPAC acres must be a number",true); return null; }
   const form={owner:v("ppOwner"), roll:roll, address:v("ppAddress"), lotcon:v("ppLotcon"), township:v("ppTownship"),
-    municipality:v("ppMunicipality"), mpac:mp===""?"":Number(mp), labelArea:({adj:"adj",ac:"acres",ha:"calc"})[v("ppLabelShow")]||"adj", labelUnit:v("ppLabelShow")==="ha"?"ha":"ac"};
+    municipality:v("ppMunicipality"), mpac:mp===""?"":Number(mp)}; Object.assign(form, propLabelStore_(v("ppLabelShow")==="meas"?"meas":"adj", v("ppLabelUnit")||"ac"));
   /* Only what the cruiser changed goes out (see "the Sheet" above): compared with the values the form
      was DRAWN with — not the record now, which a sync may have updated underneath the open form. */
   const shown=(_ppShown&&_ppShown.prop&&propK_(_ppShown.prop.tract||t)===propK_(t))?_ppShown:{prop:propGet_(t)||{},comps:PROPS.comps[propK_(t)]||{}};
@@ -14570,14 +14583,14 @@ function mmOpts_(kind){ const d=MM_DEF[kind], saved=(function(){ try{ return JSO
     /* v513: labels — where compartment labels go, turning them with long narrow compartments, leader lines, water and wetland names */
     lblPlace:saved.lblPlace==="out"?"out":"fit", lblTilt:saved.lblTilt!==false, lblOut2:saved.lblOut2==="ring"?"ring":"near", insetPos:(["tr","tl","br","bl"].indexOf(saved.insetPos)>=0)?saved.insetPos:"auto", lblLeaderAll:saved.lblLeaderAll===true, waterNames:saved.waterNames!==false,
     /* v514: one size for every compartment label, or the largest that fits each; the key map's layers */
-    lblSize:saved.lblSize==="vary"?"vary":"same", insetLayers:Object.assign({roads:1,waterbody:1,towns:1,water:0,wetland:0,woodland:0,lots:0,extent:1}, saved.insetLayers||{}),      /* v416: an arrow to the nearest town */      /* v404: compartment label size, % of automatic */      /* v401: how solid the fills print (woodland, water, hatching, Map 7 colours) */      /* v396: Map 7's plan window (blank = this year and the nine after) */
+    lblSize:saved.lblSize==="vary"?"vary":"same", lblArea:(["ac","ha","both","none"].indexOf(saved.lblArea)>=0)?saved.lblArea:"prop", insetLayers:Object.assign({roads:1,waterbody:1,towns:1,water:0,wetland:0,woodland:0,lots:0,extent:1}, saved.insetLayers||{}),      /* v416: an arrow to the nearest town */      /* v404: compartment label size, % of automatic */      /* v401: how solid the fills print (woodland, water, hatching, Map 7 colours) */      /* v396: Map 7's plan window (blank = this year and the nine after) */
     photoYear:mmPhotoYear_(saved),
     firm:(function(){ try{ return (STORE&&STORE.getItem("fi_mmfirm"))||""; }catch(e){ return ""; } })()}; }
 /* v394: the photo year to print — what was typed for this source on this phone, else the year in the source's name ("York Region 2025"), else blank. */
 function mmPhotoYear_(saved){ let src=null; try{ src=imgSource_(); }catch(e){} const id=src?src.id:"", typed=(saved&&saved.photoYears&&saved.photoYears[id])||""; if(typed) return String(typed);
   const m=String(src?src.name:"").match(/\b(19|20)\d\d\b/); return m?m[0]:""; }
 function mmSaveOpts_(o){ try{ const old=JSON.parse((STORE&&STORE.getItem("fi_mmopts"+o.kind))||"null")||{}, py=Object.assign({},old.photoYears||{}); try{ py[imgSource_().id]=String(o.photoYear||""); }catch(e){}
-  STORE&&STORE.setItem("fi_mmopts"+o.kind,JSON.stringify({title:(o.title&&o.title!==o.titleDef)?o.title:"",tbLoc:o.tbLoc!==false,tbOwner:o.tbOwner!==false,tbTotal:o.tbTotal!==false,tbProg:o.tbProg!==false,aerial:o.aerial,plotSize:o.plotSize,plotNums:o.plotNums,plotColor:o.plotColor,plotComps:o.plotComps,layers:o.layers,hatch:o.hatch,plots:o.plots,feats:o.feats,lines:o.lines,names:o.names,inset:o.inset,standLabels:o.standLabels,proj:o.proj,actFrom:o.actFrom,actTo:o.actTo,fillAlpha:o.fillAlpha,labelScale:o.labelScale,insetNames:o.insetNames,townArrow:o.townArrow,lblPlace:o.lblPlace,lblTilt:o.lblTilt,lblOut2:o.lblOut2,insetPos:o.insetPos,lblLeaderAll:o.lblLeaderAll,waterNames:o.waterNames,lblSize:o.lblSize,insetLayers:o.insetLayers,photoYears:py,scale:o.scale,page:o.page,extent:o.extent})); STORE&&STORE.setItem("fi_mmfirm",o.firm||""); }catch(e){} }
+  STORE&&STORE.setItem("fi_mmopts"+o.kind,JSON.stringify({title:(o.title&&o.title!==o.titleDef)?o.title:"",tbLoc:o.tbLoc!==false,tbOwner:o.tbOwner!==false,tbTotal:o.tbTotal!==false,tbProg:o.tbProg!==false,aerial:o.aerial,plotSize:o.plotSize,plotNums:o.plotNums,plotColor:o.plotColor,plotComps:o.plotComps,layers:o.layers,hatch:o.hatch,plots:o.plots,feats:o.feats,lines:o.lines,names:o.names,inset:o.inset,standLabels:o.standLabels,proj:o.proj,actFrom:o.actFrom,actTo:o.actTo,fillAlpha:o.fillAlpha,labelScale:o.labelScale,insetNames:o.insetNames,townArrow:o.townArrow,lblPlace:o.lblPlace,lblTilt:o.lblTilt,lblOut2:o.lblOut2,insetPos:o.insetPos,lblArea:o.lblArea,lblLeaderAll:o.lblLeaderAll,waterNames:o.waterNames,lblSize:o.lblSize,insetLayers:o.insetLayers,photoYears:py,scale:o.scale,page:o.page,extent:o.extent})); STORE&&STORE.setItem("fi_mmfirm",o.firm||""); }catch(e){} }
 /* ---- projection ---- */
 /* v396: UTM, zone from the longitude (17 for most of southern Ontario, 18 east of 78°W), forward and inverse.
    The GPS positions are WGS 84; NAD83 (CSRS) differs by under a metre here, so the map is labelled NAD83 / UTM. */
@@ -14723,14 +14736,14 @@ function mmData_(tract){
   const outline=(Array.isArray(p.boundary)&&p.boundary.length)?bndShow_(tract,p.boundary):null;      // v430: the perimeter
   const cls=n=>((propComp_(tract,n)||{}).cls||"");
   /* v386: the label is the compartment's adjusted acres (or acres / hectares, as the property says) — the same figures as the area summary. */
-  const show=propLabelShow_(p), byName={}; sum.rows.forEach(r=>{ byName[propK_(r.name)]=r; });
-  const label=c=>{ const r=byName[propK_(c.name)]||{ha:c.calcHa||0,ac:(c.calcHa||0)*HA_AC,adj:(c.calcHa||0)*HA_AC};
-    const v=show==="ha"?r.ha:show==="ac"?r.ac:r.adj, u=show==="ha"?"ha":"ac"; return (v>=100?v.toFixed(1):v.toFixed(2))+" "+u; };
+  const cfg=propLabelCfg_(p), byName={}; sum.rows.forEach(r=>{ byName[propK_(r.name)]=r; });
+  const acOf=c=>{ const r=byName[propK_(c.name)]||{ha:c.calcHa||0,ac:(c.calcHa||0)*HA_AC,adj:(c.calcHa||0)*HA_AC}; return cfg.basis==="meas"?r.ac:r.adj; };
+  const label=c=>areaLblTxt_(acOf(c), cfg.units);
   /* v385: each compartment carries its class and label as plain values, so the data can be frozen in a version. */
-  comps.forEach(c=>{ c.cls=cls(c.name); c.label=label(c);
+  comps.forEach(c=>{ c.cls=cls(c.name); c.areaAc=acOf(c); c.label=label(c);
     /* v409: a compartment in several parts — each part carries its share of the figure, by its own area, so every part is labelled with acres (Chris, 2026-10-12) */
     try{ if(c.polygons.length>1){ const has=c.polygons.map(pg=>{ try{ return Math.max(0,geoPolysHa_([pg])||0); }catch(e){ return 0; } }), tot=has.reduce((a,b)=>a+b,0);
-        const m=/^([\d.]+) (ac|ha)$/.exec(c.label||""); if(m&&tot>0){ const v=+m[1]; c.partLabels=has.map(h=>{ const x=v*h/tot; return (x>=100?x.toFixed(1):x.toFixed(2))+" "+m[2]; }); } } }catch(e){} });
+        if(tot>0){ c.partFr=has.map(h=>h/tot); if(c.label) c.partLabels=c.partFr.map(f=>areaLblTxt_(c.areaAc*f, cfg.units)); } } }catch(e){} });
   return {p, comps, sum, outline, cls, label};
 }
 /* Which class is hatched: the smaller of MFTIP-eligible and not eligible, by area. CLTIP has its own pattern (v386). */
@@ -14951,7 +14964,7 @@ async function mmGather_(tract, o, V, notes){
       c.stand={comp:v("comp"), figs:bits.join(" · "), ft:v("ft")}; }); }
   if(inset){ inset.outline=d.outline||null; inset.comps=d.comps.map(c=>c.polygons.map(pg=>pg[0]).filter(Boolean)).flat(); }      // v401: every compartment, not the first
   return {prop:d.p, sum:d.sum, outline:d.outline, ext:propExtent_(tract),
-    comps:d.comps.map(c=>({name:c.name, polygons:c.polygons, cls:c.cls, label:c.label, partLabels:c.partLabels||null, stand:c.stand||null})),
+    comps:d.comps.map(c=>({name:c.name, polygons:c.polygons, cls:c.cls, label:c.label, partLabels:c.partLabels||null, areaAc:c.areaAc!=null?c.areaAc:null, partFr:c.partFr||null, stand:c.stand||null})),
     layers, roads, plots, notes:mnFor_(tract, o.kind), feats, lines, inset, acts:o.acts?acOf_(tract).map(acOut_):[]};
 }
 /* Draw one map. Returns {canvas, notes, scale, hatch, view, data}. `frozen` = a saved version to draw again. */
@@ -14963,6 +14976,9 @@ async function mmRender_(tract, o, onPct, frozen){
   else { const ext=propExtent_(tract); if(!ext) throw new Error("this property has no outline or compartments to map");
     V=mmView_(ext,o); if(o.extent==="view" && !(Array.isArray(o.viewBox)&&o.viewBox.length===4)) notes.push("the phone's map was not open, so the map was fitted to the property");
     D=await mmGather_(tract,o,V,notes); }
+  /* v516: "Area on compartment labels" on the map page — acres, hectares, both or none for this map, over the property's choice */
+  if(o.lblArea&&o.lblArea!=="prop"&&D&&Array.isArray(D.comps)) D=Object.assign({},D,{comps:D.comps.map(c=>{ if(c.areaAc==null&&o.lblArea!=="none") return c;
+    const label=o.lblArea==="none"?"":areaLblTxt_(c.areaAc,o.lblArea); return Object.assign({},c,{label, partLabels:(label&&c.partFr)?c.partFr.map(f=>areaLblTxt_(c.areaAc*f,o.lblArea)):null}); })});
   const cv=document.createElement("canvas"); cv.width=MM_W; cv.height=MM_H;
   const ctx=cv.getContext("2d"); if(!ctx) throw new Error("this phone could not draw the map");
   const P=mmPatterns_(ctx);
@@ -15077,8 +15093,9 @@ async function mmRender_(tract, o, onPct, frozen){
      smallest a compartment label may print is 17 px at 200 dpi (6 pt, the usual floor for print) — less only when the label
      size is set below 100 %. */
   const minFs=o.lblSize==="vary"?14:Math.max(14,Math.round(17*Math.min(1,Math.max(.5,Math.min(1.6,(o.labelScale||100)/100)))));      /* "largest that fits each": v421's 14 px floor, as before */ sizes=sizes.map(v=>Math.max(minFs,v)).filter((v,i,a)=>a.indexOf(v)===i); smallFs=Math.max(minFs,smallFs);
-  const segFree=(x0,y0,x1,y1)=>{ const n=Math.max(2,Math.ceil(Math.hypot(x1-x0,y1-y0)/14)); for(let i=0;i<=n;i++){ const x=x0+(x1-x0)*i/n, y=y0+(y1-y0)*i/n; if(boxes.some(a=>x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h)) return false; } return true; };
-  const segBoxes=(x0,y0,x1,y1)=>{ const n=Math.max(1,Math.ceil(Math.hypot(x1-x0,y1-y0)/16)); for(let i=0;i<=n;i++){ const x=x0+(x1-x0)*i/n, y=y0+(y1-y0)*i/n; boxes.push({x:x-5,y:y-5,w:10,h:10}); } };
+  /* v516: a leader is tested every 6 px (it was 14, so one could slip between the marks of another leader and cross it) */
+  const segFree=(x0,y0,x1,y1)=>{ const n=Math.max(2,Math.ceil(Math.hypot(x1-x0,y1-y0)/6)); for(let i=0;i<=n;i++){ const x=x0+(x1-x0)*i/n, y=y0+(y1-y0)*i/n; if(boxes.some(a=>x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h)) return false; } return true; };
+  const segBoxes=(x0,y0,x1,y1)=>{ const n=Math.max(1,Math.ceil(Math.hypot(x1-x0,y1-y0)/8)); for(let i=0;i<=n;i++){ const x=x0+(x1-x0)*i/n, y=y0+(y1-y0)*i/n; boxes.push({x:x-5,y:y-5,w:10,h:10}); } };
   /* v401: every compartment's anchor point takes its room before any label is placed, so no label lands on a neighbour's point */
   const anchors=D.comps.map(c=>c.polygons.map(r=>{ const px=r.map(ring=>ring.map(q=>V.toPx(q[0],q[1]))); return mmInside_(px, MM_FRAME); })).flat().filter(Boolean);
   anchors.forEach(a=>boxes.push({x:a.x-7,y:a.y-7,w:14,h:14,_anc:1,ax:a.x,ay:a.y}));
@@ -15092,7 +15109,9 @@ async function mmRender_(tract, o, onPct, frozen){
   /* v514: how many edges of the other compartments a leader line crosses */
   const allEdges=D.comps.map(c=>c.polygons.map(r=>r.map(ring=>ring.map(q=>V.toPx(q[0],q[1]))))).flat();
   const crossings=(x0,y0,x1,y1,own)=>{ let n=0; const X=(a,b,c,d)=>{ const o=(p,q,r)=>(q[0]-p[0])*(r[1]-p[1])-(q[1]-p[1])*(r[0]-p[0]); return o(a,b,c)*o(a,b,d)<0&&o(c,d,a)*o(c,d,b)<0; };
-    allEdges.forEach(pg=>{ if(pg===own) return; pg.forEach(r=>{ for(let i=0,j=r.length-1;i<r.length;j=i++) if(X([x0,y0],[x1,y1],r[j],r[i])) n++; }); }); return n; };
+    allEdges.forEach(pg=>{ if(pg===own) return; pg.forEach(r=>{ for(let i=0,j=r.length-1;i<r.length;j=i++) if(X([x0,y0],[x1,y1],r[j],r[i])) n++; }); });
+    leads.forEach(q=>{ if(X([x0,y0],[x1,y1],[q[0],q[1]],[q[2],q[3]])) n+=3; }); return n; };      /* v516: crossing another leader counts as three edges */
+  const leads=[];
   const overOther=(t,at)=>{ const P=mmRBoxPts_(t,0); return allEdges.some(pg=>!mmPtIn_(pg,at.x,at.y)&&P.some(p=>mmPtIn_(pg,p[0],p[1]))); };
   const leadOf=(t,at)=>{ const cx=t.x+t.w/2, cy=t.y+t.h/2, dx=at.x-cx, dy=at.y-cy, L=Math.hypot(dx,dy)||1; const ex=Math.abs(dx)*t.h>Math.abs(dy)*t.w ? t.w/2/Math.abs(dx)*L : t.h/2/Math.abs(dy)*L; return [cx+dx/L*ex, cy+dy/L*ex]; };
   const items=[];
@@ -15141,6 +15160,7 @@ async function mmRender_(tract, o, onPct, frozen){
     if(!best) return null; const vx=best.x-cx, vy=best.y-cy, L=Math.hypot(vx,vy)||1; for(const k of [8,6,4,2]){ const x=best.x+vx/L*k, y=best.y+vy/L*k; if(mmPtIn_(big,x,y)) return {x,y}; } return {x:best.x,y:best.y}; };
   /* pass 2: the rest go outside, those nearest the outline first (the shortest leaders take the nearest spots) */
   const distOut=it=>{ let d=1/0; outPx.forEach(r=>{ for(let i=0;i<r.length;i++){ const a=r[i], b=r[(i+1)%r.length], dx=b[0]-a[0], dy=b[1]-a[1], L2=dx*dx+dy*dy; let u=L2?((it.at.x-a[0])*dx+(it.at.y-a[1])*dy)/L2:0; u=Math.max(0,Math.min(1,u)); d=Math.min(d,Math.hypot(a[0]+u*dx-it.at.x,a[1]+u*dy-it.at.y)); } }); return d; };
+  /* v516: next to their own compartment, the most hemmed-in go first (deepest inside the property — fewest places to go); the ring keeps nearest first */
   items.filter(it=>!it.b).map(it=>({it,d:distOut(it)})).sort((p,q)=>p.d-q.d).forEach(({it})=>{ const box=boxFor(it), {big,at}=it; let b=null, lead=null;
     const small=box(smallFs,at.x,at.y);
     /* v515: "Next to their own compartment" (now the default) — spots in two rows round the compartment's own edge, on open ground or
@@ -15151,7 +15171,7 @@ async function mmRender_(tract, o, onPct, frozen){
         const ext=(Math.abs(nx)*small.w+Math.abs(ny)*small.h)/2+6, k=Math.max(1,Math.round(L/Math.max(20,small.w*0.4)));
         for(let j=0;j<=k;j++){ const t=j/k, x=a[0]+(q[0]-a[0])*t, y=a[1]+(q[1]-a[1])*t; [0,1,2.2,3.6].forEach(row=>sp.push([x+nx*(ext+row*small.h*1.1), y+ny*(ext+row*small.h*1.1), row])); } }
       let best=null; for(const c of sp){ const t=box(smallFs,c[0],c[1]); if(!free(t)||!mmBoxOut_(big,t)) continue; const tp=tipOf(big,c[0],c[1]); if(!tp) continue; const s0=leadOf(t,tp); if(!segFree(s0[0],s0[1],tp.x,tp.y)) continue;
-        const ov=overOther(t,tp), x=crossings(s0[0],s0[1],tp.x,tp.y,big), sc=(ov?900:0)+x*400+Math.hypot(s0[0]-tp.x,s0[1]-tp.y)+c[2]*4; if(!best||sc<best.sc) best={t,s0,tp,sc}; }
+        const ov=overOther(t,tp), x=crossings(s0[0],s0[1],tp.x,tp.y,big), L0=Math.hypot(s0[0]-tp.x,s0[1]-tp.y), sc=(ov?350:0)+x*400+L0+Math.max(0,L0-150)+c[2]*4;      /* v516: over a neighbour 350 (was 900); a leader past 150 px counts double */ if(!best||sc<best.sc) best={t,s0,tp,sc}; }
       if(best&&best.sc<400){ b=best.t; lead=best.s0; it.tip=best.tp; } else if(best) it._alt=best; }
     if(!b&&outPx.length){ const near=callouts(small.w,small.h).map(c=>({c,d:Math.hypot(c[0]-at.x,c[1]-at.y)})).sort((p,q)=>p.d-q.d).slice(0,160);
       /* v514: of the clear spots, the one whose leader crosses the fewest other compartment edges, then the shortest */
@@ -15160,9 +15180,16 @@ async function mmRender_(tract, o, onPct, frozen){
       if(best){ b=best.t; lead=best.s0; } }
     if(!b){ const step=Math.max(small.w,small.h)*0.6;      // the v401 spiral, for a map with no outline or a crowded one
       /* v514: open ground first — a spot clear of every other compartment — then over one, always with its leader */
-      outer: for(const strict of (outPx.length?[2,1,0]:[1,0])) for(let k=1;k<=7;k++) for(const ang of [0,180,90,270,45,135,225,315]){ const r=at.room+k*step, x=at.x+Math.cos(ang*Math.PI/180)*r, y=at.y+Math.sin(ang*Math.PI/180)*r;
-        const t=box(smallFs,x,y); if(!free(t)||!mmBoxOut_(big,t)||(strict===2&&!mmBoxOut_(outPx,t))||(strict===1&&overOther(t,at))) continue; const s0=leadOf(t,at); if(!segFree(s0[0],s0[1],at.x,at.y)) continue; b=t; lead=s0; break outer; }
-      if(!b){ outer3: for(let k=1;k<=5;k++) for(const ang of [0,180,90,270,45,135,225,315]){ const r=at.room+k*step, x=at.x+Math.cos(ang*Math.PI/180)*r, y=at.y+Math.sin(ang*Math.PI/180)*r; const t=box(smallFs,x,y); if(free(t)&&mmBoxOut_(big,t)){ b=t; lead=leadOf(t,at); break outer3; } } } }
+      /* v516: of every clear spot round it, the one whose leader (to the compartment's nearest point) is shortest, counting 400 px for
+         each compartment edge or other leader it crosses and 900 px for sitting over another compartment — not the first found */
+      { let best=null; for(let k=1;k<=7;k++) for(const ang of [0,180,90,270,45,135,225,315]){ const r=at.room+k*step, x=at.x+Math.cos(ang*Math.PI/180)*r, y=at.y+Math.sin(ang*Math.PI/180)*r;
+          const t=box(smallFs,x,y); if(!free(t)||!mmBoxOut_(big,t)) continue; const tp=tipOf(big,x,y)||at, s0=leadOf(t,tp); if(!segFree(s0[0],s0[1],tp.x,tp.y)) continue;
+          const L0=Math.hypot(s0[0]-tp.x,s0[1]-tp.y), sc=crossings(s0[0],s0[1],tp.x,tp.y,big)*400+(overOther(t,tp)?350:0)+L0+Math.max(0,L0-150); if(!best||sc<best.sc) best={t,s0,tp,sc}; }
+        if(best&&(!it._alt||best.sc<=it._alt.sc)){ b=best.t; lead=best.s0; it.tip=best.tp; } }
+      /* v516: last resort — the leader may pass over other labels' marks, but still the one crossing fewest edges and leaders */
+      if(!b){ let best=null; for(let k=1;k<=7;k++) for(const ang of [0,180,90,270,45,135,225,315]){ const r=at.room+k*step, x=at.x+Math.cos(ang*Math.PI/180)*r, y=at.y+Math.sin(ang*Math.PI/180)*r; const t=box(smallFs,x,y); if(!free(t)||!mmBoxOut_(big,t)) continue;
+          const tp=tipOf(big,x,y)||at, s0=leadOf(t,tp), L0=Math.hypot(s0[0]-tp.x,s0[1]-tp.y), sc=crossings(s0[0],s0[1],tp.x,tp.y,big)*400+(overOther(t,tp)?350:0)+L0+Math.max(0,L0-150); if(!best||sc<best.sc) best={t,s0,tp,sc}; }
+        if(best&&(!it._alt||best.sc<it._alt.sc)){ b=best.t; lead=best.s0; it.tip=best.tp; } } }
     if(!b&&it._alt){ b=it._alt.t; lead=it._alt.s0; it.tip=it._alt.tp; }      // v515: over a neighbour, but next to its own compartment
     if(!b){ b=box(smallFs,at.x,at.y); lead=null; }                   // nowhere clear: the small label where it is
     if(lead&&!it.tip){ const cx=b.x+b.w/2, cy=b.y+b.h/2, tp=tipOf(big,cx,cy); if(tp){ const s1=leadOf(b,tp); if(segFree(s1[0],s1[1],tp.x,tp.y)&&crossings(s1[0],s1[1],tp.x,tp.y,big)<=crossings(lead[0],lead[1],at.x,at.y,big)){ lead=s1; it.tip=tp; } } }      // v515
@@ -15170,7 +15197,7 @@ async function mmRender_(tract, o, onPct, frozen){
     /* v513: a label that touches its own compartment (within 1.5 mm) needs no leader line, unless "Always draw leader lines" is ticked */
     if(lead&&!o.lblLeaderAll&&mmBoxGap_(big,b)<=12&&!overOther(b,tip)) lead=null;      /* v514: …and only on open ground — a label over a neighbour keeps its leader */
     if(it.tip&&it.tip!==at){ const own=boxes.findIndex(q=>q._anc&&Math.abs(q.ax-at.x)<0.01&&Math.abs(q.ay-at.y)<0.01); if(own>=0) boxes.splice(own,1); }      // v515: its middle's dot is not needed
-    it.b=b; it.lead=lead; boxes.push(b); if(lead) segBoxes(lead[0],lead[1],tip.x,tip.y); });
+    it.b=b; it.lead=lead; boxes.push(b); if(lead){ segBoxes(lead[0],lead[1],tip.x,tip.y); leads.push([lead[0],lead[1],tip.x,tip.y]); } });
   /* draw: leaders first, then every label over them */
   items.forEach(it=>{ if(!it.lead) return; const at=it.tip||it.at; ctx.beginPath(); ctx.moveTo(it.lead[0],it.lead[1]); ctx.lineTo(at.x,at.y); ctx.strokeStyle=bg; ctx.lineWidth=6; ctx.stroke(); ctx.strokeStyle=fg; ctx.lineWidth=2.5; ctx.stroke();
     ctx.beginPath(); ctx.arc(at.x,at.y,5,0,Math.PI*2); ctx.fillStyle=fg; ctx.fill(); });
@@ -15567,11 +15594,11 @@ function gxLayers_(plots, tracts, lio){ const K={}; tracts.forEach(t=>{ K[propK_
   const cRows=[], cCols=["TRACT","COMPARTMENT","CLASS","CALC_HA","AREA_AC","ADJ_AC","LABEL","SOURCE"];
   tracts.forEach(t=>{ let cs=[]; try{ cs=propCompsGeo_(t)||[]; }catch(e){}
     /* v510: the class, the acres, the adjusted acres and the label the printed maps use (name + area as the property chooses) */
-    let S={rows:[]}; try{ S=propSummary_(t,cs); }catch(e){} const byN={}; (S.rows||[]).forEach(r=>{ byN[propK_(r.name)]=r; }); const show=propLabelShow_(propGet_(t)||{});
+    let S={rows:[]}; try{ S=propSummary_(t,cs); }catch(e){} const byN={}; (S.rows||[]).forEach(r=>{ byN[propK_(r.name)]=r; }); const lc=propLabelCfg_(propGet_(t)||{});
     cs.forEach(c=>{ const polys=(c.polygons||[]).filter(p=>p&&p[0]&&p[0].length>=3); if(!polys.length) return;
-      const r=byN[propK_(c.name)]||{}, av=show==="ha"?r.ha:show==="ac"?r.ac:r.adj, au=show==="ha"?"ha":"ac";
+      const r=byN[propK_(c.name)]||{}, at=areaLblTxt_(lc.basis==="meas"?r.ac:r.adj, lc.units);      /* v516 */
       const v={TRACT:t, COMPARTMENT:c.name, CLASS:(propComp_(t,c.name)||{}).cls||"", CALC_HA:c.calcHa!=null?c.calcHa:(function(){ try{ return +geoPolysHa_(polys).toFixed(4); }catch(e){ return ""; } })(),
-        AREA_AC:isFinite(r.ac)?+(+r.ac).toFixed(2):"", ADJ_AC:isFinite(r.adj)?+(+r.adj).toFixed(2):"", LABEL:String(c.name)+(isFinite(av)&&av>0?"\n"+(av>=100?(+av).toFixed(1):(+av).toFixed(2))+" "+au:""),
+        AREA_AC:isFinite(r.ac)?+(+r.ac).toFixed(2):"", ADJ_AC:isFinite(r.adj)?+(+r.adj).toFixed(2):"", LABEL:String(c.name)+(at?"\n"+at:""),
         SOURCE:c.src==="made"?"shared compartments":(c.file||"file")};
       try{ const cf=cfGet_(t,c.name); if(cf&&cf.fields) Object.keys(cf.fields).forEach(k=>{ const kk=String(k).toUpperCase(); if(v[kk]!==undefined) return; v[kk]=cf.fields[k]; if(cCols.indexOf(kk)<0) cCols.push(kk); }); }catch(e){}
       cRows.push({g:{t:"MULTIPOLYGON",c:polys}, v}); }); });
@@ -15860,6 +15887,7 @@ function mmOpen_(kind){
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Projection</div>`+sel("mmProj",[["utm","UTM (NAD83) — zone from the property; the plan's usual grid"],["merc","Web Mercator — as the phone's map and older saved versions"]],o.proj||"utm")+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Compartment label size (automatic: 0.17 in, smaller where the compartment is tight)</div>`+sel("mmLabel",[["60","Much smaller (60%)"],["80","Smaller (80%)"],["100","Automatic"],["120","Larger (120%)"],["140","Much larger (140%)"]],String(o.labelScale||100))+
     /* v514: one size for one kind of label */
+    `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Area on compartment labels</div>`+sel("mmLblArea",[["prop","As set for the property"],["ac","Acres"],["ha","Hectares"],["both","Acres and hectares"],["none","No area — the name only"]],o.lblArea||"prop")+
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Label sizes</div>`+sel("mmLblSize",[["same","One size for every compartment label (recommended — never below 6 pt)"],["vary","The largest that fits each compartment"]],o.lblSize||"same")+
     /* v513: labels (Chris, 2026-11-26) */
     `<div style="font-size:12px;color:#a9c9b0;margin:10px 0 3px">Compartment labels</div>`+sel("mmLblPlace",[["fit","Inside their compartment where they fit — a leader line only when one must go outside"],["out","Always outside, with leader lines"]],o.lblPlace)+
@@ -15920,6 +15948,7 @@ function mmRead_(kind){
   /* v513: labels */
   const lp=v("mmLblPlace"); if(lp) o.lblPlace=lp.value==="out"?"out":"fit"; const lt=v("mmLblTilt"); if(lt) o.lblTilt=!!lt.checked; const lo2=v("mmLblOut"); if(lo2) o.lblOut2=lo2.value==="ring"?"ring":"near";
   const la=v("mmLblLeaderAll"); if(la) o.lblLeaderAll=!!la.checked; const wn=v("mmWaterNames"); if(wn) o.waterNames=!!wn.checked;
+  /* v516 */ const la2=v("mmLblArea"); if(la2) o.lblArea=["ac","ha","both","none"].indexOf(la2.value)>=0?la2.value:"prop";
   /* v514 */ const ls2=v("mmLblSize"); if(ls2) o.lblSize=ls2.value==="vary"?"vary":"same";
   if(v("mmIL_roads")){ const L={}; ["roads","waterbody","water","wetland","woodland","lots","towns","extent"].forEach(k=>{ const c=v("mmIL_"+k); L[k]=c&&c.checked?1:0; }); o.insetLayers=L; }
   const py=v("mmPhotoYear"); if(py) o.photoYear=String(py.value||"").trim().slice(0,20); const ins=v("mmInset"); if(ins) o.inset=!!ins.checked; const inn=v("mmInsetNames"); if(inn) o.insetNames=inn.value||"auto"; const ip=v("mmInsetPos"); if(ip) o.insetPos=["tr","tl","br","bl"].indexOf(ip.value)>=0?ip.value:"auto"; const ta=v("mmTownArrow"); if(ta) o.townArrow=!!ta.checked; const st=v("mmStand"); if(st) o.standLabels=!!st.checked; const pj=v("mmProj"); if(pj) o.proj=pj.value==="merc"?"merc":"utm"; const al=v("mmAlpha"); if(al) o.fillAlpha=+al.value||100; const ls=v("mmLabel"); if(ls) o.labelScale=+ls.value||100; const af=v("mmActFrom"), at=v("mmActTo"); if(af) o.actFrom=String(af.value||"").trim(); if(at) o.actTo=String(at.value||"").trim();
@@ -18686,7 +18715,7 @@ function shpMulti_(feats, st){ st=st||5;
    Sheet ("Map Setups"), so every phone and the desk have them; a copy stays on this phone for use without signal. */
 let MS_LIST=(function(){ try{ return JSON.parse((STORE&&STORE.getItem("fi_mapsets"))||"[]")||[]; }catch(e){ return []; } })(), _msFetchedAt=0;
 function msPersist_(){ try{ STORE&&STORE.setItem("fi_mapsets",JSON.stringify(MS_LIST.slice(0,200))); }catch(e){} }
-function msOfOpts_(o){ const k=["title","tbLoc","tbOwner","tbTotal","tbProg","aerial","plotSize","plotNums","plotColor","plotComps","layers","hatch","plots","feats","lines","names","inset","standLabels","proj","actFrom","actTo","fillAlpha","labelScale","insetNames","townArrow","lblPlace","lblTilt","lblOut2","insetPos","lblLeaderAll","waterNames","lblSize","insetLayers","scale","page","extent","firm"];
+function msOfOpts_(o){ const k=["title","tbLoc","tbOwner","tbTotal","tbProg","aerial","plotSize","plotNums","plotColor","plotComps","layers","hatch","plots","feats","lines","names","inset","standLabels","proj","actFrom","actTo","fillAlpha","labelScale","insetNames","townArrow","lblPlace","lblTilt","lblOut2","insetPos","lblArea","lblLeaderAll","waterNames","lblSize","insetLayers","scale","page","extent","firm"];
   const out={}; k.forEach(x=>{ if(o[x]!==undefined) out[x]=(x==="title"&&o.title===o.titleDef)?"":o[x]; }); return out; }
 function msFor_(t){ const k=propK_(t); return MS_LIST.filter(s=>!s.tract||propK_(s.tract)===k).sort((a,b)=>String(a.name).localeCompare(String(b.name),undefined,{numeric:true})); }
 function msMenuHtml_(t){ const vers=t?`<button type="button" onclick="try{ closeLayersMenu(); }catch(e){} _ppTract=propActiveTract_(); mvOpen_()" style="display:block;width:100%;text-align:left;padding:8px 10px;margin:6px 0 2px;border-radius:9px;border:1px solid #2a4a30;background:transparent;color:#cfe6d4;font:13px system-ui">🗂 Saved map versions — maps kept exactly as they were made</button>`:"";
