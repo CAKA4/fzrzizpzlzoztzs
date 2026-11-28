@@ -1452,7 +1452,7 @@ try{ (function(){
    1) PASTE YOUR APPS SCRIPT WEB APP URL HERE  (same pattern as timesheet)
    ==================================================================== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynnvaKwRSHo1sEoWjpy2odXU63HehCXwQFNjqr8b2x5rBRpI4lTDL3eRrPOWajY4TR/exec";
-const APP_BUILD = "2026-11-27 · v518";   // bump alongside the service-worker cache version on every front-end change
+const APP_BUILD = "2026-11-27 · v519";   // bump alongside the service-worker cache version on every front-end change
 
 /* ---------- Ontario species codes (confirm Bn/Wn & rare codes) ---------- */
 const SPECIES = [
@@ -2220,6 +2220,27 @@ function flushTracts(){
         }), 1200); });
   });
 }
+/* v519 (Chris, 2026-11-27: Dunnin was in the property list but nothing of it was on the map — its 14 plots had been deleted —
+   "auto remove them. The user should not need to worry about deleting properties [that] don't exist"): with the Sheet's answer in
+   hand, a name drops off this phone's list when nothing anywhere is under it — not on the Sheet's Tracts tab, no plot, property,
+   compartment, piece, point, line, note, outline or nursery plot on the Sheet (`live`), and none on this phone (plots waiting
+   included) — unless it is waiting to be added to the Sheet, chosen on the form, or the property shown. */
+function tractNameUsedHere_(k){ if(!k) return false;
+  if((PROPS.props||{})[k]||(PROPS.comps||{})[k]) return true;
+  if(["shapes","feats","lines","notes","acts"].some(m=>Object.values(PROPS[m]||{}).some(f=>f&&propK_(f.tract)===k))) return true;
+  if((saved||[]).some(p=>p&&propK_(p.TRACT)===k)) return true;
+  try{ if((auditPlots||[]).some(p=>p&&propK_(p.TRACT||p.tract)===k)) return true; }catch(e){}
+  try{ if(NUR&&Object.values(NUR.plots||{}).some(p=>p&&propK_(p.tract)===k)) return true; }catch(e){}
+  try{ if(tractField&&(boundFiles||[]).some(f=>(f.features||[]).some(ft=>ft&&ft.properties&&propK_(ft.properties[tractField])===k))) return true; }catch(e){}
+  return false; }
+function tractsPrune_(sheetList, live){ const keep={}; (sheetList||[]).concat(live||[]).forEach(n=>{ const k=propK_(n); if(k) keep[k]=1; });
+  try{ (pendingTracts||[]).forEach(n=>{ keep[propK_(n)]=1; }); }catch(e){}
+  try{ const el=$("TRACT"); if(el&&el.value) keep[propK_(el.value)]=1; }catch(e){}
+  try{ const a=propActiveTract_(); if(a) keep[propK_(a)]=1; }catch(e){}
+  const gone=(tracts||[]).filter(n=>!keep[propK_(n)]&&!tractNameUsedHere_(propK_(n)));
+  if(!gone.length) return [];
+  tracts=tracts.filter(n=>gone.indexOf(n)<0); persistTracts(); try{ tractSelect(); }catch(e){} try{ findPropFill_(); propBarFill_(); }catch(e){}
+  return gone; }
 function fetchTracts(onList){
   if(!connected || isOffline()){ if(typeof onList==="function") onList(null); return; }
   const cb="__trk"+Date.now(), sep=SCRIPT_URL.includes("?")?"&":"?";
@@ -2230,6 +2251,7 @@ function fetchTracts(onList){
   window[cb]=resp=>{ try{ let changed=false;
       ((resp&&resp.tracts)||[]).forEach(n=>{ if(n && !tracts.some(x=>x.toLowerCase()===String(n).toLowerCase())){ tracts.push(String(n)); changed=true; } });
       if(changed){ tracts.sort((a,b)=>a.localeCompare(b)); persistTracts(); tractSelect(); }
+      if(resp&&Array.isArray(resp.live)) tractsPrune_(resp.tracts||[], resp.live);      // v519
     }catch(e){} cleanup(); reply(resp && Array.isArray(resp.tracts) ? resp.tracts.map(String) : null); };
   sc.onerror=()=>{ cleanup(); reply(null); };
   setTimeout(()=>reply(null), 15000);
